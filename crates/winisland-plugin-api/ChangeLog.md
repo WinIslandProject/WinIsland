@@ -2,6 +2,21 @@
 
 This changelog lists published `winisland-plugin-api` releases only. Release notes are added when a version is published; there is no `Unreleased` section.
 
+## 0.6.0 - Aug 24, 2026
+
+Added:
+
+- `CAPABILITY_LYRICS_TRANSFORM` and the `LyricsTransformApiV1` host service
+- `LyricsTransformerDataV1` and a two-pass UTF-8 line transformation callback
+- `LyricsTextV1` with line timestamps and `LYRICS_TEXT_FLAG_WORD_SYNCED`
+
+Changed:
+
+- Registered transformers process parsed lyrics once after fetching, before the host caches them
+- Word-synchronised lines preserve their timing boundaries and reject transformed output with a
+  different Unicode character count
+- Plugin unload and transformer release are rejected while a lyric callback is in progress
+
 ## 0.5.0 - Aug 14, 2026
 
 Added:

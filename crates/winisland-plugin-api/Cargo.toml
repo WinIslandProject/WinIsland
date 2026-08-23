@@ -1,6 +1,6 @@
 [package]
 name = "winisland-plugin-api"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 description = "Versioned native plugin ABI for WinIsland, with optional packaging and signing tools"
 repository = "https://github.com/WinIslandProject/WinIsland"

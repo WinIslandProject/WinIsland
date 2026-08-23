@@ -5177,7 +5177,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winisland-plugin-api"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ed25519-dalek 2.2.0",
  "hex",
