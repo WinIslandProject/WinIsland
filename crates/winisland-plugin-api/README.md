@@ -2,7 +2,7 @@
 
 Versioned C ABI types and packaging tools for trusted native WinIsland plugins.
 
-Plugins are loaded as in-process Windows DLLs. They are not sandboxed: install only plugins you trust. ABI v1 is published by crate version `0.5` and does not support the old `0.2` vtable ABI.
+Plugins are loaded as in-process Windows DLLs. They are not sandboxed: install only plugins you trust. ABI v1 is published by crate version `0.6` and does not support the old `0.2` vtable ABI.
 
 ## Project setup
 
@@ -20,7 +20,7 @@ name = "hello_winisland_plugin"
 crate-type = ["cdylib"]
 
 [dependencies]
-winisland-plugin-api = "0.5"
+winisland-plugin-api = "0.6"
 ```
 
 ## Minimal context plugin
@@ -146,10 +146,11 @@ Declare each service in `PluginDescriptorV1.capabilities`, then query it from `H
 | `CAPABILITY_I18N` | `i18n_api()` | register and release translation bundles |
 | `CAPABILITY_HOST_STATE` | `host_state_api()` | read the current media/theme snapshot |
 | `CAPABILITY_WIDGET` | `widget_api()` | create, update, release, per-frame render callback |
+| `CAPABILITY_LYRICS_TRANSFORM` | `lyrics_transform_api()` | register and release parsed lyric text transformers |
 
 All created resources belong to the host-issued `PluginToken`. A plugin cannot update or release another plugin's resources. WinIsland automatically revokes remaining resources after successful shutdown.
 
-Borrowed slices (`ByteSliceV1`, `Utf8SliceV1`) only need to remain valid until the host call returns. `MediaSourceDataV1.callback_data` is different: it must remain valid until the media resource is successfully released. Media callbacks run synchronously on the WinIsland event-loop thread and may call host services. Update or release of that media resource returns an error while its callback is executing.
+Borrowed slices (`ByteSliceV1`, `Utf8SliceV1`) only need to remain valid until the host call returns. Callback data in Media, Widget, and Lyrics Transform resources must remain valid until the resource is successfully released. Media callbacks run synchronously on the WinIsland event-loop thread; lyric callbacks run on a lyrics-fetch worker. Release or unload returns an error while the corresponding callback is executing.
 
 Every pointer passed across the ABI must be non-null when required, correctly aligned for its declared type, and readable or writable for the complete call. All public ABI structs use `#[repr(C)]` and start with `struct_size` where versioned extension is supported.
 
@@ -209,13 +210,71 @@ Contract notes:
 - The callback runs on the render thread: keep it short, do not block, and do not retain `ctx`
   after returning. Release the widget resource in `shutdown` as shown for Context above.
 
+## Lyrics transformation
+
+Declare `CAPABILITY_LYRICS_TRANSFORM`, query `lyrics_transform_api()`, and register one callback:
+
+```rust
+let transformer = LyricsTransformerDataV1 {
+    on_transform: Some(transform_lyrics),
+    callback_data: state_ptr,
+    ..Default::default()
+};
+let mut transformer_id = INVALID_ID;
+let result = unsafe {
+    lyrics_api.register.unwrap()(info.plugin_token, &transformer, &mut transformer_id)
+};
+```
+
+The callback uses a two-pass output protocol. A real Simplified-to-Traditional plugin can replace
+the example conversion with OpenCC or another converter:
+
+```rust
+unsafe extern "C" fn transform_lyrics(
+    _callback_data: *mut std::ffi::c_void,
+    _resource_id: ResourceId,
+    input: *const LyricsTextV1,
+    output: *mut u8,
+    output_capacity: u32,
+    out_len: *mut u32,
+) -> PluginResultC {
+    if input.is_null() || out_len.is_null() {
+        return PluginResultC::err("null lyrics transform argument");
+    }
+    let input = unsafe { &*input };
+    let bytes = unsafe { std::slice::from_raw_parts(input.text.ptr, input.text.len as usize) };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return PluginResultC::err("invalid lyrics UTF-8");
+    };
+    let transformed = text.replace('汉', "漢");
+    let transformed = transformed.as_bytes();
+    unsafe { out_len.write(transformed.len() as u32) };
+    if output.is_null() && output_capacity == 0 {
+        return PluginResultC::ok();
+    }
+    if output.is_null() || output_capacity < transformed.len() as u32 {
+        return PluginResultC::err("lyrics output buffer is too small");
+    }
+    unsafe { std::ptr::copy_nonoverlapping(transformed.as_ptr(), output, transformed.len()) };
+    PluginResultC::ok()
+}
+```
+
+WinIsland invokes every registered transformer in registration order once per parsed line, after
+fetching and before caching. Each callback is called first with a null output to query its required
+byte length, then with an allocated output buffer. Output must be valid UTF-8 and no larger than
+256 KiB per line. For `LYRICS_TEXT_FLAG_WORD_SYNCED`, the transformed text must keep the same
+Unicode character count; the host then rebuilds byte boundaries so per-word highlighting keeps its
+original timing. Release the transformer during `shutdown`; release and unload are rejected while
+its callback is active.
+
 ## Packaging
 
 Enable the optional packager:
 
 ```toml
 [dev-dependencies]
-winisland-plugin-api = { version = "0.5", features = ["packager"] }
+winisland-plugin-api = { version = "0.6", features = ["packager"] }
 
 [[example]]
 name = "pack"

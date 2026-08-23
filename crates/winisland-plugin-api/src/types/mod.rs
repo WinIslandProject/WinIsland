@@ -1,5 +1,6 @@
 pub mod context;
 pub mod i18n;
+pub mod lyrics;
 pub mod metadata;
 pub mod widget;
 

@@ -119,7 +119,7 @@ DLL exports: winisland_plugin_entry_v1() -> *const PluginDescriptorV1
 PluginDescriptorV1:
   ABI version + struct size
   metadata: PluginMetadataC (id, name, version, author, description)
-  capability bitset (Context, Media, I18n, HostState, Widget)
+  capability bitset (Context, Media, I18n, HostState, Widget, LyricsTransform)
   create(create_info, out_handle) -> PluginResultC
   shutdown(handle) -> PluginResultC
   destroy(handle)
@@ -133,6 +133,10 @@ resources are owned by PluginToken, validated on every operation, and revoked
 after a successful shutdown. Plugins may call host services from worker threads;
 resource changes wake the winit event loop. shutdown must stop and join all plugin
 threads before the DLL can be destroyed and unloaded.
+
+LyricsTransform resources register bounded UTF-8 line callbacks. The host runs
+them once after lyrics are fetched and preserves word-synchronised timing byte
+boundaries when the transformed Unicode character count is unchanged.
 
 Widget rendering is synchronous and render-thread only: `draw_widget_page`
 (src/ui/expanded/widget_view.rs) places plugin widgets into free grid slots and

@@ -45,7 +45,7 @@ ID 必须同时与文件名和 `plugin.yml` 一致。后续更新不需要再次
 
 ```toml
 [dev-dependencies]
-winisland-plugin-api = { version = "0.5", features = ["packager"] }
+winisland-plugin-api = { version = "0.6", features = ["packager"] }
 
 [[example]]
 name = "pack"

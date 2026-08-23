@@ -45,7 +45,7 @@ Enable the optional `packager` feature as a development dependency:
 
 ```toml
 [dev-dependencies]
-winisland-plugin-api = { version = "0.5", features = ["packager"] }
+winisland-plugin-api = { version = "0.6", features = ["packager"] }
 
 [[example]]
 name = "pack"

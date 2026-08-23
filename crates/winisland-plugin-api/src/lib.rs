@@ -11,7 +11,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! winisland-plugin-api = "0.5"
+//! winisland-plugin-api = "0.6"
 //! ```
 //!
 //! Export the ABI v1 descriptor from a `cdylib`. See the crate README for a
@@ -30,7 +30,7 @@
 //!
 //! ```toml
 //! [dev-dependencies]
-//! winisland-plugin-api = { version = "0.5", features = ["packager"] }
+//! winisland-plugin-api = { version = "0.6", features = ["packager"] }
 //! ```
 //!
 //! Add a `package.rs` example target that builds, signs and zips the plugin:
@@ -67,6 +67,9 @@ pub use types::context::{
     PRIORITY_MEDIUM,
 };
 pub use types::i18n::TranslationPairV1;
+pub use types::lyrics::{
+    LYRICS_TEXT_FLAG_WORD_SYNCED, LyricsTextV1, LyricsTransformFnV1, LyricsTransformerDataV1,
+};
 pub use types::metadata::PluginMetadataC;
 pub use types::widget::{WIDGET_FLAG_SHOW_COMPACT, WidgetDataV1};
 pub use types::{

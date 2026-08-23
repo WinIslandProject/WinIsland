@@ -1,6 +1,6 @@
 # 宿主服务
 
-ABI v1 提供五个版本化宿主服务。Context、Media、国际化和 Widget 会创建归 plugin token 所有的资源；Host State 只返回快照，不创建资源。
+ABI v1 提供六个版本化宿主服务。Context、Media、国际化、Widget 和 Lyrics Transform 会创建归 plugin token 所有的资源；Host State 只返回快照，不创建资源。
 
 ## 查询并校验服务
 
@@ -42,6 +42,7 @@ if result.status != 0 {
 | 翻译 bundle | 16 个活动 bundle | 每个 1 MiB；每插件总计 4 MiB |
 | 翻译键值对 | 每 bundle 4,096 对 | key/value 各 64 KiB；语言代码 64 字节 |
 | Widget | 16 个活动资源 | 最大占用 6 列 × 3 行；稳定 key 最长 63 个 ASCII 字节 |
+| 歌词转换器 | 4 个活动资源 | 每行转换结果最大 256 KiB |
 
 更新会继续占用被替换资源的配额；release 后才会归还数量和内存预算。
 
@@ -165,6 +166,39 @@ WinIsland 在事件循环线程同步调用回调。回调应尽快把慢任务�
 ### Media 常见错误
 
 Media 调用会拒绝空 title、未知 flag/control、声明控制但没有回调、长度非零但 cover 指针为空、单封面超过 16 MiB、封面总配额溢出、owner/type 不匹配，以及回调期间更新或释放。
+
+## Lyrics Transform 服务
+
+Lyrics Transform 用于后处理 WinIsland 获取的歌词。声明 `CAPABILITY_LYRICS_TRANSFORM`、
+查询 `lyrics_transform_api()`，再注册一个回调资源：
+
+```rust
+let transformer = LyricsTransformerDataV1 {
+    on_transform: Some(transform_lyrics),
+    callback_data: state_ptr,
+    ..Default::default()
+};
+let mut transformer_id = INVALID_ID;
+let result = unsafe {
+    lyrics_api.register.unwrap()(token, &transformer, &mut transformer_id)
+};
+```
+
+每次歌词获取并解析完成后、写入缓存前，WinIsland 会按注册顺序对每行调用一次转换器。
+因此简体转繁体插件只需处理文本：把输入行交给 OpenCC，再返回转换后的 UTF-8 文本。
+
+回调采用两阶段输出。第一次调用时 `output` 为空且 `output_capacity` 为零，插件把所需字节数
+写入 `out_len`；第二次调用时，最多向 `output` 写入 `output_capacity` 字节，并把实际长度写回
+`out_len`。指针无效、转换失败或容量不足时应返回错误。
+
+`LyricsTextV1` 包含 `line_time_ms`、借用的 UTF-8 行文本和
+`LYRICS_TEXT_FLAG_WORD_SYNCED`。逐字歌词的输出必须保持与输入相同的 Unicode 字符数量；
+WinIsland 会把原来的逐字边界映射到转换后的 UTF-8 byte offset，因此即使编码字节变化，
+高亮时间仍保持不变。字符数量不同的结果只会在该行被拒绝，其他行仍继续经过转换链。
+
+回调会在歌词获取 worker 上同步执行，可以调用其他宿主服务，但必须保持有界；每行输出上限为
+256 KiB。`callback_data` 必须有效到 release 成功。回调执行期间 release 和插件卸载都会返回
+错误。插件应在 `shutdown` 中释放转换器；新注册的转换器从下一次歌词获取开始生效。
 
 ## Widget 服务
 

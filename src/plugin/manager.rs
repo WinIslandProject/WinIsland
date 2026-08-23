@@ -5,17 +5,19 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use super::loader::NativePlugin;
 use super::types::{
     ABI_VERSION_1, ByteSliceV1, CAPABILITY_CONTEXT, CAPABILITY_HOST_STATE, CAPABILITY_I18N,
-    CAPABILITY_MEDIA, CAPABILITY_WIDGET, ContextApiV1, ContextDataV1, DrawApiV1, HostApiV1,
-    HostState, HostStateApiV1, HostStateV1, I18nApiV1, INTERFACE_CONTEXT, INTERFACE_HOST_STATE,
-    INTERFACE_I18N, INTERFACE_MEDIA, INTERFACE_VERSION_1, INTERFACE_WIDGET, INVALID_ID, MediaApiV1,
-    MediaCommandV1, MediaSourceDataV1, PluginError, PluginResultC, PluginToken, ResourceId,
-    TranslationPairV1, Utf8SliceV1, WidgetApiV1, WidgetDataV1, WidgetDrawContextV1,
-    context_from_ffi, read_c_str, widget_from_ffi,
+    CAPABILITY_LYRICS_TRANSFORM, CAPABILITY_MEDIA, CAPABILITY_WIDGET, ContextApiV1, ContextDataV1,
+    DrawApiV1, HostApiV1, HostState, HostStateApiV1, HostStateV1, I18nApiV1, INTERFACE_CONTEXT,
+    INTERFACE_HOST_STATE, INTERFACE_I18N, INTERFACE_LYRICS_TRANSFORM, INTERFACE_MEDIA,
+    INTERFACE_VERSION_1, INTERFACE_WIDGET, INVALID_ID, LYRICS_TEXT_FLAG_WORD_SYNCED, LyricsTextV1,
+    LyricsTransformApiV1, LyricsTransformFnV1, LyricsTransformerDataV1, MediaApiV1, MediaCommandV1,
+    MediaSourceDataV1, PluginError, PluginResultC, PluginToken, ResourceId, TranslationPairV1,
+    Utf8SliceV1, WidgetApiV1, WidgetDataV1, WidgetDrawContextV1, context_from_ffi, read_c_str,
+    widget_from_ffi,
 };
 use super::zip_loader::{self, PluginManifest};
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
@@ -27,6 +29,8 @@ const MAX_MEDIA_BYTES_PER_PLUGIN: usize = 32 * 1024 * 1024;
 const MAX_I18N_BUNDLES_PER_PLUGIN: usize = 16;
 const MAX_I18N_BYTES_PER_PLUGIN: usize = 4 * 1024 * 1024;
 const MAX_WIDGETS_PER_PLUGIN: usize = 8;
+const MAX_LYRICS_TRANSFORMERS_PER_PLUGIN: usize = 4;
+const MAX_TRANSFORMED_LYRIC_BYTES: u32 = 256 * 1024;
 const MAX_TRANSLATION_PAIRS: u32 = 4096;
 const MAX_TRANSLATION_STRING_BYTES: u32 = 64 * 1024;
 const MAX_TRANSLATION_BUNDLE_BYTES: usize = 1024 * 1024;
@@ -79,6 +83,7 @@ enum ResourceKind {
     Media,
     I18n,
     Widget,
+    LyricsTransform,
 }
 
 struct ResourceOwner {
@@ -101,6 +106,13 @@ struct MediaResource {
     in_flight: u32,
 }
 
+struct LyricsTransformerResource {
+    sequence: u64,
+    on_transform: LyricsTransformFnV1,
+    callback_data: usize,
+    in_flight: u32,
+}
+
 #[derive(Default)]
 struct RuntimeState {
     plugins: HashMap<PluginToken, PluginRegistration>,
@@ -112,6 +124,8 @@ struct RuntimeState {
     media_dirty: bool,
     widget_events: HashMap<ResourceId, WidgetEvent>,
     widget_keys: HashMap<(PluginToken, String), ResourceId>,
+    lyrics_transformers: HashMap<ResourceId, LyricsTransformerResource>,
+    lyrics_transformer_sequence: u64,
     host_state: HostState,
 }
 
@@ -157,6 +171,12 @@ static WIDGET_API: WidgetApiV1 = WidgetApiV1 {
     update: Some(widget_update),
     release: Some(widget_release),
 };
+static LYRICS_TRANSFORM_API: LyricsTransformApiV1 = LyricsTransformApiV1 {
+    struct_size: std::mem::size_of::<LyricsTransformApiV1>() as u32,
+    version: INTERFACE_VERSION_1,
+    register: Some(lyrics_transform_register),
+    release: Some(lyrics_transform_release),
+};
 static DRAW_API: DrawApiV1 = DrawApiV1 {
     struct_size: std::mem::size_of::<DrawApiV1>() as u32,
     version: INTERFACE_VERSION_1,
@@ -195,6 +215,7 @@ unsafe extern "C" fn query_interface(interface_id: u32, version: u32) -> *const 
         INTERFACE_I18N => std::ptr::from_ref(&I18N_API).cast(),
         INTERFACE_HOST_STATE => std::ptr::from_ref(&HOST_STATE_API).cast(),
         INTERFACE_WIDGET => std::ptr::from_ref(&WIDGET_API).cast(),
+        INTERFACE_LYRICS_TRANSFORM => std::ptr::from_ref(&LYRICS_TRANSFORM_API).cast(),
         _ => std::ptr::null(),
     }
 }
@@ -720,6 +741,82 @@ unsafe extern "C" fn host_state_get(
     PluginResultC::ok()
 }
 
+unsafe extern "C" fn lyrics_transform_register(
+    token: PluginToken,
+    data: *const LyricsTransformerDataV1,
+    out_id: *mut ResourceId,
+) -> PluginResultC {
+    if out_id.is_null() {
+        return PluginResultC::err("resource output pointer is null");
+    }
+    // SAFETY: Validation is performed by read_struct before the value is used.
+    let data = match unsafe { read_struct(data) } {
+        Ok(data) => data,
+        Err(error) => return PluginResultC::err(error),
+    };
+    if data.flags != 0 {
+        return PluginResultC::err("lyrics transformer contains unknown flags");
+    }
+    let Some(on_transform) = data.on_transform else {
+        return PluginResultC::err("lyrics transform callback is required");
+    };
+    let mut state = match runtime().lock() {
+        Ok(state) => state,
+        Err(_) => return PluginResultC::err("plugin runtime lock is poisoned"),
+    };
+    if let Err(error) = require_capability(&state, token, CAPABILITY_LYRICS_TRANSFORM) {
+        return PluginResultC::err(error);
+    }
+    if resource_count(&state, token, ResourceKind::LyricsTransform)
+        >= MAX_LYRICS_TRANSFORMERS_PER_PLUGIN
+    {
+        return PluginResultC::err("lyrics transformer resource limit reached");
+    }
+    let id = next_id(&NEXT_RESOURCE_ID);
+    state.lyrics_transformer_sequence = state.lyrics_transformer_sequence.wrapping_add(1);
+    let sequence = state.lyrics_transformer_sequence;
+    state.resources.insert(
+        id,
+        ResourceOwner {
+            plugin: token,
+            kind: ResourceKind::LyricsTransform,
+            size_bytes: 0,
+        },
+    );
+    state.lyrics_transformers.insert(
+        id,
+        LyricsTransformerResource {
+            sequence,
+            on_transform,
+            callback_data: data.callback_data as usize,
+            in_flight: 0,
+        },
+    );
+    // SAFETY: out_id was checked non-null and belongs to the caller.
+    unsafe { out_id.write(id) };
+    PluginResultC::ok()
+}
+
+unsafe extern "C" fn lyrics_transform_release(token: PluginToken, id: ResourceId) -> PluginResultC {
+    let mut state = match runtime().lock() {
+        Ok(state) => state,
+        Err(_) => return PluginResultC::err("plugin runtime lock is poisoned"),
+    };
+    if let Err(error) = require_resource(&state, token, id, ResourceKind::LyricsTransform) {
+        return PluginResultC::err(error);
+    }
+    if state
+        .lyrics_transformers
+        .get(&id)
+        .is_some_and(|transformer| transformer.in_flight != 0)
+    {
+        return PluginResultC::err("lyrics transform callback is in progress");
+    }
+    state.resources.remove(&id);
+    state.lyrics_transformers.remove(&id);
+    PluginResultC::ok()
+}
+
 fn ctx_ref<'a>(ctx: *const WidgetDrawContextV1) -> Option<&'a WidgetDrawContextV1> {
     // SAFETY: The context is host-provided and valid for the whole on_draw call.
     let ctx = unsafe { ctx.as_ref() }?;
@@ -1225,6 +1322,158 @@ pub fn update_host_state(state: HostState) {
     }
 }
 
+struct ActiveLyricsTransformer {
+    resource_id: ResourceId,
+    plugin_id: String,
+    on_transform: LyricsTransformFnV1,
+    callback_data: usize,
+}
+
+struct LyricsTransformLease {
+    transformers: Vec<ActiveLyricsTransformer>,
+}
+
+impl LyricsTransformLease {
+    fn acquire() -> Self {
+        let Ok(mut state) = runtime().lock() else {
+            return Self {
+                transformers: Vec::new(),
+            };
+        };
+        let mut available = state
+            .lyrics_transformers
+            .iter()
+            .filter_map(|(&resource_id, transformer)| {
+                let owner = state.resources.get(&resource_id)?;
+                let plugin = state.plugins.get(&owner.plugin)?;
+                (!plugin.stopping)
+                    .then(|| (resource_id, transformer.sequence, plugin.id.to_string()))
+            })
+            .collect::<Vec<_>>();
+        available.sort_by_key(|(_, sequence, _)| *sequence);
+        let transformers = available
+            .into_iter()
+            .filter_map(|(resource_id, _, plugin_id)| {
+                let transformer = state.lyrics_transformers.get_mut(&resource_id)?;
+                transformer.in_flight = transformer.in_flight.saturating_add(1);
+                Some(ActiveLyricsTransformer {
+                    resource_id,
+                    plugin_id,
+                    on_transform: transformer.on_transform,
+                    callback_data: transformer.callback_data,
+                })
+            })
+            .collect();
+        Self { transformers }
+    }
+}
+
+impl Drop for LyricsTransformLease {
+    fn drop(&mut self) {
+        if let Ok(mut state) = runtime().lock() {
+            for transformer in &self.transformers {
+                if let Some(resource) = state.lyrics_transformers.get_mut(&transformer.resource_id)
+                {
+                    resource.in_flight = resource.in_flight.saturating_sub(1);
+                }
+            }
+        }
+    }
+}
+
+fn transform_lyric_text(
+    transformer: &ActiveLyricsTransformer,
+    input: &LyricsTextV1,
+) -> Result<String, String> {
+    let mut required = 0u32;
+    // SAFETY: The callback belongs to a leased, loaded plugin. Input and out_len
+    // remain valid for this synchronous size-query call.
+    unsafe {
+        (transformer.on_transform)(
+            transformer.callback_data as *mut c_void,
+            transformer.resource_id,
+            input,
+            std::ptr::null_mut(),
+            0,
+            &mut required,
+        )
+    }
+    .into_result()?;
+    if required > MAX_TRANSFORMED_LYRIC_BYTES {
+        return Err("transformed lyric line exceeds 256 KiB".to_string());
+    }
+    if required == 0 {
+        return Ok(String::new());
+    }
+
+    let mut output = vec![0u8; required as usize];
+    let mut written = required;
+    // SAFETY: The callback belongs to a leased, loaded plugin. The output buffer
+    // and out_len remain writable for this synchronous transform call.
+    unsafe {
+        (transformer.on_transform)(
+            transformer.callback_data as *mut c_void,
+            transformer.resource_id,
+            input,
+            output.as_mut_ptr(),
+            required,
+            &mut written,
+        )
+    }
+    .into_result()?;
+    if written > required {
+        return Err("lyrics transform wrote beyond the advertised length".to_string());
+    }
+    output.truncate(written as usize);
+    String::from_utf8(output).map_err(|_| "lyrics transform returned invalid UTF-8".to_string())
+}
+
+pub fn apply_lyrics_transforms(
+    mut lyrics: Arc<Vec<crate::core::lyrics::LyricLine>>,
+) -> Arc<Vec<crate::core::lyrics::LyricLine>> {
+    let lease = LyricsTransformLease::acquire();
+    if lease.transformers.is_empty() {
+        return lyrics;
+    }
+
+    let mut reported_errors = HashSet::new();
+    for line in Arc::make_mut(&mut lyrics) {
+        for transformer in &lease.transformers {
+            let input = LyricsTextV1 {
+                flags: if line.is_word_synced() {
+                    LYRICS_TEXT_FLAG_WORD_SYNCED
+                } else {
+                    0
+                },
+                line_time_ms: line.time_ms,
+                text: Utf8SliceV1::borrowed(&line.text),
+                ..Default::default()
+            };
+            let transformed = match transform_lyric_text(transformer, &input) {
+                Ok(transformed) => transformed,
+                Err(error) => {
+                    if reported_errors.insert(transformer.resource_id) {
+                        log::warn!(
+                            "Lyrics transformer '{}' failed: {error}",
+                            transformer.plugin_id
+                        );
+                    }
+                    continue;
+                }
+            };
+            if !line.replace_text_preserving_timings(transformed)
+                && reported_errors.insert(transformer.resource_id)
+            {
+                log::warn!(
+                    "Lyrics transformer '{}' changed the character count of a word-synced line",
+                    transformer.plugin_id
+                );
+            }
+        }
+    }
+    lyrics
+}
+
 pub fn update_host_media(title: &str, artist: &str, is_playing: bool) {
     if let Ok(mut runtime) = runtime().lock() {
         if runtime.host_state.media_title != title {
@@ -1403,16 +1652,24 @@ fn begin_plugin_shutdown(token: PluginToken) -> Result<bool, PluginError> {
         .ok_or_else(|| PluginError::ExecutionError("plugin token is not registered".to_string()))?
         .stopping;
     let callback_in_progress = runtime.resources.iter().any(|(&id, owner)| {
-        owner.plugin == token
-            && owner.kind == ResourceKind::Media
-            && runtime
+        if owner.plugin != token {
+            return false;
+        }
+        match owner.kind {
+            ResourceKind::Media => runtime
                 .media
                 .get(&id)
-                .is_some_and(|media| media.in_flight != 0)
+                .is_some_and(|media| media.in_flight != 0),
+            ResourceKind::LyricsTransform => runtime
+                .lyrics_transformers
+                .get(&id)
+                .is_some_and(|transformer| transformer.in_flight != 0),
+            _ => false,
+        }
     });
     if callback_in_progress {
         return Err(PluginError::ExecutionError(
-            "plugin media callback is in progress".to_string(),
+            "plugin callback is in progress".to_string(),
         ));
     }
     if let Some(plugin) = runtime.plugins.get_mut(&token) {
@@ -1460,6 +1717,9 @@ fn revoke_plugin(token: PluginToken) {
                 ResourceKind::Widget => {
                     runtime.widget_events.remove(&id);
                     runtime.widget_events.insert(id, WidgetEvent::Remove(id));
+                }
+                ResourceKind::LyricsTransform => {
+                    runtime.lyrics_transformers.remove(&id);
                 }
             }
         }

@@ -333,7 +333,8 @@ pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: Ly
             &request.source,
             request.local_dir.as_deref(),
         )
-        .await;
+        .await
+        .map(crate::plugin::manager::apply_lyrics_transforms);
         let applied = info_tx.send_if_modified(|current| {
             if current.title != request.title
                 || current.artist != request.artist

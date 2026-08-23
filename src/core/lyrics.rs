@@ -81,6 +81,46 @@ pub(crate) struct LyricHighlight {
 }
 
 impl LyricLine {
+    pub(crate) fn is_word_synced(&self) -> bool {
+        !self.timings.is_empty()
+    }
+
+    pub(crate) fn replace_text_preserving_timings(&mut self, text: String) -> bool {
+        if self.timings.is_empty() {
+            self.text = text;
+            return true;
+        }
+
+        let boundaries = self
+            .timings
+            .iter()
+            .map(|timing| {
+                self.text
+                    .get(..timing.end_byte)
+                    .map(|prefix| prefix.chars().count())
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(boundaries) = boundaries else {
+            return false;
+        };
+        let byte_offsets = text
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain(std::iter::once(text.len()))
+            .collect::<Vec<_>>();
+        if byte_offsets.len() != self.text.chars().count() + 1 {
+            return false;
+        }
+        for (timing, boundary) in self.timings.iter_mut().zip(boundaries) {
+            let Some(&end_byte) = byte_offsets.get(boundary) else {
+                return false;
+            };
+            timing.end_byte = end_byte;
+        }
+        self.text = text;
+        true
+    }
+
     pub(crate) fn highlight_at(
         &self,
         position_ms: u64,

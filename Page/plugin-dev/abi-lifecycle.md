@@ -91,7 +91,7 @@ Never reconstruct a `Box` in `shutdown`; shutdown may return an error and be ret
 
 ## Shutdown contract
 
-WinIsland marks the plugin as stopping before entering `shutdown`. New Media command dispatch is rejected, and unload is rejected while an existing Media callback is in flight.
+WinIsland marks the plugin as stopping before entering `shutdown`. New Media command dispatch is rejected, and unload is rejected while a Media or Lyrics Transform callback is in flight.
 
 `shutdown` must perform work in this order:
 
@@ -134,6 +134,11 @@ Media command callbacks are different:
 
 Do not call plugin UI or framework code that assumes the callback runs on a worker thread. If the plugin needs asynchronous work, copy the command into a channel owned by a worker that shutdown can stop and join.
 
+Lyrics Transform callbacks run synchronously on a lyrics-fetch worker, twice per parsed line: a
+size query followed by the actual write. Their callback data must remain valid until release
+succeeds. Keep conversion bounded, thread-safe, and deterministic between both calls. Release and
+unload are rejected while a lyric callback is active.
+
 ## FFI data rules
 
 - Every public ABI structure is `#[repr(C)]`.
@@ -153,7 +158,7 @@ There are three related versions:
 
 | Value | Meaning |
 |---|---|
-| crate `0.3.x` | Rust package release containing ABI v1 definitions |
+| crate `0.6.x` | Rust package release containing ABI v1 definitions |
 | `ABI_VERSION_1` | Top-level descriptor and create-info ABI |
 | `INTERFACE_VERSION_1` | Version of an individual host service table |
 
@@ -173,7 +178,7 @@ ABI v1 is a rewrite, not an in-place upgrade.
 | global push/clear calls | Service-specific create, update, and release operations |
 | unfinished Theme/Shortcut APIs | No ABI v1 equivalent |
 
-Remove all old exports. A DLL should export only ABI v1 entry points and use 0.3 types throughout; mixing layouts is not supported.
+Remove all old exports. A DLL should export only ABI v1 entry points and use 0.6 types throughout; mixing layouts is not supported.
 
 ## Review checklist
 

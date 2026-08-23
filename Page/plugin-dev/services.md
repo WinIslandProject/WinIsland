@@ -1,6 +1,6 @@
 # Host services
 
-ABI v1 exposes five versioned host services. Context, Media, i18n, and Widget create resources owned by the plugin token. Host State returns a snapshot and creates no resource.
+ABI v1 exposes six versioned host services. Context, Media, i18n, Widget, and Lyrics Transform create resources owned by the plugin token. Host State returns a snapshot and creates no resource.
 
 ## Query and validate a service
 
@@ -42,6 +42,7 @@ Limits protect the WinIsland process from accidental unbounded resource use. The
 | Translation bundle | 16 active bundles | 1 MiB per bundle; 4 MiB total per plugin |
 | Translation pairs | 4,096 per bundle | Key/value up to 64 KiB each; language code up to 64 bytes |
 | Widget | 16 active resources | Span up to 6 columns by 3 rows; stable key up to 63 ASCII bytes |
+| Lyrics transformer | 4 active resources | Transformed output up to 256 KiB per line |
 
 An update is included in the same quota as the resource it replaces. Releasing a resource returns its count and memory budget.
 
@@ -165,6 +166,43 @@ Updating or releasing the same resource from inside its callback returns `media 
 ### Media errors
 
 Media calls reject an empty title, unknown flags or controls, controls without a callback, null cover data with nonzero length, covers larger than 16 MiB, total cover quota overflow, a wrong owner/type, and update/release during a callback.
+
+## Lyrics Transform service
+
+Lyrics Transform post-processes lyrics fetched by WinIsland. Declare
+`CAPABILITY_LYRICS_TRANSFORM`, query `lyrics_transform_api()`, and register a callback resource:
+
+```rust
+let transformer = LyricsTransformerDataV1 {
+    on_transform: Some(transform_lyrics),
+    callback_data: state_ptr,
+    ..Default::default()
+};
+let mut transformer_id = INVALID_ID;
+let result = unsafe {
+    lyrics_api.register.unwrap()(token, &transformer, &mut transformer_id)
+};
+```
+
+WinIsland calls the transformer once per parsed line, in registration order, after a lyrics fetch
+completes and before the result is cached. This makes a Simplified-to-Traditional converter a
+small text-only plugin: pass the input line through OpenCC and return the converted UTF-8 text.
+
+The callback uses two passes. On the first call, `output` is null and `output_capacity` is zero;
+write the required byte length to `out_len`. On the second call, copy at most `output_capacity`
+bytes to `output` and update `out_len` with the actual length. Return an error on invalid pointers,
+conversion failure, or insufficient capacity.
+
+`LyricsTextV1` includes `line_time_ms`, the borrowed UTF-8 line, and
+`LYRICS_TEXT_FLAG_WORD_SYNCED`. Word-synchronised output must retain the input's Unicode character
+count. WinIsland then maps the original per-word boundaries into the transformed UTF-8 bytes, so
+highlight timing remains intact even when byte sequences change. A different character count is
+rejected for that line; other lines continue through the transformer chain.
+
+Callbacks run synchronously on a lyrics-fetch worker and may call other host services. Keep them
+bounded: every line is limited to 256 KiB of output. `callback_data` must remain valid until release
+succeeds. Release and plugin unload return an error while the callback is active. Release the
+transformer during `shutdown`; newly registered transformers apply from the next lyrics fetch.
 
 ## Widget service
 

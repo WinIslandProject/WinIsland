@@ -91,7 +91,7 @@ unsafe { drop(Box::from_raw(handle.cast::<Instance>())) };
 
 ## Shutdown 契约
 
-进入 `shutdown` 前，WinIsland 会把插件标记为 stopping。新的 Media 命令不会再派发；如果已有 Media 回调正在执行，卸载会被拒绝。
+进入 `shutdown` 前，WinIsland 会把插件标记为 stopping。新的 Media 命令不会再派发；如果已有 Media 或 Lyrics Transform 回调正在执行，卸载会被拒绝。
 
 `shutdown` 必须按顺序完成：
 
@@ -134,6 +134,10 @@ Media 命令回调不同：
 
 不要调用假设自己运行在 worker 线程的 UI 或框架代码。需要异步处理时，把命令复制进 worker 拥有的 channel，并确保 shutdown 能停止和 join 该 worker。
 
+Lyrics Transform 回调会在歌词获取 worker 上同步执行，每个解析后的歌词行调用两次：先查询
+所需大小，再实际写入。Callback data 必须有效到 release 成功。两次调用之间的转换结果必须
+确定一致，转换逻辑也必须有界且线程安全。歌词回调执行期间 release 和卸载都会被拒绝。
+
 ## FFI 数据规则
 
 - 所有公共 ABI 结构均为 `#[repr(C)]`。
@@ -153,7 +157,7 @@ Media 命令回调不同：
 
 | 值 | 含义 |
 |---|---|
-| crate `0.3.x` | 包含 ABI v1 定义的 Rust 包版本 |
+| crate `0.6.x` | 包含 ABI v1 定义的 Rust 包版本 |
 | `ABI_VERSION_1` | 顶层 Descriptor 和 create-info ABI |
 | `INTERFACE_VERSION_1` | 单个宿主服务表的版本 |
 
@@ -173,7 +177,7 @@ ABI v1 是整体重写，不是原地升级。
 | 全局 push/clear 调用 | 各服务的 create、update、release 操作 |
 | 未完成的 Theme/Shortcut API | ABI v1 无对应接口 |
 
-删除所有旧导出。一个 DLL 应只导出 ABI v1 入口，并全部使用 0.3 类型；不支持混合两套布局。
+删除所有旧导出。一个 DLL 应只导出 ABI v1 入口，并全部使用 0.6 类型；不支持混合两套布局。
 
 ## 审查清单
 
