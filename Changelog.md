@@ -3,6 +3,7 @@
 ### v1.3.1
 - Added word-synced LRC lyrics with smooth per-character highlighting
 - Added QQ Music as a lyrics source
+- Added a compact CPU and memory usage widget
 - Replaced the native Windows volume flyout with the Dynamic Island volume indicator when using volume keys
 - Fixed known issues
 - Fixed a crash issue when quickly switching songs(#130)

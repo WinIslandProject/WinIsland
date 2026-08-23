@@ -115,6 +115,7 @@ pub struct WidgetSlot {
 #[serde(rename_all = "snake_case")]
 pub enum CompactWidgetKind {
     Time,
+    ResourceUsage,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -213,6 +214,7 @@ where
     let raw = Option::<String>::deserialize(deserializer)?;
     Ok(raw.and_then(|value| match value.as_str() {
         "time" => Some(CompactWidgetKind::Time),
+        "resource_usage" => Some(CompactWidgetKind::ResourceUsage),
         _ => None,
     }))
 }
@@ -417,7 +419,8 @@ pub const AVAILABLE_WIDGETS: [WidgetKind; 3] = [
     WidgetKind::Calendar,
     WidgetKind::ResourceUsage,
 ];
-pub const AVAILABLE_COMPACT_WIDGETS: [CompactWidgetKind; 1] = [CompactWidgetKind::Time];
+pub const AVAILABLE_COMPACT_WIDGETS: [CompactWidgetKind; 2] =
+    [CompactWidgetKind::Time, CompactWidgetKind::ResourceUsage];
 
 pub fn default_compact_widget_layout() -> Vec<CompactWidgetSlot> {
     Vec::new()

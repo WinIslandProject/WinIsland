@@ -1,3 +1,4 @@
+mod resource_usage;
 mod time;
 
 use crate::core::config::{CompactWidgetAlignment, CompactWidgetKind, CompactWidgetSlot};
@@ -9,6 +10,7 @@ const CONTENT_GAP: f32 = 7.0;
 pub(crate) fn widget_width(widget: CompactWidgetKind) -> f32 {
     match widget {
         CompactWidgetKind::Time => 48.0,
+        CompactWidgetKind::ResourceUsage => 132.0,
     }
 }
 
@@ -67,19 +69,40 @@ pub(crate) fn side_extensions(
 }
 
 fn aligned_layout_width(left_width: f32, center_width: f32, right_width: f32) -> f32 {
-    if center_width > 0.0 {
-        let side_width = left_width.max(right_width);
-        center_width
-            + 2.0
-                * (CONTENT_EDGE_INSET
-                    + side_width
-                    + if side_width > 0.0 { CONTENT_GAP } else { 0.0 })
-    } else {
-        match (left_width > 0.0, right_width > 0.0) {
-            (true, true) => CONTENT_EDGE_INSET * 2.0 + left_width + CONTENT_GAP + right_width,
-            (true, false) => CONTENT_EDGE_INSET * 2.0 + left_width,
-            (false, true) => CONTENT_EDGE_INSET * 2.0 + right_width,
-            (false, false) => 0.0,
+    let occupied_groups = [left_width, center_width, right_width]
+        .into_iter()
+        .filter(|width| *width > 0.0)
+        .count();
+    if occupied_groups == 0 {
+        return 0.0;
+    }
+    CONTENT_EDGE_INSET * 2.0
+        + left_width
+        + center_width
+        + right_width
+        + CONTENT_GAP * occupied_groups.saturating_sub(1) as f32
+}
+
+pub(crate) fn alignment_offset(
+    layout: &[CompactWidgetSlot],
+    total_width: f32,
+    alignment: CompactWidgetAlignment,
+) -> f32 {
+    let left_width = strip_width(widgets(layout, CompactWidgetAlignment::Left));
+    let center_width = strip_width(widgets(layout, CompactWidgetAlignment::Center));
+    let right_width = strip_width(widgets(layout, CompactWidgetAlignment::Right));
+    match alignment {
+        CompactWidgetAlignment::Left => CONTENT_EDGE_INSET,
+        CompactWidgetAlignment::Right => total_width - CONTENT_EDGE_INSET - right_width,
+        CompactWidgetAlignment::Center => {
+            let minimum =
+                CONTENT_EDGE_INSET + left_width + if left_width > 0.0 { CONTENT_GAP } else { 0.0 };
+            let maximum = total_width
+                - CONTENT_EDGE_INSET
+                - right_width
+                - center_width
+                - if right_width > 0.0 { CONTENT_GAP } else { 0.0 };
+            ((total_width - center_width) / 2.0).clamp(minimum, maximum.max(minimum))
         }
     }
 }
@@ -156,28 +179,30 @@ pub(crate) fn draw(
         );
         draw_content_separators(canvas, layout, rect, scale, alpha);
     } else {
+        let logical_width = rect.width() / scale.max(f32::EPSILON);
         draw_strip(
             canvas,
             widgets(layout, CompactWidgetAlignment::Left),
-            rect.left + CONTENT_EDGE_INSET * scale,
+            rect.left
+                + alignment_offset(layout, logical_width, CompactWidgetAlignment::Left) * scale,
             rect,
             scale,
             alpha,
         );
-        let center_width = strip_width(widgets(layout, CompactWidgetAlignment::Center)) * scale;
         draw_strip(
             canvas,
             widgets(layout, CompactWidgetAlignment::Center),
-            rect.center_x() - center_width / 2.0,
+            rect.left
+                + alignment_offset(layout, logical_width, CompactWidgetAlignment::Center) * scale,
             rect,
             scale,
             alpha,
         );
-        let right_width = strip_width(widgets(layout, CompactWidgetAlignment::Right)) * scale;
         draw_strip(
             canvas,
             widgets(layout, CompactWidgetAlignment::Right),
-            rect.right - CONTENT_EDGE_INSET * scale - right_width,
+            rect.left
+                + alignment_offset(layout, logical_width, CompactWidgetAlignment::Right) * scale,
             rect,
             scale,
             alpha,
@@ -262,12 +287,22 @@ pub(crate) fn draw_widget(
 ) {
     match widget {
         CompactWidgetKind::Time => time::draw(canvas, rect, scale, alpha),
+        CompactWidgetKind::ResourceUsage => resource_usage::draw(canvas, rect, scale, alpha),
     }
 }
 
 pub(crate) fn next_refresh_delay(layout: &[CompactWidgetSlot]) -> Option<std::time::Duration> {
-    layout
+    let time_delay = layout
         .iter()
         .any(|entry| entry.widget == Some(CompactWidgetKind::Time))
-        .then(crate::ui::widget::time_text::until_next_minute)
+        .then(crate::ui::widget::time_text::until_next_minute);
+    let resource_delay = layout
+        .iter()
+        .any(|entry| entry.widget == Some(CompactWidgetKind::ResourceUsage))
+        .then(crate::ui::widget::resource_usage::next_refresh_delay);
+    match (time_delay, resource_delay) {
+        (Some(time), Some(resource)) => Some(time.min(resource)),
+        (Some(delay), None) | (None, Some(delay)) => Some(delay),
+        (None, None) => None,
+    }
 }

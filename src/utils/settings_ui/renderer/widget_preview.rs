@@ -595,7 +595,15 @@ fn draw_compact_library_tile(canvas: &Canvas, widget: CompactWidgetKind, rect: R
         12.0,
         &paint,
     );
-    let preview = Rect::from_xywh(rect.center_x() - 46.0, rect.center_y() - 15.0, 92.0, 30.0);
+    let widget_width = crate::ui::widget::compact::widget_width(widget);
+    let natural_width = widget_width + 18.0;
+    let preview_scale = ((rect.width() - 8.0) / natural_width).min(1.0);
+    let preview = Rect::from_xywh(
+        rect.center_x() - natural_width * preview_scale / 2.0,
+        rect.center_y() - 15.0 * preview_scale,
+        natural_width * preview_scale,
+        30.0 * preview_scale,
+    );
     paint.set_style(skia_safe::paint::Style::Fill);
     paint.set_color(Color::from_rgb(10, 10, 10));
     canvas.draw_round_rect(
@@ -604,7 +612,18 @@ fn draw_compact_library_tile(canvas: &Canvas, widget: CompactWidgetKind, rect: R
         preview.height() / 2.0,
         &paint,
     );
-    crate::ui::widget::compact::draw_widget(canvas, widget, preview, 1.0, 255);
+    crate::ui::widget::compact::draw_widget(
+        canvas,
+        widget,
+        Rect::from_xywh(
+            preview.left + 9.0 * preview_scale,
+            preview.top,
+            widget_width * preview_scale,
+            preview.height(),
+        ),
+        preview_scale,
+        255,
+    );
 }
 
 fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {

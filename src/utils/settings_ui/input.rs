@@ -18,6 +18,9 @@ pub const WIDGET_LIBRARY_TILE_H: f32 = 72.0;
 pub const WIDGET_LIBRARY_TILE_GAP: f32 = 10.0;
 pub const COMPACT_WIDGET_PREVIEW_H: f32 = 388.0;
 pub const COMPACT_WIDGET_ISLAND_PANEL_H: f32 = 226.0;
+const COMPACT_WIDGET_PREVIEW_PREFERRED_W: f32 = 260.0;
+const COMPACT_WIDGET_PREVIEW_WIDTH_GROWTH: f32 = 0.75;
+const COMPACT_WIDGET_PREVIEW_MAX_SCALE: f32 = 1.8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClickResult {
@@ -376,9 +379,13 @@ pub fn compact_widget_grid_geom(
     let max_w = preview_w - 48.0;
     let max_h = editor_content_h - 12.0;
     let preview_width = crate::ui::widget::compact::preview_width(layout, base_width, dragging);
-    let cap_scale = (max_w / preview_width.max(1.0))
+    let extra_width = (preview_width - base_width).max(0.0);
+    let preferred_w = (COMPACT_WIDGET_PREVIEW_PREFERRED_W
+        + extra_width * COMPACT_WIDGET_PREVIEW_WIDTH_GROWTH)
+        .min(max_w);
+    let cap_scale = (preferred_w / preview_width.max(1.0))
         .min(max_h / base_height.max(1.0))
-        .clamp(0.25, 3.0);
+        .clamp(0.25, COMPACT_WIDGET_PREVIEW_MAX_SCALE);
     let cap_w = preview_width * cap_scale;
     let cap_h = base_height * cap_scale;
     let cap_x = row_x + (preview_w - cap_w) / 2.0;
@@ -399,21 +406,9 @@ pub fn compact_widget_grid_geom(
         CompactWidgetAlignment::Center,
         CompactWidgetAlignment::Right,
     ] {
-        let aligned_width = entries
-            .iter()
-            .filter(|(position, _)| position.alignment == alignment)
-            .map(|(_, width)| *width)
-            .sum::<f32>();
-        let aligned_count = entries
-            .iter()
-            .filter(|(position, _)| position.alignment == alignment)
-            .count();
-        let strip_width = aligned_width + gap * aligned_count.saturating_sub(1) as f32;
-        let mut next_x = match alignment {
-            CompactWidgetAlignment::Left => cap_x + 9.0 * cap_scale,
-            CompactWidgetAlignment::Center => cap_x + (cap_w - strip_width) / 2.0,
-            CompactWidgetAlignment::Right => cap_x + cap_w - 9.0 * cap_scale - strip_width,
-        };
+        let mut next_x = cap_x
+            + crate::ui::widget::compact::alignment_offset(layout, preview_width, alignment)
+                * cap_scale;
         for (position, width) in entries
             .iter()
             .filter(|(position, _)| position.alignment == alignment)
