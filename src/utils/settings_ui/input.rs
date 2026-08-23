@@ -1,9 +1,11 @@
 use super::items::*;
 use crate::core::config::{
-    AVAILABLE_COMPACT_WIDGETS, AVAILABLE_WIDGETS, COMPACT_WIDGET_SLOTS, CompactWidgetKind,
-    CompactWidgetSlot, PluginWidgetId, PluginWidgetSlot, WidgetKind, WidgetSlot,
+    AVAILABLE_COMPACT_WIDGETS, AVAILABLE_WIDGETS, CompactWidgetAlignment, CompactWidgetKind,
+    CompactWidgetPosition, CompactWidgetSlot, PluginWidgetId, PluginWidgetSlot, WidgetKind,
+    WidgetSlot,
 };
 use crate::core::plugin_widget::PluginWidget;
+use crate::ui::widget::compact::widget_width;
 use crate::ui::widget::expanded::{WidgetGridLayout, widget_corner_radius, widget_grid_layout};
 
 pub const WIDGET_PREVIEW_BASE_H: f32 = 480.0;
@@ -88,10 +90,16 @@ pub enum WidgetPreviewHit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetEditorSlot {
+    Expanded(usize),
+    Compact(CompactWidgetPosition),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactWidgetPreviewHit {
     None,
     Source(CompactWidgetKind),
-    Slot(usize),
+    Slot(CompactWidgetPosition),
 }
 
 fn in_rect(mx: f32, my: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
@@ -123,47 +131,100 @@ impl WidgetGridGeom {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CompactWidgetGridGeom {
     pub cap_x: f32,
     pub cap_y: f32,
     pub cap_w: f32,
     pub cap_h: f32,
     pub cap_scale: f32,
-    slot_x: f32,
     slot_y: f32,
-    slot_w: f32,
     slot_h: f32,
     gap: f32,
+    slots: Vec<(CompactWidgetPosition, f32, f32)>,
 }
 
 impl CompactWidgetGridGeom {
-    pub fn slot_rect(&self, slot: usize) -> (f32, f32, f32, f32) {
-        (
-            self.slot_x + slot.min(COMPACT_WIDGET_SLOTS - 1) as f32 * (self.slot_w + self.gap),
-            self.slot_y,
-            self.slot_w,
-            self.slot_h,
-        )
+    pub fn slot_rect(&self, position: CompactWidgetPosition) -> Option<(f32, f32, f32, f32)> {
+        self.slots
+            .iter()
+            .find(|(candidate, _, _)| *candidate == position)
+            .map(|(_, x, width)| (*x, self.slot_y, *width, self.slot_h))
     }
 
-    pub fn slot_at_point(&self, x: f32, y: f32, include_gaps: bool) -> Option<usize> {
-        if include_gaps
-            && x >= self.slot_x
-            && x <= self.slot_x
-                + self.slot_w * COMPACT_WIDGET_SLOTS as f32
-                + self.gap * (COMPACT_WIDGET_SLOTS - 1) as f32
-            && y >= self.slot_y
-            && y <= self.slot_y + self.slot_h
-        {
-            return Some(
-                (((x - self.slot_x + self.gap / 2.0) / (self.slot_w + self.gap)).floor() as usize)
-                    .min(COMPACT_WIDGET_SLOTS - 1),
-            );
+    pub fn drop_indicator_x(&self, position: CompactWidgetPosition) -> f32 {
+        let mut aligned = self
+            .slots
+            .iter()
+            .filter(|(candidate, _, _)| candidate.alignment == position.alignment);
+        if let Some((_, x, _)) = aligned.nth(position.index) {
+            return *x - self.gap / 2.0;
         }
-        (0..COMPACT_WIDGET_SLOTS).find(|slot| {
-            let (slot_x, slot_y, slot_w, slot_h) = self.slot_rect(*slot);
-            in_rect(x, y, slot_x, slot_y, slot_w, slot_h)
+        if let Some((_, x, width)) = self
+            .slots
+            .iter()
+            .rev()
+            .find(|(candidate, _, _)| candidate.alignment == position.alignment)
+        {
+            return *x + *width + self.gap / 2.0;
+        }
+        match position.alignment {
+            CompactWidgetAlignment::Left => self.cap_x + 9.0 * self.cap_scale,
+            CompactWidgetAlignment::Center => self.cap_x + self.cap_w / 2.0,
+            CompactWidgetAlignment::Right => self.cap_x + self.cap_w - 9.0 * self.cap_scale,
+        }
+    }
+
+    pub fn slot_at_point(
+        &self,
+        x: f32,
+        y: f32,
+        include_drop_zones: bool,
+    ) -> Option<CompactWidgetPosition> {
+        if y < self.slot_y || y > self.slot_y + self.slot_h {
+            return None;
+        }
+        if include_drop_zones && x >= self.cap_x && x <= self.cap_x + self.cap_w {
+            let relative_x = (x - self.cap_x) / self.cap_w;
+            let alignment = [
+                CompactWidgetAlignment::Left,
+                CompactWidgetAlignment::Center,
+                CompactWidgetAlignment::Right,
+            ]
+            .into_iter()
+            .find(|alignment| {
+                let bounds = self
+                    .slots
+                    .iter()
+                    .filter(|(position, _, _)| position.alignment == *alignment)
+                    .fold(None::<(f32, f32)>, |bounds, (_, slot_x, width)| {
+                        Some(match bounds {
+                            Some((left, right)) => (left.min(*slot_x), right.max(*slot_x + *width)),
+                            None => (*slot_x, *slot_x + *width),
+                        })
+                    });
+                bounds.is_some_and(|(left, right)| x >= left - self.gap && x <= right + self.gap)
+            })
+            .unwrap_or_else(|| {
+                if relative_x < 1.0 / 3.0 {
+                    CompactWidgetAlignment::Left
+                } else if relative_x < 2.0 / 3.0 {
+                    CompactWidgetAlignment::Center
+                } else {
+                    CompactWidgetAlignment::Right
+                }
+            });
+            let index = self
+                .slots
+                .iter()
+                .filter(|(position, slot_x, width)| {
+                    position.alignment == alignment && x > *slot_x + *width / 2.0
+                })
+                .count();
+            return Some(CompactWidgetPosition { alignment, index });
+        }
+        self.slots.iter().find_map(|(position, slot_x, width)| {
+            in_rect(x, y, *slot_x, self.slot_y, *width, self.slot_h).then_some(*position)
         })
     }
 }
@@ -304,6 +365,8 @@ pub fn compact_widget_grid_geom(
     width: f32,
     base_width: f32,
     base_height: f32,
+    layout: &[CompactWidgetSlot],
+    dragging: Option<CompactWidgetKind>,
 ) -> CompactWidgetGridGeom {
     let content_w = width - CONTENT_PADDING * 2.0;
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
@@ -312,18 +375,53 @@ pub fn compact_widget_grid_geom(
     let editor_content_h = COMPACT_WIDGET_ISLAND_PANEL_H - WIDGET_EDITOR_HEADER_H - 16.0;
     let max_w = preview_w - 48.0;
     let max_h = editor_content_h - 12.0;
-    let cap_scale = (max_w / base_width.max(1.0))
+    let preview_width = crate::ui::widget::compact::preview_width(layout, base_width, dragging);
+    let cap_scale = (max_w / preview_width.max(1.0))
         .min(max_h / base_height.max(1.0))
         .clamp(0.25, 3.0);
-    let cap_w = base_width * cap_scale;
+    let cap_w = preview_width * cap_scale;
     let cap_h = base_height * cap_scale;
     let cap_x = row_x + (preview_w - cap_w) / 2.0;
     let cap_y = panel_y + WIDGET_EDITOR_HEADER_H + (editor_content_h - cap_h) / 2.0;
-    let inset = 7.0 * cap_scale;
-    let gap = 4.0 * cap_scale;
-    let slot_w = ((cap_w - inset * 2.0 - gap * (COMPACT_WIDGET_SLOTS - 1) as f32)
-        / COMPACT_WIDGET_SLOTS as f32)
-        .max(1.0);
+    let mut entries = layout
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .widget
+                .map(|widget| (entry.position(), widget_width(widget) * cap_scale))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(position, _)| (position.alignment.order(), position.index));
+    let gap = 7.0 * cap_scale;
+    let mut slots = Vec::with_capacity(entries.len());
+    for alignment in [
+        CompactWidgetAlignment::Left,
+        CompactWidgetAlignment::Center,
+        CompactWidgetAlignment::Right,
+    ] {
+        let aligned_width = entries
+            .iter()
+            .filter(|(position, _)| position.alignment == alignment)
+            .map(|(_, width)| *width)
+            .sum::<f32>();
+        let aligned_count = entries
+            .iter()
+            .filter(|(position, _)| position.alignment == alignment)
+            .count();
+        let strip_width = aligned_width + gap * aligned_count.saturating_sub(1) as f32;
+        let mut next_x = match alignment {
+            CompactWidgetAlignment::Left => cap_x + 9.0 * cap_scale,
+            CompactWidgetAlignment::Center => cap_x + (cap_w - strip_width) / 2.0,
+            CompactWidgetAlignment::Right => cap_x + cap_w - 9.0 * cap_scale - strip_width,
+        };
+        for (position, width) in entries
+            .iter()
+            .filter(|(position, _)| position.alignment == alignment)
+        {
+            slots.push((*position, next_x, *width));
+            next_x += *width + gap;
+        }
+    }
 
     CompactWidgetGridGeom {
         cap_x,
@@ -331,11 +429,10 @@ pub fn compact_widget_grid_geom(
         cap_w,
         cap_h,
         cap_scale,
-        slot_x: cap_x + inset,
         slot_y: cap_y + 3.0 * cap_scale,
-        slot_w,
         slot_h: (cap_h - 6.0 * cap_scale).max(1.0),
         gap,
+        slots,
     }
 }
 
@@ -364,7 +461,8 @@ pub fn compact_widget_preview_hit_test(
         }
     }
 
-    let geometry = compact_widget_grid_geom(item_y, width, base_width, base_height);
+    let geometry =
+        compact_widget_grid_geom(item_y, width, base_width, base_height, layout, dragging);
     if let Some(slot) = geometry.slot_at_point(mx, my, dragging.is_some()) {
         return CompactWidgetPreviewHit::Slot(slot);
     }

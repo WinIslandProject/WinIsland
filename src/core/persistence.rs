@@ -39,6 +39,21 @@ pub fn load_config() -> AppConfig {
                 .to_string();
                 migrated = true;
             }
+            if let Some(entries) = table
+                .get("compact_widget_layout")
+                .and_then(toml::Value::as_array)
+            {
+                for (entry, raw_entry) in config.compact_widget_layout.iter_mut().zip(entries) {
+                    if raw_entry
+                        .as_table()
+                        .is_some_and(|table| !table.contains_key("alignment"))
+                    {
+                        entry.alignment =
+                            crate::core::config::CompactWidgetAlignment::legacy_slot(entry.slot);
+                        migrated = true;
+                    }
+                }
+            }
         }
         config
     } else {

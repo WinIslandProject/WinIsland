@@ -117,11 +117,55 @@ pub enum CompactWidgetKind {
     Time,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactWidgetAlignment {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+impl CompactWidgetAlignment {
+    pub(crate) const fn order(self) -> usize {
+        match self {
+            Self::Left => 0,
+            Self::Center => 1,
+            Self::Right => 2,
+        }
+    }
+
+    pub const fn legacy_slot(slot: usize) -> Self {
+        match slot {
+            0 => Self::Left,
+            2 => Self::Right,
+            _ => Self::Center,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CompactWidgetPosition {
+    pub alignment: CompactWidgetAlignment,
+    pub index: usize,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CompactWidgetSlot {
     pub slot: usize,
     #[serde(default, deserialize_with = "deserialize_compact_widget_kind")]
     pub widget: Option<CompactWidgetKind>,
+    #[serde(default)]
+    pub alignment: CompactWidgetAlignment,
+}
+
+impl CompactWidgetSlot {
+    pub const fn position(&self) -> CompactWidgetPosition {
+        CompactWidgetPosition {
+            alignment: self.alignment,
+            index: self.slot,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
@@ -373,59 +417,70 @@ pub const AVAILABLE_WIDGETS: [WidgetKind; 3] = [
     WidgetKind::Calendar,
     WidgetKind::ResourceUsage,
 ];
-pub const COMPACT_WIDGET_SLOTS: usize = 3;
 pub const AVAILABLE_COMPACT_WIDGETS: [CompactWidgetKind; 1] = [CompactWidgetKind::Time];
 
 pub fn default_compact_widget_layout() -> Vec<CompactWidgetSlot> {
-    (0..COMPACT_WIDGET_SLOTS)
-        .map(|slot| CompactWidgetSlot { slot, widget: None })
-        .collect()
+    Vec::new()
 }
 
 pub fn normalize_compact_widget_layout(layout: &mut Vec<CompactWidgetSlot>) -> bool {
     let original = layout.clone();
-    layout.retain(|entry| entry.slot < COMPACT_WIDGET_SLOTS);
-    layout.sort_by_key(|entry| entry.slot);
-    layout.dedup_by_key(|entry| entry.slot);
-
+    layout.retain(|entry| entry.widget.is_some());
+    layout.sort_by_key(|entry| (entry.alignment.order(), entry.slot));
     let mut seen = Vec::new();
-    for entry in layout.iter_mut() {
-        if entry.widget.is_some_and(|widget| seen.contains(&widget)) {
-            entry.widget = None;
-        } else if let Some(widget) = entry.widget {
+    layout.retain(|entry| match entry.widget {
+        Some(widget) if !seen.contains(&widget) => {
             seen.push(widget);
+            true
         }
+        _ => false,
+    });
+    let mut next_slots = [0; 3];
+    for entry in layout.iter_mut() {
+        let alignment = entry.alignment.order();
+        entry.slot = next_slots[alignment];
+        next_slots[alignment] += 1;
     }
-    for slot in 0..COMPACT_WIDGET_SLOTS {
-        if !layout.iter().any(|entry| entry.slot == slot) {
-            layout.push(CompactWidgetSlot { slot, widget: None });
-        }
-    }
-    layout.sort_by_key(|entry| entry.slot);
     *layout != original
 }
 
 pub fn place_compact_widget(
     layout: &mut Vec<CompactWidgetSlot>,
     widget: CompactWidgetKind,
-    target_slot: usize,
+    target: CompactWidgetPosition,
 ) {
     normalize_compact_widget_layout(layout);
-    let target_slot = target_slot.min(COMPACT_WIDGET_SLOTS - 1);
-    for entry in layout.iter_mut() {
-        if entry.widget == Some(widget) || entry.slot == target_slot {
-            entry.widget = None;
-        }
-    }
-    if let Some(entry) = layout.iter_mut().find(|entry| entry.slot == target_slot) {
-        entry.widget = Some(widget);
-    }
+    layout.retain(|entry| entry.widget != Some(widget));
+    let target_index = target.index.min(
+        layout
+            .iter()
+            .filter(|entry| entry.alignment == target.alignment)
+            .count(),
+    );
+    let insertion = layout
+        .iter()
+        .position(|entry| {
+            entry.alignment.order() > target.alignment.order()
+                || (entry.alignment == target.alignment && entry.slot >= target_index)
+        })
+        .unwrap_or(layout.len());
+    layout.insert(
+        insertion,
+        CompactWidgetSlot {
+            slot: target_index,
+            widget: Some(widget),
+            alignment: target.alignment,
+        },
+    );
+    normalize_compact_widget_layout(layout);
 }
 
-pub fn clear_compact_widget_slot(layout: &mut [CompactWidgetSlot], target_slot: usize) {
-    if let Some(entry) = layout.iter_mut().find(|entry| entry.slot == target_slot) {
-        entry.widget = None;
-    }
+pub fn clear_compact_widget_slot(
+    layout: &mut Vec<CompactWidgetSlot>,
+    target: CompactWidgetPosition,
+) {
+    layout.retain(|entry| entry.position() != target);
+    normalize_compact_widget_layout(layout);
 }
 
 pub fn widget_footprint(widget: WidgetKind, anchor_slot: usize) -> Vec<usize> {

@@ -1,8 +1,9 @@
 use skia_safe::{Canvas, Color, FontStyle, Paint, Point, Rect};
 
 use crate::core::config::{
-    COMPACT_WIDGET_SLOTS, CompactWidgetKind, CompactWidgetSlot, PluginWidgetSlot,
-    WIDGET_GRID_SLOTS, WidgetKind, WidgetSlot, plugin_widget_slot, span_cells, widget_footprint,
+    CompactWidgetAlignment, CompactWidgetKind, CompactWidgetPosition, CompactWidgetSlot,
+    PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetKind, WidgetSlot, plugin_widget_slot, span_cells,
+    widget_footprint,
 };
 use crate::core::i18n::tr;
 use crate::core::plugin_widget::PluginWidget;
@@ -44,8 +45,8 @@ pub(super) struct WidgetPreviewParams<'a> {
     pub(super) widget_preview_hover_slot: Option<usize>,
     pub(super) compact_widget_layout: &'a [CompactWidgetSlot],
     pub(super) compact_widget_dragging: Option<CompactWidgetKind>,
-    pub(super) compact_widget_drag_hover_slot: Option<usize>,
-    pub(super) compact_widget_preview_hover_slot: Option<usize>,
+    pub(super) compact_widget_drag_hover_slot: Option<CompactWidgetPosition>,
+    pub(super) compact_widget_preview_hover_slot: Option<CompactWidgetPosition>,
     pub(super) theme: &'a SettingsTheme,
 }
 
@@ -224,9 +225,9 @@ fn draw_delete_button(canvas: &Canvas, x: f32, y: f32, scale: f32) {
 }
 
 fn draw_compact_delete_button(canvas: &Canvas, x: f32, y: f32, scale: f32) {
-    let radius = (5.25 * scale).max(5.5);
-    let stroke_width = (1.1 * scale).max(1.15);
-    let arm = (2.0 * scale).max(2.0);
+    let radius = (3.75 * scale).max(4.0);
+    let stroke_width = (0.9 * scale).max(1.0);
+    let arm = (1.35 * scale).max(1.5);
     draw_delete_button_with_metrics(canvas, x, y, radius, stroke_width, arm);
 }
 
@@ -509,45 +510,93 @@ fn draw_compact_grid(
     canvas: &Canvas,
     geometry: &CompactWidgetGridGeom,
     dragging: bool,
-    drop_slot: Option<usize>,
+    drop_position: Option<CompactWidgetPosition>,
     theme: &SettingsTheme,
 ) {
-    for slot in 0..COMPACT_WIDGET_SLOTS {
-        let (x, y, width, height) = geometry.slot_rect(slot);
-        let rect = Rect::from_xywh(x, y, width, height);
-        let radius = height / 2.0;
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_style(skia_safe::paint::Style::Stroke);
-        paint.set_stroke_width(if dragging { 1.0 } else { 0.75 });
-        paint.set_color(Color::from_argb(
-            if dragging { 52 } else { 24 },
-            255,
-            255,
-            255,
-        ));
-        canvas.draw_round_rect(rect, radius, radius, &paint);
-        if drop_slot == Some(slot) {
-            paint.set_style(skia_safe::paint::Style::Fill);
-            paint.set_color(Color::from_argb(
-                86,
-                theme.accent.r(),
-                theme.accent.g(),
-                theme.accent.b(),
-            ));
-            canvas.draw_round_rect(rect, radius, radius, &paint);
-            paint.set_style(skia_safe::paint::Style::Stroke);
-            paint.set_stroke_width(2.0);
-            paint.set_color(theme.accent);
-            canvas.draw_round_rect(rect, radius, radius, &paint);
-        }
+    if !dragging {
+        return;
     }
+    canvas.save();
+    let island_path = g3_rounded_rect_path(
+        Rect::from_xywh(
+            geometry.cap_x,
+            geometry.cap_y,
+            geometry.cap_w,
+            geometry.cap_h,
+        ),
+        geometry.cap_h / 2.0,
+    );
+    canvas.clip_path(&island_path, skia_safe::ClipOp::Intersect, true);
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    if let Some(position) = drop_position {
+        let lane_width = geometry.cap_w / 3.0;
+        let lane = match position.alignment {
+            CompactWidgetAlignment::Left => 0.0,
+            CompactWidgetAlignment::Center => 1.0,
+            CompactWidgetAlignment::Right => 2.0,
+        };
+        paint.set_color(Color::from_argb(
+            24,
+            theme.accent.r(),
+            theme.accent.g(),
+            theme.accent.b(),
+        ));
+        canvas.draw_rect(
+            Rect::from_xywh(
+                geometry.cap_x + lane_width * lane,
+                geometry.cap_y,
+                lane_width,
+                geometry.cap_h,
+            ),
+            &paint,
+        );
+        let indicator_x = geometry.drop_indicator_x(position);
+        paint.set_color(theme.accent);
+        paint.set_stroke_width((1.5 * geometry.cap_scale).clamp(1.5, 2.5));
+        paint.set_stroke_cap(skia_safe::paint::Cap::Round);
+        let inset = geometry.cap_h * 0.27;
+        canvas.draw_line(
+            (indicator_x, geometry.cap_y + inset),
+            (indicator_x, geometry.cap_y + geometry.cap_h - inset),
+            &paint,
+        );
+    }
+    paint.set_color(Color::from_argb(28, 255, 255, 255));
+    paint.set_stroke_width(1.0);
+    for boundary in [1.0, 2.0] {
+        let x = geometry.cap_x + geometry.cap_w * boundary / 3.0;
+        let inset = geometry.cap_h * 0.32;
+        canvas.draw_line(
+            (x, geometry.cap_y + inset),
+            (x, geometry.cap_y + geometry.cap_h - inset),
+            &paint,
+        );
+    }
+    canvas.restore();
 }
 
 fn draw_compact_library_tile(canvas: &Canvas, widget: CompactWidgetKind, rect: Rect) {
-    let preview = Rect::from_xywh(rect.center_x() - 46.0, rect.center_y() - 15.0, 92.0, 30.0);
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
+    paint.set_color(Color::from_argb(8, 255, 255, 255));
+    canvas.draw_round_rect(rect, 12.0, 12.0, &paint);
+    paint.set_style(skia_safe::paint::Style::Stroke);
+    paint.set_stroke_width(0.75);
+    paint.set_color(Color::from_argb(24, 255, 255, 255));
+    canvas.draw_round_rect(
+        Rect::from_xywh(
+            rect.left + 0.375,
+            rect.top + 0.375,
+            rect.width() - 0.75,
+            rect.height() - 0.75,
+        ),
+        12.0,
+        12.0,
+        &paint,
+    );
+    let preview = Rect::from_xywh(rect.center_x() - 46.0, rect.center_y() - 15.0, 92.0, 30.0);
+    paint.set_style(skia_safe::paint::Style::Fill);
     paint.set_color(Color::from_rgb(10, 10, 10));
     canvas.draw_round_rect(
         preview,
@@ -615,7 +664,14 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
         theme.text_sec,
     );
 
-    let geometry = compact_widget_grid_geom(item_y, width, base_width, base_height);
+    let geometry = compact_widget_grid_geom(
+        item_y,
+        width,
+        base_width,
+        base_height,
+        compact_widget_layout,
+        compact_widget_dragging,
+    );
     let island_rect = Rect::from_xywh(
         geometry.cap_x,
         geometry.cap_y,
@@ -643,7 +699,9 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
         if compact_widget_dragging == Some(widget) {
             continue;
         }
-        let (x, y, width, height) = geometry.slot_rect(entry.slot);
+        let Some((x, y, width, height)) = geometry.slot_rect(entry.position()) else {
+            continue;
+        };
         crate::ui::widget::compact::draw_widget(
             canvas,
             widget,
@@ -651,7 +709,7 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
             geometry.cap_scale,
             255,
         );
-        if dragging || compact_widget_preview_hover_slot == Some(entry.slot) {
+        if compact_widget_preview_hover_slot == Some(entry.position()) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
             draw_compact_delete_button(canvas, button_x, button_y, geometry.cap_scale);

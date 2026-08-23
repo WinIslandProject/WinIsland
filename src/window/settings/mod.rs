@@ -93,10 +93,10 @@ pub(crate) const PLUGIN_DETAIL_KEY: u64 = 2_000;
 pub(crate) const SCROLL_STIFFNESS: f32 = 55.0;
 pub(crate) const SCROLL_DAMPING: f32 = 16.0;
 
-pub(crate) fn widget_drag_move_needs_redraw(
+pub(crate) fn widget_drag_move_needs_redraw<T: PartialEq>(
     dragging: bool,
-    current_slot: Option<usize>,
-    new_slot: Option<usize>,
+    current_slot: Option<T>,
+    new_slot: Option<T>,
 ) -> bool {
     dragging || current_slot != new_slot
 }
@@ -180,8 +180,9 @@ pub struct SettingsApp {
     pub(crate) widget_preview_hover_slot: Option<usize>,
     pub(crate) widget_editor_mode: WidgetEditorMode,
     pub(crate) compact_widget_dragging: Option<crate::core::config::CompactWidgetKind>,
-    pub(crate) compact_widget_drag_hover_slot: Option<usize>,
-    pub(crate) compact_widget_preview_hover_slot: Option<usize>,
+    pub(crate) compact_widget_drag_hover_slot: Option<crate::core::config::CompactWidgetPosition>,
+    pub(crate) compact_widget_preview_hover_slot:
+        Option<crate::core::config::CompactWidgetPosition>,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
     pub(crate) plugins: Vec<InstalledPlugin>,
     plugin_inventory_rx: Option<mpsc::Receiver<Vec<InstalledPlugin>>>,

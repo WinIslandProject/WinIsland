@@ -4,7 +4,9 @@ mod widget_preview;
 
 use skia_safe::{Canvas, Rect};
 
-use crate::core::config::{CompactWidgetKind, CompactWidgetSlot, PluginWidgetSlot, WidgetSlot};
+use crate::core::config::{
+    CompactWidgetKind, CompactWidgetPosition, CompactWidgetSlot, PluginWidgetSlot, WidgetSlot,
+};
 use crate::core::plugin_widget::PluginWidget;
 use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::input::{WidgetEditorMode, WidgetSource};
@@ -43,8 +45,8 @@ pub struct DrawItemsParams<'a> {
     pub widget_preview_hover_slot: Option<usize>,
     pub compact_widget_layout: &'a [CompactWidgetSlot],
     pub compact_widget_dragging: Option<CompactWidgetKind>,
-    pub compact_widget_drag_hover_slot: Option<usize>,
-    pub compact_widget_preview_hover_slot: Option<usize>,
+    pub compact_widget_drag_hover_slot: Option<CompactWidgetPosition>,
+    pub compact_widget_preview_hover_slot: Option<CompactWidgetPosition>,
     pub active_source_button: Option<Rect>,
     pub active_stepper_value: Option<ActiveStepperValue<'a>>,
     pub hover_pos: Option<(f32, f32)>,
