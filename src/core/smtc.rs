@@ -12,14 +12,18 @@ mod properties;
 mod session;
 mod worker;
 
-pub(super) struct WinRtGuard;
+pub(super) struct WinRtGuard {
+    _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
+}
 
 impl WinRtGuard {
     pub(super) fn new() -> windows::core::Result<Self> {
         // SAFETY: This initializes Windows Runtime for the current thread in the MTA. Every
         // successful call is balanced by WinRtGuard::drop on the same thread.
         unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
-        Ok(Self)
+        Ok(Self {
+            _not_send: std::marker::PhantomData,
+        })
     }
 }
 
@@ -191,6 +195,7 @@ pub(super) enum PlaybackCommand {
 
 pub struct SmtcListener {
     info_rx: watch::Receiver<MediaInfo>,
+    enabled_tx: watch::Sender<bool>,
     seek_tx: mpsc::UnboundedSender<u64>,
     playback_tx: mpsc::UnboundedSender<PlaybackCommand>,
     lyrics_mode_tx: mpsc::UnboundedSender<LyricsMode>,
@@ -202,12 +207,15 @@ pub struct SmtcListener {
 
 impl SmtcListener {
     pub fn new(
+        enabled: bool,
         mode: String,
         source: String,
         local_dir: Option<String>,
         allowed: Vec<String>,
+        known_apps: Vec<String>,
     ) -> Self {
         let (info_tx, info_rx) = watch::channel(MediaInfo::default());
+        let (enabled_tx, enabled_rx) = watch::channel(enabled);
         let (seek_tx, seek_rx) = mpsc::unbounded_channel();
         let (playback_tx, playback_rx) = mpsc::unbounded_channel();
         let (lyrics_mode_tx, lyrics_mode_rx) = mpsc::unbounded_channel();
@@ -226,12 +234,14 @@ impl SmtcListener {
             worker::smtc_poll_loop(
                 worker::WorkerChannels {
                     info_tx,
+                    enabled_rx,
                     seek_rx,
                     playback_rx,
                     lyrics_mode_rx,
                     lyrics_source_rx,
                     lyrics_local_dir_rx,
                     allowed_apps_rx,
+                    known_apps,
                 },
                 cancel,
             );
@@ -239,6 +249,7 @@ impl SmtcListener {
 
         Self {
             info_rx,
+            enabled_tx,
             seek_tx,
             playback_tx,
             lyrics_mode_tx,
@@ -247,6 +258,17 @@ impl SmtcListener {
             allowed_apps_tx,
             cancel_token,
         }
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled_tx.send_if_modified(|current| {
+            if *current == enabled {
+                false
+            } else {
+                *current = enabled;
+                true
+            }
+        });
     }
 
     pub fn set_allowed_apps(&self, apps: Vec<String>) {
@@ -312,17 +334,19 @@ pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: Ly
             request.local_dir.as_deref(),
         )
         .await;
-        let current = info_tx.borrow();
-        if current.title != request.title
-            || current.artist != request.artist
-            || current.lyrics_fetch_id != request.request_id
-        {
+        let applied = info_tx.send_if_modified(|current| {
+            if current.title != request.title
+                || current.artist != request.artist
+                || current.lyrics_fetch_id != request.request_id
+            {
+                return false;
+            }
+            current.lyrics = lyrics.clone();
+            true
+        });
+        if !applied {
             return;
         }
-        drop(current);
-        let mut new_info = info_tx.borrow().clone();
-        new_info.lyrics = lyrics.clone();
-        let _ = info_tx.send(new_info);
         if let Some(lyrics) = lyrics {
             log::info!("SMTC: lyrics fetched ({} lines)", lyrics.len());
         } else {

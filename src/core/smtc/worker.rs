@@ -7,29 +7,33 @@ use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
 
 use crate::core::lyrics::LyricsMode;
 
-use super::properties::{ThumbnailFetcher, fetch_properties};
+use super::properties::{ThumbnailFetcher, TimelineCache, fetch_properties};
 use super::session::{auto_allow_new_apps, get_target_session};
 use super::{LyricsFetchRequest, MediaInfo, PlaybackCommand, WinRtGuard, spawn_lyrics_fetch};
 
 pub(super) struct WorkerChannels {
     pub(super) info_tx: watch::Sender<MediaInfo>,
+    pub(super) enabled_rx: watch::Receiver<bool>,
     pub(super) seek_rx: mpsc::UnboundedReceiver<u64>,
     pub(super) playback_rx: mpsc::UnboundedReceiver<PlaybackCommand>,
     pub(super) lyrics_mode_rx: mpsc::UnboundedReceiver<LyricsMode>,
     pub(super) lyrics_source_rx: mpsc::UnboundedReceiver<String>,
     pub(super) lyrics_local_dir_rx: mpsc::UnboundedReceiver<Option<String>>,
     pub(super) allowed_apps_rx: mpsc::UnboundedReceiver<Vec<String>>,
+    pub(super) known_apps: Vec<String>,
 }
 
 pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken) {
     let WorkerChannels {
         info_tx,
+        mut enabled_rx,
         mut seek_rx,
         mut playback_rx,
         mut lyrics_mode_rx,
         mut lyrics_source_rx,
         mut lyrics_local_dir_rx,
         mut allowed_apps_rx,
+        mut known_apps,
     } = channels;
     let _winrt_guard = match WinRtGuard::new() {
         Ok(guard) => guard,
@@ -42,13 +46,13 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
     let manager = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
         Ok(op) => match op.join() {
             Ok(m) => m,
-            Err(_) => {
-                log::error!("SMTC: failed to get session manager");
+            Err(error) => {
+                log::error!("SMTC: failed to get session manager: {error}");
                 return;
             }
         },
-        Err(_) => {
-            log::error!("SMTC: RequestAsync failed");
+        Err(error) => {
+            log::error!("SMTC: RequestAsync failed: {error}");
             return;
         }
     };
@@ -60,7 +64,10 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         Ok(())
     });
     let sessions_changed_token = manager.SessionsChanged(&handler).ok();
-    let thumbnail_fetcher = ThumbnailFetcher::new(info_tx.clone());
+    let mut enabled = *enabled_rx.borrow_and_update();
+    let mut thumbnail_fetcher = enabled
+        .then(|| ThumbnailFetcher::new(info_tx.clone()))
+        .flatten();
 
     let mut current_lyrics_mode = LyricsMode::Online;
     let mut current_lyrics_source = "163".to_string();
@@ -82,35 +89,40 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
 
     let mut last_session_seen = Instant::now();
     let mut last_was_playing = false;
+    let mut timeline_cache = TimelineCache::default();
 
-    for attempt in 0..10 {
-        update_media_info(
-            &manager,
-            &info_tx,
-            current_lyrics_mode,
-            &current_lyrics_source,
-            current_lyrics_local_dir.as_deref(),
-            &mut current_allowed_apps,
-            true,
-            &mut last_session_seen,
-            &mut last_was_playing,
-            thumbnail_fetcher.as_ref(),
-        );
-        let info = info_tx.borrow();
-        let timeline_ready = info.duration_ms > 0
-            || info.position_ms > 0
-            || !info.is_playing
-            || info.title.is_empty();
-        if timeline_ready {
-            if attempt > 0 {
-                log::info!("SMTC: initial timeline ready after {} retries", attempt + 1);
+    if enabled {
+        for attempt in 0..10 {
+            update_media_info(
+                &manager,
+                &info_tx,
+                current_lyrics_mode,
+                &current_lyrics_source,
+                current_lyrics_local_dir.as_deref(),
+                &mut current_allowed_apps,
+                &mut known_apps,
+                true,
+                &mut last_session_seen,
+                &mut last_was_playing,
+                thumbnail_fetcher.as_ref(),
+                &mut timeline_cache,
+            );
+            let info = info_tx.borrow();
+            let timeline_ready = info.duration_ms > 0
+                || info.position_ms > 0
+                || !info.is_playing
+                || info.title.is_empty();
+            if timeline_ready {
+                if attempt > 0 {
+                    log::info!("SMTC: initial timeline ready after {} retries", attempt + 1);
+                }
+                drop(info);
+                break;
             }
             drop(info);
-            break;
-        }
-        drop(info);
-        if attempt < 9 {
-            std::thread::sleep(Duration::from_millis(200));
+            if attempt < 9 {
+                std::thread::sleep(Duration::from_millis(200));
+            }
         }
     }
 
@@ -149,6 +161,32 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             current_allowed_apps = apps;
         }
 
+        let next_enabled = *enabled_rx.borrow_and_update();
+        if next_enabled != enabled {
+            enabled = next_enabled;
+            if enabled {
+                thumbnail_fetcher = ThumbnailFetcher::new(info_tx.clone());
+                last_regular_update = Instant::now() - Duration::from_millis(301);
+                last_session_seen = Instant::now();
+                timeline_cache.clear();
+                log::info!("SMTC: listener enabled");
+            } else {
+                thumbnail_fetcher = None;
+                let _ = info_tx.send(MediaInfo::default());
+                last_was_playing = false;
+                timeline_cache.clear();
+                log::info!("SMTC: listener disabled");
+            }
+        }
+
+        if !enabled {
+            while seek_rx.try_recv().is_ok() {}
+            while playback_rx.try_recv().is_ok() {}
+            while event_rx.try_recv().is_ok() {}
+            std::thread::sleep(Duration::from_millis(300));
+            continue;
+        }
+
         let mut seek_pos = None;
         while let Ok(v) = seek_rx.try_recv() {
             seek_pos = Some(v);
@@ -156,17 +194,28 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         if let Some(seek_pos) = seek_pos
             && let Some(session) = get_target_session(&manager, &current_allowed_apps)
         {
+            let seek_pos = seek_pos.min(i64::MAX as u64 / 10_000);
+            let source_app_id = session
+                .SourceAppUserModelId()
+                .map(|id| id.to_string())
+                .unwrap_or_default();
             log::info!("SMTC: seek to {}ms", seek_pos);
             let ticks = seek_pos as i64 * 10_000;
-            let _ = session.TryChangePlaybackPositionAsync(ticks);
-            let mut info = info_tx.borrow().clone();
-            info.position_ms = seek_pos;
-            info.last_update = Instant::now();
-            info.seek_target_ms = seek_pos;
-            info.seek_guard_until = Some(Instant::now() + Duration::from_secs(4));
-            // Do not update last_smtc_pos here: SMTC timeline can lag after seek, and treating
-            // seek_pos as authoritative would make the next poll think SMTC changed and sync back.
-            let _ = info_tx.send(info);
+            match session.TryChangePlaybackPositionAsync(ticks) {
+                Ok(_) => {
+                    info_tx.send_if_modified(|info| {
+                        if info.source_app_id != source_app_id || info.title.is_empty() {
+                            return false;
+                        }
+                        info.position_ms = seek_pos;
+                        info.last_update = Instant::now();
+                        info.seek_target_ms = seek_pos;
+                        info.seek_guard_until = Some(Instant::now() + Duration::from_secs(4));
+                        true
+                    });
+                }
+                Err(error) => log::warn!("SMTC: failed to start seek: {error}"),
+            }
         }
 
         while let Ok(cmd) = playback_rx.try_recv() {
@@ -203,10 +252,12 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
                 &current_lyrics_source,
                 current_lyrics_local_dir.as_deref(),
                 &mut current_allowed_apps,
+                &mut known_apps,
                 true,
                 &mut last_session_seen,
                 &mut last_was_playing,
                 thumbnail_fetcher.as_ref(),
+                &mut timeline_cache,
             );
             last_regular_update = Instant::now();
         }
@@ -221,10 +272,12 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
                 &current_lyrics_source,
                 current_lyrics_local_dir.as_deref(),
                 &mut current_allowed_apps,
+                &mut known_apps,
                 do_auto_allow,
                 &mut last_session_seen,
                 &mut last_was_playing,
                 thumbnail_fetcher.as_ref(),
+                &mut timeline_cache,
             );
             last_regular_update = Instant::now();
         }
@@ -247,31 +300,52 @@ fn update_media_info(
     lyrics_source: &str,
     local_dir: Option<&str>,
     allowed_apps: &mut Vec<String>,
+    known_apps: &mut Vec<String>,
     auto_allow: bool,
     last_session_seen: &mut Instant,
     last_was_playing: &mut bool,
     thumbnail_fetcher: Option<&ThumbnailFetcher>,
+    timeline_cache: &mut TimelineCache,
 ) {
     if auto_allow {
-        *allowed_apps = auto_allow_new_apps(manager, allowed_apps);
+        *allowed_apps = auto_allow_new_apps(manager, allowed_apps, known_apps);
     }
 
     if let Some(session) = get_target_session(manager, allowed_apps) {
-        *last_session_seen = Instant::now();
-        let _ = fetch_properties(
+        let result = fetch_properties(
             &session,
             info_tx,
             lyrics_mode,
             lyrics_source,
             local_dir,
             thumbnail_fetcher,
+            timeline_cache,
         );
-        *last_was_playing = info_tx.borrow().is_playing;
+        match result {
+            Ok(()) => {
+                *last_session_seen = Instant::now();
+                *last_was_playing = info_tx.borrow().is_playing;
+            }
+            Err(error) => {
+                log::debug!("SMTC: failed to read active session: {error}");
+                if last_session_seen.elapsed() > Duration::from_secs(5) {
+                    let info = info_tx.borrow();
+                    if !info.title.is_empty() {
+                        drop(info);
+                        let _ = info_tx.send(MediaInfo::default());
+                        timeline_cache.clear();
+                        *last_was_playing = false;
+                        log::warn!("SMTC: active session failed for >5s, cleared media info");
+                    }
+                }
+            }
+        }
     } else if *last_was_playing {
         let info = info_tx.borrow();
         if !info.title.is_empty() {
             drop(info);
             let _ = info_tx.send(MediaInfo::default());
+            timeline_cache.clear();
             log::info!("SMTC: app closed while playing, cleared immediately");
         }
         *last_was_playing = false;
@@ -280,6 +354,7 @@ fn update_media_info(
         if !info.title.is_empty() {
             drop(info);
             let _ = info_tx.send(MediaInfo::default());
+            timeline_cache.clear();
             log::info!("SMTC: paused session lost for >15s, cleared media info");
         }
     }
@@ -291,17 +366,24 @@ fn refresh_current_lyrics(
     lyrics_source: &str,
     local_dir: Option<&str>,
 ) {
-    let mut info = info_tx.borrow().clone();
-    if info.title.is_empty() {
+    let mut request = None;
+    info_tx.send_if_modified(|info| {
+        if info.title.is_empty() {
+            return false;
+        }
+        info.lyrics = None;
+        info.lyrics_fetch_id = info.lyrics_fetch_id.wrapping_add(1);
+        request = Some((
+            info.title.clone(),
+            info.artist.clone(),
+            info.duration_secs,
+            info.lyrics_fetch_id,
+        ));
+        true
+    });
+    let Some((title, artist, duration_secs, request_id)) = request else {
         return;
-    }
-    info.lyrics = None;
-    info.lyrics_fetch_id = info.lyrics_fetch_id.wrapping_add(1);
-    let title = info.title.clone();
-    let artist = info.artist.clone();
-    let duration_secs = info.duration_secs;
-    let request_id = info.lyrics_fetch_id;
-    let _ = info_tx.send(info);
+    };
     spawn_lyrics_fetch(
         info_tx,
         LyricsFetchRequest {

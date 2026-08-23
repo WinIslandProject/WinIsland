@@ -21,6 +21,7 @@ const THUMBNAIL_COMPRESSION_FAILED: windows::core::HRESULT = windows::core::HRES
 #[derive(Clone)]
 struct ThumbnailFetchRequest {
     session: GlobalSystemMediaTransportControlsSession,
+    source_app_id: String,
     title: String,
     artist: String,
     album: String,
@@ -95,6 +96,7 @@ impl ThumbnailFetcher {
     fn request(
         &self,
         session: &GlobalSystemMediaTransportControlsSession,
+        source_app_id: String,
         title: String,
         artist: String,
         album: String,
@@ -107,6 +109,7 @@ impl ThumbnailFetcher {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *request = Some(ThumbnailFetchRequest {
             session: session.clone(),
+            source_app_id,
             title,
             artist,
             album,
@@ -126,11 +129,19 @@ impl Drop for ThumbnailFetcher {
     }
 }
 
-thread_local! {
-    static LAST_TIMELINE_FETCH: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
-    static LAST_FETCHED_SMTC_POS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    static LAST_FETCHED_DURATION_SECS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    static LAST_FETCHED_DURATION_MS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+#[derive(Default)]
+pub(super) struct TimelineCache {
+    source_app_id: String,
+    last_fetch: Option<Instant>,
+    position_ms: u64,
+    duration_secs: u64,
+    duration_ms: u64,
+}
+
+impl TimelineCache {
+    pub(super) fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 
 pub(super) fn fetch_properties(
@@ -140,6 +151,7 @@ pub(super) fn fetch_properties(
     lyrics_source: &str,
     local_dir: Option<&str>,
     thumbnail_fetcher: Option<&ThumbnailFetcher>,
+    timeline_cache: &mut TimelineCache,
 ) -> windows::core::Result<()> {
     if !is_music_session(session) {
         let info = info_tx.borrow();
@@ -157,54 +169,68 @@ pub(super) fn fetch_properties(
     let new_title = props.Title()?.to_string();
     let new_artist = props.Artist()?.to_string();
     let new_album = props.AlbumTitle()?.to_string();
-    let source_app_id = session
-        .SourceAppUserModelId()
-        .map(|id| id.to_string())
-        .unwrap_or_default();
+    let source_app_id = session.SourceAppUserModelId()?.to_string();
 
     let song_changed = {
         let info = info_tx.borrow();
-        info.title != new_title || info.artist != new_artist || info.album != new_album
+        info.title != new_title
+            || info.artist != new_artist
+            || info.album != new_album
+            || info.source_app_id != source_app_id
     };
 
     let should_fetch = song_changed
         || (info_tx.borrow().is_playing != is_playing)
-        || LAST_TIMELINE_FETCH.with(|cell| match cell.get() {
-            Some(last) => last.elapsed() >= Duration::from_millis(500),
-            None => true,
-        });
+        || timeline_cache.source_app_id != source_app_id
+        || timeline_cache
+            .last_fetch
+            .is_none_or(|last| last.elapsed() >= Duration::from_millis(500));
 
-    let (smtc_pos, duration_secs, duration_ms_from_tl) = read_timeline(session, should_fetch);
+    let (smtc_pos, duration_secs, duration_ms_from_tl) = read_timeline(
+        session,
+        &source_app_id,
+        should_fetch,
+        song_changed,
+        timeline_cache,
+    );
 
     let mut should_fetch_lyrics = false;
     let mut should_fetch_thumbnail = false;
+    let mut lyrics_request_id = 0;
 
-    {
-        let mut info = info_tx.borrow().clone();
-        let song_changed =
-            info.title != new_title || info.artist != new_artist || info.album != new_album;
+    info_tx.send_if_modified(|info| {
+        let song_changed = info.title != new_title
+            || info.artist != new_artist
+            || info.album != new_album
+            || info.source_app_id != source_app_id;
+        let mut notify = false;
         if song_changed {
             log::info!(
-                "SMTC: track changed -> {} - {} / {}",
+                "SMTC: track changed -> {} - {} / {} ({})",
                 new_title,
                 new_artist,
-                new_album
+                new_album,
+                source_app_id
             );
-            info.title = new_title.clone();
-            info.artist = new_artist.clone();
-            info.album = new_album.clone();
+            info.title.clone_from(&new_title);
+            info.artist.clone_from(&new_artist);
+            info.album.clone_from(&new_album);
             info.duration_secs = duration_secs;
             info.duration_ms = duration_ms_from_tl;
             info.lyrics = None;
             info.lyrics_fetch_id = info.lyrics_fetch_id.wrapping_add(1);
+            lyrics_request_id = info.lyrics_fetch_id;
             info.thumbnail = None;
             info.thumbnail_hash = 0;
             info.position_ms = smtc_pos;
             info.last_smtc_pos = smtc_pos;
             info.last_update = Instant::now();
+            info.seek_target_ms = 0;
+            info.seek_guard_until = None;
             info.last_thumbnail_fetch = Instant::now();
-            should_fetch_lyrics = true;
-            should_fetch_thumbnail = true;
+            should_fetch_lyrics = !new_title.trim().is_empty();
+            should_fetch_thumbnail = should_fetch_lyrics;
+            notify = true;
         } else if info.thumbnail.is_none()
             && !new_title.is_empty()
             && (info.is_playing != is_playing
@@ -227,6 +253,9 @@ pub(super) fn fetch_properties(
             && info
                 .seek_guard_until
                 .is_some_and(|until| Instant::now() < until);
+        if !seek_guard_active && info.seek_guard_until.is_some() {
+            info.seek_guard_until = None;
+        }
         if seek_guard_active
             && smtc_pos > 0
             && (smtc_pos as i64 - info.seek_target_ms as i64).abs() < 1500
@@ -245,26 +274,37 @@ pub(super) fn fetch_properties(
                 info.position_ms = smtc_pos;
             }
             info.last_update = Instant::now();
+            notify = true;
         }
 
         let was_playing = info.is_playing;
         info.last_smtc_pos = smtc_pos;
         info.is_playing = is_playing;
-        info.source_app_id = source_app_id;
+        if was_playing != is_playing {
+            notify = true;
+        }
+        if info.source_app_id != source_app_id {
+            info.source_app_id.clone_from(&source_app_id);
+            notify = true;
+        }
         if !song_changed && was_playing != is_playing {
             log::info!(
                 "SMTC: playback state -> {}",
                 if is_playing { "Playing" } else { "Paused" }
             );
         }
-        info.duration_secs = duration_secs;
-        info.duration_ms = duration_ms_from_tl;
-        let _ = info_tx.send(info);
-    }
+        if info.duration_secs != duration_secs || info.duration_ms != duration_ms_from_tl {
+            info.duration_secs = duration_secs;
+            info.duration_ms = duration_ms_from_tl;
+            notify = true;
+        }
+        notify
+    });
 
     if should_fetch_thumbnail && let Some(thumbnail_fetcher) = thumbnail_fetcher {
         thumbnail_fetcher.request(
             session,
+            source_app_id.clone(),
             new_title.clone(),
             new_artist.clone(),
             new_album.clone(),
@@ -273,7 +313,6 @@ pub(super) fn fetch_properties(
     }
 
     if should_fetch_lyrics {
-        let request_id = info_tx.borrow().lyrics_fetch_id;
         spawn_lyrics_fetch(
             info_tx,
             LyricsFetchRequest {
@@ -283,7 +322,7 @@ pub(super) fn fetch_properties(
                 mode: lyrics_mode,
                 source: lyrics_source.to_string(),
                 local_dir: local_dir.map(str::to_string),
-                request_id,
+                request_id: lyrics_request_id,
             },
         );
     }
@@ -292,19 +331,22 @@ pub(super) fn fetch_properties(
 
 fn read_timeline(
     session: &GlobalSystemMediaTransportControlsSession,
+    source_app_id: &str,
     should_fetch: bool,
+    reset_cache: bool,
+    cache: &mut TimelineCache,
 ) -> (u64, u64, u64) {
+    if reset_cache || cache.source_app_id != source_app_id {
+        cache.clear();
+        cache.source_app_id = source_app_id.to_string();
+    }
     if !should_fetch {
-        return (
-            LAST_FETCHED_SMTC_POS.with(|cell| cell.get()),
-            LAST_FETCHED_DURATION_SECS.with(|cell| cell.get()),
-            LAST_FETCHED_DURATION_MS.with(|cell| cell.get()),
-        );
+        return (cache.position_ms, cache.duration_secs, cache.duration_ms);
     }
 
     let Ok(tl) = session.GetTimelineProperties() else {
-        LAST_TIMELINE_FETCH.with(|cell| cell.set(Some(Instant::now())));
-        return (0, 0, 0);
+        cache.last_fetch = Some(Instant::now());
+        return (cache.position_ms, cache.duration_secs, cache.duration_ms);
     };
 
     let smtc_pos = tl
@@ -333,10 +375,12 @@ fn read_timeline(
         })
         .unwrap_or((0, 0));
 
-    LAST_TIMELINE_FETCH.with(|cell| cell.set(Some(Instant::now())));
-    LAST_FETCHED_SMTC_POS.with(|cell| cell.set(smtc_pos));
-    LAST_FETCHED_DURATION_SECS.with(|cell| cell.set(duration_secs));
-    LAST_FETCHED_DURATION_MS.with(|cell| cell.set(duration_ms));
+    cache.source_app_id.clear();
+    cache.source_app_id.push_str(source_app_id);
+    cache.last_fetch = Some(Instant::now());
+    cache.position_ms = smtc_pos;
+    cache.duration_secs = duration_secs;
+    cache.duration_ms = duration_ms;
     (smtc_pos, duration_secs, duration_ms)
 }
 
@@ -414,18 +458,23 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
             bytes.hash(&mut hasher);
             let hash = hasher.finish();
 
-            let current = info_tx.borrow();
-            if current.title == request.title
-                && current.artist == request.artist
-                && current.album == request.album
-                && current.thumbnail_hash != hash
-            {
-                drop(current);
-                let mut new_info = info_tx.borrow().clone();
-                let byte_len = bytes.len();
-                new_info.thumbnail = Some(Data::new_copy(&bytes));
-                new_info.thumbnail_hash = hash;
-                let _ = info_tx.send(new_info);
+            let byte_len = bytes.len();
+            let data = Data::new_copy(&bytes);
+            let applied = info_tx.send_if_modified(|current| {
+                if current.title != request.title
+                    || current.artist != request.artist
+                    || current.album != request.album
+                    || current.source_app_id != request.source_app_id
+                    || current.thumbnail.is_some()
+                    || current.thumbnail_hash == hash
+                {
+                    return false;
+                }
+                current.thumbnail = Some(data);
+                current.thumbnail_hash = hash;
+                true
+            });
+            if applied {
                 log::info!(
                     "SMTC: thumbnail fetched ({} bytes, hash={:#x})",
                     byte_len,
@@ -471,5 +520,6 @@ fn thumbnail_request_is_current(
     current.title == request.title
         && current.artist == request.artist
         && current.album == request.album
+        && current.source_app_id == request.source_app_id
         && current.thumbnail.is_none()
 }

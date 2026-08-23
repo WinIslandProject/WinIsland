@@ -410,6 +410,7 @@ impl App {
                         .set_lyrics_local_dir(self.config.lyrics_local_dir.clone());
                     self.smtc.set_allowed_apps(self.config.smtc_apps.clone());
                     if old_smtc_enabled != self.config.smtc_enabled {
+                        self.smtc.set_enabled(self.config.smtc_enabled);
                         self.audio.set_target_app_id(self.audio_target_app_id());
                     }
 

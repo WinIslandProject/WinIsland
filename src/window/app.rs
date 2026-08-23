@@ -134,10 +134,12 @@ impl Default for App {
             springs: IslandSprings::new(&config),
             geom: WindowGeometry::default(),
             smtc: SmtcListener::new(
+                config.smtc_enabled,
                 config.lyrics_mode.clone(),
                 config.lyrics_source.clone(),
                 config.lyrics_local_dir.clone(),
                 config.smtc_apps.clone(),
+                config.smtc_known_apps.clone(),
             ),
             audio: AudioProcessor::new(),
             compact_overlay: CompactOverlay::default(),
