@@ -231,13 +231,7 @@ impl D3DRenderer {
             .get_mut(index)
             .ok_or_else(|| "DXGI returned an invalid back buffer index".to_string())?;
         let output = draw(&mut self.direct_context, surface);
-        self.direct_context.flush_surface(surface);
-        if !self.direct_context.submit(None) {
-            return Err(format!(
-                "Skia failed to submit D3D12 work: {}",
-                device_status(&device)
-            ));
-        }
+        self.direct_context.flush_and_submit_surface(surface, None);
         check_context(&mut self.direct_context, &device, "after submitting")?;
         let present_result = unsafe {
             // SAFETY: The current back buffer is rendered and submitted before presentation.
