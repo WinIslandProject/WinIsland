@@ -244,7 +244,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         }
 
         if event_rx.try_recv().is_ok() {
-            log::info!("SMTC: session change event received, updating immediately");
+            log::debug!("SMTC: session change event received, updating immediately");
             update_media_info(
                 &manager,
                 &info_tx,

@@ -3,7 +3,10 @@ use std::time::{Duration, Instant};
 
 use skia_safe::Data;
 use tokio::sync::watch;
-use windows::Media::Control::GlobalSystemMediaTransportControlsSession;
+use windows::Media::Control::{
+    GlobalSystemMediaTransportControlsSession,
+    GlobalSystemMediaTransportControlsSessionMediaProperties,
+};
 use windows::Storage::Streams::DataReader;
 
 use crate::core::lyrics::LyricsMode;
@@ -17,14 +20,64 @@ const MAX_THUMBNAIL_STREAM_BYTES: u64 = 64 * 1024 * 1024;
 const THUMBNAIL_STALE: windows::core::HRESULT = windows::core::HRESULT(-2);
 const THUMBNAIL_TOO_LARGE: windows::core::HRESULT = windows::core::HRESULT(-3);
 const THUMBNAIL_COMPRESSION_FAILED: windows::core::HRESULT = windows::core::HRESULT(-4);
+static NEXT_TRACK_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+struct MediaMetadata {
+    title: String,
+    artist: String,
+    album: String,
+}
+
+impl MediaMetadata {
+    fn read(props: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Self {
+        let raw_title = read_string(props.Title());
+        let subtitle = read_string(props.Subtitle());
+        let album = read_string(props.AlbumTitle());
+        let raw_artist = read_string(props.Artist());
+        let album_artist = read_string(props.AlbumArtist());
+
+        let title = if !raw_title.is_empty() {
+            raw_title
+        } else if !album.is_empty() {
+            album.clone()
+        } else {
+            subtitle.clone()
+        };
+        let artist = if !raw_artist.is_empty() {
+            raw_artist
+        } else if !album_artist.is_empty() {
+            album_artist
+        } else if subtitle != title {
+            subtitle
+        } else {
+            String::new()
+        };
+
+        Self {
+            title,
+            artist,
+            album,
+        }
+    }
+}
+
+fn read_string(value: windows::core::Result<windows::core::HSTRING>) -> String {
+    value
+        .map(|value| value.to_string().trim().to_string())
+        .unwrap_or_default()
+}
+
+fn next_track_id() -> u64 {
+    NEXT_TRACK_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 #[derive(Clone)]
 struct ThumbnailFetchRequest {
     session: GlobalSystemMediaTransportControlsSession,
     source_app_id: String,
+    track_id: u64,
     title: String,
     artist: String,
-    album: String,
     is_song_change: bool,
 }
 
@@ -97,9 +150,9 @@ impl ThumbnailFetcher {
         &self,
         session: &GlobalSystemMediaTransportControlsSession,
         source_app_id: String,
+        track_id: u64,
         title: String,
         artist: String,
-        album: String,
         is_song_change: bool,
     ) {
         let mut request = self
@@ -110,9 +163,9 @@ impl ThumbnailFetcher {
         *request = Some(ThumbnailFetchRequest {
             session: session.clone(),
             source_app_id,
+            track_id,
             title,
             artist,
-            album,
             is_song_change,
         });
         drop(request);
@@ -166,17 +219,15 @@ pub(super) fn fetch_properties(
     let pb_info = session.GetPlaybackInfo()?;
     let is_playing = pb_info.PlaybackStatus()? == windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
 
-    let new_title = props.Title()?.to_string();
-    let new_artist = props.Artist()?.to_string();
-    let new_album = props.AlbumTitle()?.to_string();
+    let metadata = MediaMetadata::read(&props);
+    let new_title = &metadata.title;
+    let new_artist = &metadata.artist;
+    let new_album = &metadata.album;
     let source_app_id = session.SourceAppUserModelId()?.to_string();
 
     let song_changed = {
         let info = info_tx.borrow();
-        info.title != new_title
-            || info.artist != new_artist
-            || info.album != new_album
-            || info.source_app_id != source_app_id
+        is_new_track(&info, &metadata, &source_app_id)
     };
 
     let should_fetch = song_changed
@@ -194,15 +245,11 @@ pub(super) fn fetch_properties(
         timeline_cache,
     );
 
-    let mut should_fetch_lyrics = false;
-    let mut should_fetch_thumbnail = false;
-    let mut lyrics_request_id = 0;
+    let mut lyrics_request = None;
+    let mut thumbnail_request = None;
 
     info_tx.send_if_modified(|info| {
-        let song_changed = info.title != new_title
-            || info.artist != new_artist
-            || info.album != new_album
-            || info.source_app_id != source_app_id;
+        let song_changed = is_new_track(info, &metadata, &source_app_id);
         let mut notify = false;
         if song_changed {
             log::info!(
@@ -212,14 +259,15 @@ pub(super) fn fetch_properties(
                 new_album,
                 source_app_id
             );
-            info.title.clone_from(&new_title);
-            info.artist.clone_from(&new_artist);
-            info.album.clone_from(&new_album);
+            info.title.clone_from(new_title);
+            info.artist.clone_from(new_artist);
+            info.album.clone_from(new_album);
+            info.source_app_id.clone_from(&source_app_id);
+            info.track_id = next_track_id();
             info.duration_secs = duration_secs;
             info.duration_ms = duration_ms_from_tl;
             info.lyrics = None;
             info.lyrics_fetch_id = info.lyrics_fetch_id.wrapping_add(1);
-            lyrics_request_id = info.lyrics_fetch_id;
             info.thumbnail = None;
             info.thumbnail_hash = 0;
             info.position_ms = smtc_pos;
@@ -228,16 +276,50 @@ pub(super) fn fetch_properties(
             info.seek_target_ms = 0;
             info.seek_guard_until = None;
             info.last_thumbnail_fetch = Instant::now();
-            should_fetch_lyrics = !new_title.trim().is_empty();
-            should_fetch_thumbnail = should_fetch_lyrics;
+            lyrics_request = Some((
+                info.title.clone(),
+                info.artist.clone(),
+                info.lyrics_fetch_id,
+            ));
+            thumbnail_request =
+                Some((info.track_id, info.title.clone(), info.artist.clone(), true));
             notify = true;
-        } else if info.thumbnail.is_none()
-            && !new_title.is_empty()
-            && (info.is_playing != is_playing
-                || info.last_thumbnail_fetch.elapsed() >= Duration::from_secs(5))
+        } else if new_title.is_empty()
+            && info.source_app_id != source_app_id
+            && !info.title.is_empty()
         {
-            info.last_thumbnail_fetch = Instant::now();
-            should_fetch_thumbnail = true;
+            *info = MediaInfo::default();
+            return true;
+        } else if !new_title.is_empty() {
+            let artist_enriched = info.artist.is_empty() && !new_artist.is_empty();
+            if artist_enriched {
+                info.artist.clone_from(new_artist);
+                if info.lyrics.is_none() {
+                    info.lyrics_fetch_id = info.lyrics_fetch_id.wrapping_add(1);
+                    lyrics_request = Some((
+                        info.title.clone(),
+                        info.artist.clone(),
+                        info.lyrics_fetch_id,
+                    ));
+                }
+                notify = true;
+            }
+            if info.album.is_empty() && !new_album.is_empty() {
+                info.album.clone_from(new_album);
+                notify = true;
+            }
+            if info.thumbnail.is_none()
+                && (info.is_playing != is_playing
+                    || info.last_thumbnail_fetch.elapsed() >= Duration::from_secs(5))
+            {
+                info.last_thumbnail_fetch = Instant::now();
+                thumbnail_request = Some((
+                    info.track_id,
+                    info.title.clone(),
+                    info.artist.clone(),
+                    false,
+                ));
+            }
         }
         let current_extrapolated = if info.is_playing {
             info.position_ms
@@ -283,7 +365,7 @@ pub(super) fn fetch_properties(
         if was_playing != is_playing {
             notify = true;
         }
-        if info.source_app_id != source_app_id {
+        if !new_title.is_empty() && info.source_app_id != source_app_id {
             info.source_app_id.clone_from(&source_app_id);
             notify = true;
         }
@@ -301,32 +383,47 @@ pub(super) fn fetch_properties(
         notify
     });
 
-    if should_fetch_thumbnail && let Some(thumbnail_fetcher) = thumbnail_fetcher {
+    if let Some((track_id, title, artist, is_song_change)) = thumbnail_request
+        && let Some(thumbnail_fetcher) = thumbnail_fetcher
+    {
         thumbnail_fetcher.request(
             session,
             source_app_id.clone(),
-            new_title.clone(),
-            new_artist.clone(),
-            new_album.clone(),
-            should_fetch_lyrics,
+            track_id,
+            title,
+            artist,
+            is_song_change,
         );
     }
 
-    if should_fetch_lyrics {
+    if let Some((title, artist, request_id)) = lyrics_request {
         spawn_lyrics_fetch(
             info_tx,
             LyricsFetchRequest {
-                title: new_title.clone(),
-                artist: new_artist.clone(),
+                title,
+                artist,
                 duration_secs,
                 mode: lyrics_mode,
                 source: lyrics_source.to_string(),
                 local_dir: local_dir.map(str::to_string),
-                request_id: lyrics_request_id,
+                request_id,
             },
         );
     }
     Ok(())
+}
+
+fn is_new_track(info: &MediaInfo, metadata: &MediaMetadata, source_app_id: &str) -> bool {
+    if metadata.title.is_empty() {
+        return false;
+    }
+    info.title.is_empty()
+        || info.source_app_id != source_app_id
+        || info.title != metadata.title
+        || (!info.artist.is_empty()
+            && !metadata.artist.is_empty()
+            && info.artist != metadata.artist)
+        || (!info.album.is_empty() && !metadata.album.is_empty() && info.album != metadata.album)
 }
 
 fn read_timeline(
@@ -394,13 +491,8 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
         }
         let res = (|| -> windows::core::Result<Vec<u8>> {
             let props = request.session.TryGetMediaPropertiesAsync()?.join()?;
-            let fetched_title = props.Title()?.to_string();
-            let fetched_artist = props.Artist()?.to_string();
-            let fetched_album = props.AlbumTitle()?.to_string();
-            if fetched_title != request.title
-                || fetched_artist != request.artist
-                || fetched_album != request.album
-            {
+            let fetched_metadata = MediaMetadata::read(&props);
+            if fetched_metadata.title != request.title {
                 return Err(windows::core::Error::new(
                     THUMBNAIL_STALE,
                     "Stale properties",
@@ -461,9 +553,7 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
             let byte_len = bytes.len();
             let data = Data::new_copy(&bytes);
             let applied = info_tx.send_if_modified(|current| {
-                if current.title != request.title
-                    || current.artist != request.artist
-                    || current.album != request.album
+                if current.track_id != request.track_id
                     || current.source_app_id != request.source_app_id
                     || current.thumbnail.is_some()
                     || current.thumbnail_hash == hash
@@ -517,9 +607,7 @@ fn thumbnail_request_is_current(
     request: &ThumbnailFetchRequest,
 ) -> bool {
     let current = info_tx.borrow();
-    current.title == request.title
-        && current.artist == request.artist
-        && current.album == request.album
+    current.track_id == request.track_id
         && current.source_app_id == request.source_app_id
         && current.thumbnail.is_none()
 }
