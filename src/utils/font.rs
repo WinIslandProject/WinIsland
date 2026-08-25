@@ -1,4 +1,4 @@
-use skia_safe::{Canvas, Font, FontMgr, FontStyle, Paint, Typeface};
+use skia_safe::{Canvas, Font, FontMgr, FontStyle, Paint, Path, Typeface};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -10,6 +10,7 @@ type TextGroup = (String, Typeface, bool, f32);
 type TextGroups = Vec<TextGroup>;
 type TextCacheValue = (f32, TextGroups);
 type TextCacheMap = HashMap<u64, TextCacheValue>;
+type TextPathCacheMap = HashMap<u64, Vec<Path>>;
 
 pub struct DrawTextInRectParams<'a> {
     pub canvas: &'a Canvas,
@@ -46,6 +47,7 @@ thread_local! {
     static FONT_MGR: FontMgr = FontMgr::new();
     static FALLBACK_CACHE: RefCell<HashMap<(char, u32), Typeface>> = RefCell::new(HashMap::new());
     static TEXT_CACHE: RefCell<TextCacheMap> = RefCell::new(HashMap::new());
+    static TEXT_PATH_CACHE: RefCell<TextPathCacheMap> = RefCell::new(HashMap::new());
     static CUSTOM_TYPEFACE: RefCell<CustomTypefaceState> = const { RefCell::new(CustomTypefaceState {
         path: None,
         typeface: None,
@@ -55,6 +57,7 @@ thread_local! {
 
 const FALLBACK_CACHE_LIMIT: usize = 2000;
 const TEXT_CACHE_LIMIT: usize = 500;
+const TEXT_PATH_CACHE_LIMIT: usize = 100;
 
 fn evict_one_if_full<K, V>(cache: &mut HashMap<K, V>, limit: usize)
 where
@@ -239,6 +242,24 @@ fn compute_text_groups(text: &str, size: f32, style: FontStyle) -> (f32, TextGro
     (current_w, groups)
 }
 
+fn compute_text_paths(text: &str, size: f32, style: FontStyle) -> Vec<Path> {
+    let (_, groups) = compute_text_groups(text, size, style);
+    let mut x = 0.0;
+    groups
+        .into_iter()
+        .map(|(text, typeface, embolden, width)| {
+            let mut font = Font::from_typeface(typeface, size);
+            font.set_subpixel(true);
+            if embolden {
+                font.set_embolden(true);
+            }
+            let path = skia_safe::utils::text_utils::get_path(text.as_str(), (x, 0.0), &font);
+            x += width;
+            path
+        })
+        .collect()
+}
+
 impl FontManager {
     pub fn global() -> &'static FontManager {
         GLOBAL_FONT_MANAGER.get_or_init(|| FontManager { _marker: () })
@@ -253,6 +274,7 @@ impl FontManager {
             state.load_attempted = false;
         });
         TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
+        TEXT_PATH_CACHE.with(|cache| cache.borrow_mut().clear());
         FALLBACK_CACHE.with(|cache| cache.borrow_mut().clear());
     }
 
@@ -345,6 +367,30 @@ impl FontManager {
                 params.canvas.draw_str(&**s, (x, y), &font, params.paint);
                 x += *width;
             }
+        });
+    }
+
+    pub fn draw_text_as_paths_cached(&self, params: DrawTextCachedParams<'_>) {
+        let style = if params.bold {
+            FontStyle::bold()
+        } else {
+            FontStyle::normal()
+        };
+        let cache_key = hash_cache_key(params.text, style, params.size);
+        TEXT_PATH_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if !cache.contains_key(&cache_key) {
+                evict_one_if_full(&mut cache, TEXT_PATH_CACHE_LIMIT);
+            }
+            let paths = cache
+                .entry(cache_key)
+                .or_insert_with(|| compute_text_paths(params.text, params.size, style));
+            params.canvas.save();
+            params.canvas.translate((params.x, params.y));
+            for path in paths {
+                params.canvas.draw_path(path, params.paint);
+            }
+            params.canvas.restore();
         });
     }
 }

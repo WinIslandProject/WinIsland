@@ -727,6 +727,7 @@ fn draw_track_text(params: TrackTextParams) {
             style: title_style,
             paint: &text_paint,
             scale,
+            render_as_paths: true,
         });
     });
 
@@ -756,6 +757,7 @@ fn draw_track_text(params: TrackTextParams) {
             style: artist_style,
             paint: &text_paint,
             scale,
+            render_as_paths: true,
         });
     });
 }

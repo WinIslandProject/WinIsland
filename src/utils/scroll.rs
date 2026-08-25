@@ -12,6 +12,7 @@ pub struct ScrollDrawParams<'a> {
     pub style: FontStyle,
     pub paint: &'a Paint,
     pub scale: f32,
+    pub render_as_paths: bool,
 }
 
 pub struct ScrollText {
@@ -48,6 +49,7 @@ impl ScrollText {
         let style = params.style;
         let paint = params.paint;
         let scale = params.scale;
+        let render_as_paths = params.render_as_paths;
 
         if self.last_text != text {
             self.last_text = text.to_string();
@@ -79,40 +81,57 @@ impl ScrollText {
                 true,
             );
 
-            FontManager::global().draw_text_cached(DrawTextCachedParams {
-                canvas,
-                text,
-                x: x - self.offset,
-                y,
-                size,
-                bold: *style.weight() >= 700,
-                paint,
-            });
-            let next_x = x - self.offset + full_w + 50.0 * scale;
-            if next_x < x + max_w {
-                FontManager::global().draw_text_cached(DrawTextCachedParams {
+            draw_text(
+                DrawTextCachedParams {
                     canvas,
                     text,
-                    x: next_x,
+                    x: x - self.offset,
                     y,
                     size,
                     bold: *style.weight() >= 700,
                     paint,
-                });
+                },
+                render_as_paths,
+            );
+            let next_x = x - self.offset + full_w + 50.0 * scale;
+            if next_x < x + max_w {
+                draw_text(
+                    DrawTextCachedParams {
+                        canvas,
+                        text,
+                        x: next_x,
+                        y,
+                        size,
+                        bold: *style.weight() >= 700,
+                        paint,
+                    },
+                    render_as_paths,
+                );
             }
             canvas.restore();
         } else {
             self.offset = 0.0;
-            FontManager::global().draw_text_cached(DrawTextCachedParams {
-                canvas,
-                text,
-                x,
-                y,
-                size,
-                bold: *style.weight() >= 700,
-                paint,
-            });
+            draw_text(
+                DrawTextCachedParams {
+                    canvas,
+                    text,
+                    x,
+                    y,
+                    size,
+                    bold: *style.weight() >= 700,
+                    paint,
+                },
+                render_as_paths,
+            );
         }
+    }
+}
+
+fn draw_text(params: DrawTextCachedParams<'_>, render_as_paths: bool) {
+    if render_as_paths {
+        FontManager::global().draw_text_as_paths_cached(params);
+    } else {
+        FontManager::global().draw_text_cached(params);
     }
 }
 

@@ -835,6 +835,7 @@ fn draw_notification_text(
         style,
         paint: params.paint,
         scale,
+        render_as_paths: false,
     });
 }
 
