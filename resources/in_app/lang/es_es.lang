@@ -116,6 +116,7 @@ hidden_width=Ancho al ocultar (px)
 hidden_width_off=No
 right_click_drag=Clic derecho largo para mover
 notification_display=Mostrar notificaciones
+replace_native_volume_flyout=Reemplazar panel de volumen del sistema
 check_updates=Buscar Actualizaciones
 update_interval=Intervalo de Actualización (h)
 language=Idioma

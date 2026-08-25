@@ -116,6 +116,7 @@ hidden_width=Width When Hidden (px)
 hidden_width_off=Off
 right_click_drag=Right click long press to move
 notification_display=Notification Display
+replace_native_volume_flyout=Replace System Volume Flyout
 check_updates=Check for Updates
 update_interval=Update Interval (h)
 language=Language

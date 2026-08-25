@@ -116,6 +116,7 @@ hidden_width=隐藏后宽度 (px)
 hidden_width_off=不隐藏
 right_click_drag=右键长按移动
 notification_display=通知显示
+replace_native_volume_flyout=替换系统音量浮窗
 check_updates=检查更新
 update_interval=检查更新间隔 (h)
 language=语言

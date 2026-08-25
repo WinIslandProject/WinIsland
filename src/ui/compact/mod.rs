@@ -48,18 +48,21 @@ impl ActiveCompactOverlay<'_> {
     }
 }
 
-impl Default for CompactOverlay {
-    fn default() -> Self {
+impl CompactOverlay {
+    pub fn new(replace_native_volume_flyout: bool) -> Self {
         Self {
-            volume_monitor: VolumeMonitor::new(),
+            volume_monitor: VolumeMonitor::new(replace_native_volume_flyout),
             volume_indicator: VolumeIndicator::default(),
             notification_monitor: NotificationMonitor::default(),
             notification_indicator: NotificationIndicator::default(),
         }
     }
-}
 
-impl CompactOverlay {
+    pub fn set_native_volume_flyout_replacement_enabled(&mut self, enabled: bool) {
+        self.volume_monitor
+            .set_native_flyout_replacement_enabled(enabled);
+    }
+
     pub fn update(&mut self, state: CompactOverlayState, notification_display: bool) -> bool {
         self.volume_monitor
             .set_key_handling_enabled(!matches!(state, CompactOverlayState::Discard));

@@ -16,6 +16,7 @@ pub(super) enum BehaviorAction {
     HiddenWidth,
     RightClickDrag,
     NotificationDisplay,
+    ReplaceNativeVolumeFlyout,
     HideDelay,
     Language,
     CheckForUpdates,
@@ -85,6 +86,14 @@ impl SettingsApp {
                 enabled: true,
             },
             BehaviorAction::NotificationDisplay,
+        );
+        page.push_action(
+            SettingsItem::RowSwitch {
+                label: tr("replace_native_volume_flyout"),
+                on: self.config.replace_native_volume_flyout,
+                enabled: true,
+            },
+            BehaviorAction::ReplaceNativeVolumeFlyout,
         );
 
         let language = current_lang();
@@ -199,6 +208,11 @@ impl SettingsApp {
             }
             (BehaviorAction::NotificationDisplay, ClickResult::Switch(_)) => {
                 self.config.notification_display = !self.config.notification_display;
+                true
+            }
+            (BehaviorAction::ReplaceNativeVolumeFlyout, ClickResult::Switch(_)) => {
+                self.config.replace_native_volume_flyout =
+                    !self.config.replace_native_volume_flyout;
                 true
             }
             (BehaviorAction::CheckForUpdates, ClickResult::Switch(_)) => {

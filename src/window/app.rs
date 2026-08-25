@@ -142,7 +142,7 @@ impl Default for App {
                 config.smtc_known_apps.clone(),
             ),
             audio: AudioProcessor::new(),
-            compact_overlay: CompactOverlay::default(),
+            compact_overlay: CompactOverlay::new(config.replace_native_volume_flyout),
             smtc_media_info: MediaInfo::default(),
             last_media_title: String::new(),
             lyrics: LyricState::default(),

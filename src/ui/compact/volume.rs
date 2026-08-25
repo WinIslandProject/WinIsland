@@ -63,12 +63,14 @@ struct SharedVolumeState {
 pub(super) struct VolumeMonitor {
     state: Arc<SharedVolumeState>,
     cancellation: CancellationToken,
+    command_sender: SyncSender<VolumeCommand>,
+    endpoint_ready: Arc<AtomicBool>,
     display_enabled: Arc<AtomicBool>,
     keyboard_hook: Option<HHOOK>,
 }
 
 impl VolumeMonitor {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(replace_native_volume_flyout: bool) -> Self {
         let state = Arc::new(SharedVolumeState {
             snapshot: Mutex::new(VolumeSnapshot {
                 level: 0.0,
@@ -86,17 +88,16 @@ impl VolumeMonitor {
             command_receiver,
             endpoint_ready.clone(),
         );
-        let keyboard_hook = install_volume_keyboard_hook(VolumeKeyHandler {
-            sender: command_sender,
-            endpoint_ready,
-            display_enabled: display_enabled.clone(),
-        });
-        Self {
+        let mut monitor = Self {
             state,
             cancellation,
+            command_sender,
+            endpoint_ready,
             display_enabled,
-            keyboard_hook,
-        }
+            keyboard_hook: None,
+        };
+        monitor.set_native_flyout_replacement_enabled(replace_native_volume_flyout);
+        monitor
     }
 
     pub(super) fn snapshot(&self) -> VolumeSnapshot {
@@ -110,21 +111,47 @@ impl VolumeMonitor {
     pub(super) fn set_key_handling_enabled(&self, enabled: bool) {
         self.display_enabled.store(enabled, Ordering::Release);
     }
-}
 
-impl Drop for VolumeMonitor {
-    fn drop(&mut self) {
+    pub(super) fn set_native_flyout_replacement_enabled(&mut self, enabled: bool) {
+        if enabled {
+            let handler = VolumeKeyHandler {
+                sender: self.command_sender.clone(),
+                endpoint_ready: self.endpoint_ready.clone(),
+                display_enabled: self.display_enabled.clone(),
+            };
+            if self.keyboard_hook.is_some() {
+                *VOLUME_KEY_HANDLER
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(handler);
+            } else {
+                self.keyboard_hook = install_volume_keyboard_hook(handler);
+            }
+        } else {
+            self.remove_keyboard_hook();
+        }
+    }
+
+    fn remove_keyboard_hook(&mut self) {
         self.display_enabled.store(false, Ordering::Release);
         *VOLUME_KEY_HANDLER
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = None;
-        if let Some(hook) = self.keyboard_hook.take() {
+        if let Some(hook) = self.keyboard_hook {
             // SAFETY: hook was returned by SetWindowsHookExW and is removed once while the
             // callback function remains valid for the process lifetime.
             if unsafe { UnhookWindowsHookEx(hook) }.is_err() {
                 log::warn!("Volume keyboard hook could not be removed");
+            } else {
+                self.keyboard_hook = None;
+                log::info!("Native volume flyout replacement disabled");
             }
         }
+    }
+}
+
+impl Drop for VolumeMonitor {
+    fn drop(&mut self) {
+        self.remove_keyboard_hook();
         self.cancellation.cancel();
     }
 }

@@ -291,6 +291,8 @@ pub struct AppConfig {
     pub right_click_drag: bool,
     #[serde(default = "default_notification_display")]
     pub notification_display: bool,
+    #[serde(default = "default_replace_native_volume_flyout")]
+    pub replace_native_volume_flyout: bool,
     #[serde(default = "default_widget_layout")]
     pub widget_layout: Vec<WidgetSlot>,
     #[serde(default)]
@@ -305,6 +307,10 @@ fn default_right_click_drag() -> bool {
 
 fn default_notification_display() -> bool {
     false
+}
+
+fn default_replace_native_volume_flyout() -> bool {
+    true
 }
 
 fn default_island_style() -> String {
@@ -840,6 +846,7 @@ impl Default for AppConfig {
             update_channel: default_update_channel(),
             right_click_drag: default_right_click_drag(),
             notification_display: default_notification_display(),
+            replace_native_volume_flyout: default_replace_native_volume_flyout(),
             widget_layout: default_widget_layout(),
             plugin_widget_layout: Vec::new(),
             compact_widget_layout: default_compact_widget_layout(),

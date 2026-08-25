@@ -392,6 +392,7 @@ impl App {
                     let old_expanded_shape = self.config.expanded_cover_shape.clone();
                     let old_font = self.config.custom_font_path.clone();
                     let old_smtc_enabled = self.config.smtc_enabled;
+                    let old_replace_native_volume_flyout = self.config.replace_native_volume_flyout;
                     let old_position_x_offset = self.config.position_x_offset;
                     let old_position_y_offset = self.config.position_y_offset;
                     let old_monitor_index = self.config.monitor_index;
@@ -409,6 +410,13 @@ impl App {
                     self.smtc
                         .set_lyrics_local_dir(self.config.lyrics_local_dir.clone());
                     self.smtc.set_allowed_apps(self.config.smtc_apps.clone());
+                    if old_replace_native_volume_flyout != self.config.replace_native_volume_flyout
+                    {
+                        self.compact_overlay
+                            .set_native_volume_flyout_replacement_enabled(
+                                self.config.replace_native_volume_flyout,
+                            );
+                    }
                     if old_smtc_enabled != self.config.smtc_enabled {
                         self.smtc.set_enabled(self.config.smtc_enabled);
                         self.audio.set_target_app_id(self.audio_target_app_id());
