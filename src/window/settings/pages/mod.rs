@@ -1,3 +1,4 @@
+use skia_safe::Color;
 use skia_safe::Rect;
 
 use crate::utils::settings_ui::items::{
@@ -35,6 +36,107 @@ impl<A> SettingsPage<A> {
     pub(crate) fn push_action(&mut self, item: SettingsItem, action: A) {
         self.items.push(item);
         self.actions.push(Some(action));
+    }
+
+    pub(crate) fn section(&mut self, label: String) {
+        self.push(SettingsItem::SectionHeader { label });
+    }
+
+    pub(crate) fn group_start(&mut self) {
+        self.push(SettingsItem::GroupStart);
+    }
+
+    pub(crate) fn group_end(&mut self) {
+        self.push(SettingsItem::GroupEnd);
+    }
+
+    pub(crate) fn row_switch(&mut self, label: String, on: bool, enabled: bool, action: A) {
+        self.push_action(SettingsItem::RowSwitch { label, on, enabled }, action);
+    }
+
+    pub(crate) fn row_stepper(&mut self, label: String, value: String, enabled: bool, action: A) {
+        self.push_action(
+            SettingsItem::RowStepper {
+                label,
+                value,
+                enabled,
+            },
+            action,
+        );
+    }
+
+    pub(crate) fn row_source(
+        &mut self,
+        label: String,
+        options: Vec<(String, bool)>,
+        enabled: bool,
+        action: A,
+    ) {
+        self.push_action(
+            SettingsItem::RowSourceSelect {
+                label,
+                options,
+                enabled,
+            },
+            action,
+        );
+    }
+
+    pub(crate) fn row_button(
+        &mut self,
+        label: String,
+        btn_label: String,
+        enabled: bool,
+        action: A,
+    ) {
+        self.push_action(
+            SettingsItem::RowButton {
+                label,
+                btn_label,
+                enabled,
+            },
+            action,
+        );
+    }
+
+    pub(crate) fn center_link(&mut self, label: String, color: Color, action: A) {
+        self.push_action(SettingsItem::CenterLink { label, color }, action);
+    }
+
+    pub(crate) fn row_label(&mut self, label: String) {
+        self.push(SettingsItem::RowLabel { label });
+    }
+
+    pub(crate) fn row_app(&mut self, label: String, active: bool, enabled: bool, action: A) {
+        self.push_action(
+            SettingsItem::RowAppItem {
+                label,
+                active,
+                enabled,
+            },
+            action,
+        );
+    }
+
+    pub(crate) fn row_folder(
+        &mut self,
+        label: String,
+        btn_label: String,
+        clear_label: Option<String>,
+        current_path: Option<String>,
+        enabled: bool,
+        action: A,
+    ) {
+        self.push_action(
+            SettingsItem::RowFolderPicker {
+                label,
+                btn_label,
+                clear_label,
+                current_path,
+                enabled,
+            },
+            action,
+        );
     }
 
     pub(crate) fn items(&self) -> &[SettingsItem] {

@@ -1,5 +1,4 @@
 use crate::core::i18n::tr;
-use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use crate::window::settings::{NumberInputHandler, PopupState};
 
@@ -22,92 +21,71 @@ pub(super) enum AppearanceAction {
 impl SettingsApp {
     pub(super) fn build_appearance_page(&self) -> SettingsPage<AppearanceAction> {
         let mut page = SettingsPage::new();
-        page.push(SettingsItem::SectionHeader {
-            label: tr("section_appearance"),
-        });
-        page.push(SettingsItem::GroupStart);
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("global_scale"),
-                value: format!("{:.2}", self.config.global_scale),
-                enabled: true,
-            },
+        page.section(tr("section_appearance"));
+        page.group_start();
+        page.row_stepper(
+            tr("global_scale"),
+            format!("{:.2}", self.config.global_scale),
+            true,
             AppearanceAction::GlobalScale,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("base_width"),
-                value: self.config.base_width.to_string(),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("base_width"),
+            self.config.base_width.to_string(),
+            true,
             AppearanceAction::BaseWidth,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("base_height"),
-                value: self.config.base_height.to_string(),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("base_height"),
+            self.config.base_height.to_string(),
+            true,
             AppearanceAction::BaseHeight,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("expanded_width"),
-                value: self.config.expanded_width.to_string(),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("expanded_width"),
+            self.config.expanded_width.to_string(),
+            true,
             AppearanceAction::ExpandedWidth,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("expanded_height"),
-                value: self.config.expanded_height.to_string(),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("expanded_height"),
+            self.config.expanded_height.to_string(),
+            true,
             AppearanceAction::ExpandedHeight,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("position_x_offset"),
-                value: self.config.position_x_offset.to_string(),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("position_x_offset"),
+            self.config.position_x_offset.to_string(),
+            true,
             AppearanceAction::PositionX,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("position_y_offset"),
-                value: self.config.position_y_offset.to_string(),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("position_y_offset"),
+            self.config.position_y_offset.to_string(),
+            true,
             AppearanceAction::PositionY,
         );
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("font_size"),
-                value: format!("{:.0}", self.config.font_size),
-                enabled: true,
-            },
+        page.row_stepper(
+            tr("font_size"),
+            format!("{:.0}", self.config.font_size),
+            true,
             AppearanceAction::FontSize,
         );
 
         let monitors = self.get_monitor_list();
         let selected_monitor =
             (self.config.monitor_index as usize).min(monitors.len().saturating_sub(1));
-        page.push_action(
-            SettingsItem::RowSourceSelect {
-                label: tr("monitor"),
-                options: monitors
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, name)| (name, index == selected_monitor))
-                    .collect(),
-                enabled: true,
-            },
+        page.row_source(
+            tr("monitor"),
+            monitors
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| (name, index == selected_monitor))
+                .collect(),
+            true,
             AppearanceAction::Monitor,
         );
-
-        page.push(SettingsItem::GroupEnd);
+        page.group_end();
         page
     }
 

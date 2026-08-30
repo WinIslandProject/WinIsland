@@ -172,13 +172,10 @@ impl App {
                     let _ = std::fs::remove_dir_all(staging);
                     Self::show_toast("Plugin Error", &error);
                     log::error!("Failed to activate installed plugin: {error}");
-                    if let Some(settings) = self.settings.as_mut() {
-                        settings.finish_marketplace_install();
-                        settings.set_plugin_status(
-                            crate::core::i18n::tr_args("plugin_install_failed", &[&error]),
-                            false,
-                        );
-                    }
+                    self.set_plugin_install_error(crate::core::i18n::tr_args(
+                        "plugin_install_failed",
+                        &[&error],
+                    ));
                     return;
                 }
                 Self::show_toast(
@@ -200,13 +197,10 @@ impl App {
             }
             Ok(Err(e)) => {
                 Self::show_toast("Plugin Error", &e);
-                if let Some(settings) = self.settings.as_mut() {
-                    settings.finish_marketplace_install();
-                    settings.set_plugin_status(
-                        crate::core::i18n::tr_args("plugin_install_failed", &[&e]),
-                        false,
-                    );
-                }
+                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                    "plugin_install_failed",
+                    &[&e],
+                ));
                 log::error!("Failed to install plugin from drop: {}", e);
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -215,16 +209,10 @@ impl App {
             Err(mpsc::TryRecvError::Disconnected) => {
                 Self::show_toast("Plugin Error", "Installation thread crashed");
                 log::error!("Plugin installation thread disconnected unexpectedly");
-                if let Some(settings) = self.settings.as_mut() {
-                    settings.finish_marketplace_install();
-                    settings.set_plugin_status(
-                        crate::core::i18n::tr_args(
-                            "plugin_install_failed",
-                            &["installation thread crashed"],
-                        ),
-                        false,
-                    );
-                }
+                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                    "plugin_install_failed",
+                    &["installation thread crashed"],
+                ));
             }
         }
     }
@@ -273,29 +261,27 @@ impl App {
             }
             Ok(Err(error)) => {
                 log::error!("Failed to download marketplace plugin: {error}");
-                if let Some(settings) = self.settings.as_mut() {
-                    settings.finish_marketplace_install();
-                    settings.set_plugin_status(
-                        crate::core::i18n::tr_args("plugin_install_failed", &[&error]),
-                        false,
-                    );
-                }
+                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                    "plugin_install_failed",
+                    &[&error],
+                ));
             }
             Err(mpsc::TryRecvError::Empty) => {
                 self.pending_marketplace_download = Some(rx);
             }
             Err(mpsc::TryRecvError::Disconnected) => {
-                if let Some(settings) = self.settings.as_mut() {
-                    settings.finish_marketplace_install();
-                    settings.set_plugin_status(
-                        crate::core::i18n::tr_args(
-                            "plugin_install_failed",
-                            &["the marketplace download task stopped unexpectedly"],
-                        ),
-                        false,
-                    );
-                }
+                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                    "plugin_install_failed",
+                    &["the marketplace download task stopped unexpectedly"],
+                ));
             }
+        }
+    }
+
+    fn set_plugin_install_error(&mut self, message: String) {
+        if let Some(settings) = self.settings.as_mut() {
+            settings.finish_marketplace_install();
+            settings.set_plugin_status(message, false);
         }
     }
 

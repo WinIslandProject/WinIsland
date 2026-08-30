@@ -247,14 +247,6 @@ fn read_zip_entry(
     Ok(bytes)
 }
 
-pub fn validate_zip(zip_path: &Path) -> Result<(), String> {
-    let file =
-        std::fs::File::open(zip_path).map_err(|error| format!("Cannot open zip: {error}"))?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|error| format!("Invalid zip: {error}"))?;
-    let manifest = read_manifest(&mut zip)?;
-    validate_archive(&mut zip, &manifest)
-}
-
 pub fn read_manifest_from_zip(zip_path: &Path) -> Result<PluginManifest, String> {
     let file =
         std::fs::File::open(zip_path).map_err(|error| format!("Cannot open zip: {error}"))?;

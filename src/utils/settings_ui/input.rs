@@ -237,16 +237,9 @@ pub fn widget_delete_button_center(x: f32, y: f32, w: f32, h: f32, scale: f32) -
     (x + w - corner_inset, y + corner_inset)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn widget_delete_button_hit(
-    mx: f32,
-    my: f32,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    scale: f32,
-) -> bool {
+pub fn widget_delete_button_hit(mouse: (f32, f32), rect: (f32, f32, f32, f32), scale: f32) -> bool {
+    let (mx, my) = mouse;
+    let (x, y, w, h) = rect;
     let (cx, cy) = widget_delete_button_center(x, y, w, h, scale);
     let radius = (7.0 * scale).max(6.0);
     (mx - cx).powi(2) + (my - cy).powi(2) <= radius.powi(2)

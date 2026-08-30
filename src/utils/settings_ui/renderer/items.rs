@@ -36,6 +36,34 @@ struct GroupRows {
     current_row: usize,
 }
 
+fn row_text_color(ctx: &ItemCtx, enabled: bool) -> Color {
+    if enabled {
+        ctx.theme.text_pri
+    } else {
+        ctx.theme.text_sec
+    }
+}
+
+fn draw_row_text(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Color) -> (f32, bool) {
+    let cy = y + height / 2.0;
+    let visible = ctx.row_visible(y, height);
+    if visible {
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_color(color);
+        FontManager::global().draw_text_cached(DrawTextCachedParams {
+            canvas: ctx.canvas,
+            text: label,
+            x: CONTENT_PADDING + GROUP_INNER_PAD,
+            y: cy + 5.0,
+            size: 13.0,
+            bold: false,
+            paint: &paint,
+        });
+    }
+    (cy, visible)
+}
+
 fn draw_row_stepper(
     ctx: &ItemCtx,
     y: f32,
@@ -48,29 +76,7 @@ fn draw_row_stepper(
     let canvas = ctx.canvas;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + ROW_HEIGHT / 2.0;
-    let visible = ctx.row_visible(y, ROW_HEIGHT);
-
-    if visible {
-        paint.set_color(if enabled {
-            theme.text_pri
-        } else {
-            theme.text_sec
-        });
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-    }
+    let (cy, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
 
     let btn_inc_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - STEPPER_BTN_SIZE;
     let value_x = btn_inc_x - STEPPER_GAP - STEPPER_VALUE_W;
@@ -149,6 +155,9 @@ fn draw_row_stepper(
 
     let val_center = value_x + STEPPER_VALUE_W / 2.0;
     if visible {
+        let fm = FontManager::global();
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
         let is_editing = active_stepper_value.as_ref().is_some_and(|input| {
             (input.rect.left - value_x).abs() < 0.5 && (input.rect.top - btn_y).abs() < 0.5
         });
@@ -228,29 +237,7 @@ fn draw_row_switch(
     let canvas = ctx.canvas;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + ROW_HEIGHT / 2.0;
-    let visible = ctx.row_visible(y, ROW_HEIGHT);
-
-    if visible {
-        paint.set_color(if enabled {
-            theme.text_pri
-        } else {
-            theme.text_sec
-        });
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-    }
+    let (cy, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
 
     let toggle_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - TOGGLE_W;
     let toggle_y = cy - TOGGLE_H / 2.0;
@@ -272,25 +259,8 @@ fn draw_row_font_picker(
     let canvas = ctx.canvas;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + ROW_HEIGHT / 2.0;
-    let visible = ctx.row_visible(y, ROW_HEIGHT);
-
+    let (cy, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, theme.text_pri);
     if visible {
-        paint.set_color(theme.text_pri);
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-
         let sel_w: f32 = 72.0;
         let sel_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - sel_w;
         let btn_y = cy - POPUP_BTN_H / 2.0;
@@ -349,27 +319,10 @@ fn draw_row_folder_picker(
     paint.set_anti_alias(true);
     let has_path = current_path.as_ref().is_some_and(|p| !p.is_empty());
     let row_h = if has_path { 64.0 } else { ROW_HEIGHT };
-    let visible = ctx.row_visible(y, row_h);
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + row_h / 2.0;
+    let (cy, visible) = draw_row_text(ctx, y, row_h, label, row_text_color(ctx, enabled));
 
     if visible {
-        paint.set_color(if enabled {
-            theme.text_pri
-        } else {
-            theme.text_sec
-        });
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-
-        // Show current path as secondary text on the left
         if let Some(path) = current_path
             && !path.is_empty()
         {
@@ -454,28 +407,7 @@ fn draw_row_source_select(
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + ROW_HEIGHT / 2.0;
-    let visible = ctx.row_visible(y, ROW_HEIGHT);
-
-    if visible {
-        paint.set_color(if enabled {
-            theme.text_pri
-        } else {
-            theme.text_sec
-        });
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-    }
+    let (cy, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
 
     let selected_label = options
         .iter()
@@ -586,29 +518,8 @@ fn draw_row_button(
     let canvas = ctx.canvas;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + ROW_HEIGHT / 2.0;
-    let visible = ctx.row_visible(y, ROW_HEIGHT);
-
+    let (cy, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
     if visible {
-        paint.set_color(if enabled {
-            theme.text_pri
-        } else {
-            theme.text_sec
-        });
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-
         let label_color = if enabled {
             theme.text_pri
         } else {
@@ -731,27 +642,7 @@ fn draw_row_app_item(
 }
 
 fn draw_row_label(ctx: &ItemCtx, y: f32, label: &str, groups: &mut GroupRows) {
-    let canvas = ctx.canvas;
-    let theme = ctx.theme;
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let cy = y + ROW_HEIGHT / 2.0;
-    let visible = ctx.row_visible(y, ROW_HEIGHT);
-    if visible {
-        paint.set_color(theme.text_sec);
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: label,
-            x: row_x,
-            y: cy + 5.0,
-            size: 13.0,
-            bold: false,
-            paint: &paint,
-        });
-    }
-
+    let (_, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, ctx.theme.text_sec);
     advance_group_row(ctx, y + ROW_HEIGHT, groups, visible);
 }
 

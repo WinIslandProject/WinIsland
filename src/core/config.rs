@@ -231,19 +231,19 @@ pub struct AppConfig {
     pub island_style: String,
     pub smtc_enabled: bool,
     pub smtc_apps: Vec<String>,
-    #[serde(default = "default_smtc_known_apps")]
+    #[serde(default)]
     pub smtc_known_apps: Vec<String>,
     #[serde(default = "default_show_lyrics")]
     pub show_lyrics: bool,
     #[serde(default = "default_lyrics_mode")]
     pub lyrics_mode: String,
-    #[serde(default = "default_lyrics_local_dir")]
+    #[serde(default)]
     pub lyrics_local_dir: Option<String>,
-    #[serde(default = "default_custom_font")]
+    #[serde(default)]
     pub custom_font_path: Option<String>,
-    #[serde(default = "default_auto_start")]
+    #[serde(default)]
     pub auto_start: bool,
-    #[serde(default = "default_auto_hide")]
+    #[serde(default)]
     pub auto_hide: bool,
     #[serde(default = "default_auto_hide_delay")]
     pub auto_hide_delay: f32,
@@ -257,15 +257,15 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default = "default_lyrics_source")]
     pub lyrics_source: String,
-    #[serde(default = "default_lyrics_delay")]
+    #[serde(default)]
     pub lyrics_delay: f64,
-    #[serde(default = "default_lyrics_scroll")]
+    #[serde(default)]
     pub lyrics_scroll: bool,
     #[serde(default = "default_lyrics_scroll_max_width")]
     pub lyrics_scroll_max_width: f32,
-    #[serde(default = "default_position_x_offset")]
+    #[serde(default)]
     pub position_x_offset: i32,
-    #[serde(default = "default_position_y_offset")]
+    #[serde(default)]
     pub position_y_offset: i32,
     #[serde(
         rename = "dock_position",
@@ -273,9 +273,9 @@ pub struct AppConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub legacy_dock_position: Option<DockPosition>,
-    #[serde(default = "default_monitor_index")]
+    #[serde(default)]
     pub monitor_index: i32,
-    #[serde(default = "default_font_size")]
+    #[serde(default)]
     pub font_size: f32,
     #[serde(default = "default_settings_theme")]
     pub settings_theme: String,
@@ -287,9 +287,9 @@ pub struct AppConfig {
     pub cover_rotate: bool,
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
-    #[serde(default = "default_right_click_drag")]
+    #[serde(default)]
     pub right_click_drag: bool,
-    #[serde(default = "default_notification_display")]
+    #[serde(default)]
     pub notification_display: bool,
     #[serde(default = "default_replace_native_volume_flyout")]
     pub replace_native_volume_flyout: bool,
@@ -297,124 +297,33 @@ pub struct AppConfig {
     pub widget_layout: Vec<WidgetSlot>,
     #[serde(default)]
     pub plugin_widget_layout: Vec<PluginWidgetSlot>,
-    #[serde(default = "default_compact_widget_layout")]
+    #[serde(default)]
     pub compact_widget_layout: Vec<CompactWidgetSlot>,
 }
 
-fn default_right_click_drag() -> bool {
-    false
+macro_rules! defaults {
+    ($($name:ident: $ty:ty = $value:expr),* $(,)?) => {
+        $(fn $name() -> $ty { $value })*
+    };
 }
 
-fn default_notification_display() -> bool {
-    false
-}
-
-fn default_replace_native_volume_flyout() -> bool {
-    true
-}
-
-fn default_island_style() -> String {
-    "default".to_string()
-}
-
-fn default_show_lyrics() -> bool {
-    true
-}
-
-fn default_lyrics_mode() -> String {
-    "online".to_string()
-}
-
-fn default_smtc_known_apps() -> Vec<String> {
-    Vec::new()
-}
-
-fn default_custom_font() -> Option<String> {
-    None
-}
-
-fn default_lyrics_local_dir() -> Option<String> {
-    None
-}
-
-fn default_auto_start() -> bool {
-    false
-}
-
-fn default_auto_hide() -> bool {
-    false
-}
-
-fn default_auto_hide_delay() -> f32 {
-    5.0
-}
-
-fn default_hidden_width() -> f32 {
-    5.0
-}
-
-fn default_check_for_updates() -> bool {
-    true
-}
-
-fn default_update_check_interval() -> f32 {
-    4.0
-}
-
-fn default_language() -> String {
-    "auto".to_string()
-}
-
-fn default_lyrics_source() -> String {
-    "163".to_string()
-}
-
-fn default_lyrics_delay() -> f64 {
-    0.0
-}
-
-fn default_lyrics_scroll() -> bool {
-    false
-}
-
-fn default_lyrics_scroll_max_width() -> f32 {
-    300.0
-}
-
-fn default_position_x_offset() -> i32 {
-    0
-}
-
-fn default_position_y_offset() -> i32 {
-    0
-}
-
-fn default_monitor_index() -> i32 {
-    0
-}
-
-fn default_font_size() -> f32 {
-    0.0
-}
-
-fn default_settings_theme() -> String {
-    "system".to_string()
-}
-
-fn default_mini_cover_shape() -> String {
-    "square".to_string()
-}
-
-fn default_expanded_cover_shape() -> String {
-    "square".to_string()
-}
-
-fn default_cover_rotate() -> bool {
-    false
-}
-
-fn default_update_channel() -> String {
-    "stable".to_string()
+defaults! {
+    default_replace_native_volume_flyout: bool = true,
+    default_island_style: String = "default".to_string(),
+    default_show_lyrics: bool = true,
+    default_lyrics_mode: String = "online".to_string(),
+    default_auto_hide_delay: f32 = 5.0,
+    default_hidden_width: f32 = 5.0,
+    default_check_for_updates: bool = true,
+    default_update_check_interval: f32 = 4.0,
+    default_language: String = "auto".to_string(),
+    default_lyrics_source: String = "163".to_string(),
+    default_lyrics_scroll_max_width: f32 = 300.0,
+    default_settings_theme: String = "system".to_string(),
+    default_mini_cover_shape: String = "square".to_string(),
+    default_expanded_cover_shape: String = "square".to_string(),
+    default_cover_rotate: bool = false,
+    default_update_channel: String = "stable".to_string(),
 }
 
 pub const WIDGET_GRID_COLS: usize = 6;
@@ -427,10 +336,6 @@ pub const AVAILABLE_WIDGETS: [WidgetKind; 3] = [
 ];
 pub const AVAILABLE_COMPACT_WIDGETS: [CompactWidgetKind; 2] =
     [CompactWidgetKind::Time, CompactWidgetKind::ResourceUsage];
-
-pub fn default_compact_widget_layout() -> Vec<CompactWidgetSlot> {
-    Vec::new()
-}
 
 pub fn normalize_compact_widget_layout(layout: &mut Vec<CompactWidgetSlot>) -> bool {
     let original = layout.clone();
@@ -493,16 +398,7 @@ pub fn clear_compact_widget_slot(
 }
 
 pub fn widget_footprint(widget: WidgetKind, anchor_slot: usize) -> Vec<usize> {
-    let (cols, rows) = widget.span();
-    let anchor_col = (anchor_slot % WIDGET_GRID_COLS).min(WIDGET_GRID_COLS - cols);
-    let anchor_row = (anchor_slot / WIDGET_GRID_COLS).min(WIDGET_GRID_ROWS - rows);
-    let mut cells = Vec::with_capacity(cols * rows);
-    for dr in 0..rows {
-        for dc in 0..cols {
-            cells.push((anchor_row + dr) * WIDGET_GRID_COLS + (anchor_col + dc));
-        }
-    }
-    cells
+    span_cells(anchor_slot, widget.span())
 }
 
 pub fn widget_anchor_slot(widget: WidgetKind, target_slot: usize) -> usize {
@@ -528,6 +424,10 @@ pub fn span_cells(anchor: usize, span: (usize, usize)) -> Vec<usize> {
     if cols == 0 || rows == 0 || cols > WIDGET_GRID_COLS || rows > WIDGET_GRID_ROWS {
         return Vec::new();
     }
+    footprint_cells(anchor, cols, rows)
+}
+
+fn footprint_cells(anchor: usize, cols: usize, rows: usize) -> Vec<usize> {
     let anchor_col = (anchor % WIDGET_GRID_COLS).min(WIDGET_GRID_COLS - cols);
     let anchor_row = (anchor / WIDGET_GRID_COLS).min(WIDGET_GRID_ROWS - rows);
     let mut cells = Vec::with_capacity(cols * rows);
@@ -556,11 +456,12 @@ pub fn first_free_anchor(occupied: &[bool], span: (usize, usize)) -> Option<usiz
 }
 
 pub fn default_widget_layout() -> Vec<WidgetSlot> {
-    let mut layout: Vec<WidgetSlot> = (0..WIDGET_GRID_SLOTS)
-        .map(|slot| WidgetSlot { slot, widget: None })
-        .collect();
-    layout[WIDGET_GRID_SLOTS - 1].widget = Some(WidgetKind::Settings);
-    layout
+    (0..WIDGET_GRID_SLOTS)
+        .map(|slot| WidgetSlot {
+            slot,
+            widget: (slot + 1 == WIDGET_GRID_SLOTS).then_some(WidgetKind::Settings),
+        })
+        .collect()
 }
 
 fn ensure_widget_slots(layout: &mut Vec<WidgetSlot>) {
@@ -818,38 +719,38 @@ impl Default for AppConfig {
             island_style: default_island_style(),
             smtc_enabled: true,
             smtc_apps: Vec::new(),
-            smtc_known_apps: default_smtc_known_apps(),
+            smtc_known_apps: Vec::new(),
             show_lyrics: default_show_lyrics(),
             lyrics_mode: default_lyrics_mode(),
-            lyrics_local_dir: default_lyrics_local_dir(),
-            custom_font_path: default_custom_font(),
-            auto_start: default_auto_start(),
-            auto_hide: default_auto_hide(),
+            lyrics_local_dir: None,
+            custom_font_path: None,
+            auto_start: false,
+            auto_hide: false,
             auto_hide_delay: default_auto_hide_delay(),
             hidden_width: default_hidden_width(),
             check_for_updates: default_check_for_updates(),
             update_check_interval: default_update_check_interval(),
             language: default_language(),
             lyrics_source: default_lyrics_source(),
-            lyrics_delay: default_lyrics_delay(),
-            lyrics_scroll: default_lyrics_scroll(),
+            lyrics_delay: 0.0,
+            lyrics_scroll: false,
             lyrics_scroll_max_width: default_lyrics_scroll_max_width(),
-            position_x_offset: default_position_x_offset(),
-            position_y_offset: default_position_y_offset(),
+            position_x_offset: 0,
+            position_y_offset: 0,
             legacy_dock_position: None,
-            monitor_index: default_monitor_index(),
-            font_size: default_font_size(),
+            monitor_index: 0,
+            font_size: 0.0,
             settings_theme: default_settings_theme(),
             mini_cover_shape: default_mini_cover_shape(),
             expanded_cover_shape: default_expanded_cover_shape(),
             cover_rotate: default_cover_rotate(),
             update_channel: default_update_channel(),
-            right_click_drag: default_right_click_drag(),
-            notification_display: default_notification_display(),
+            right_click_drag: false,
+            notification_display: false,
             replace_native_volume_flyout: default_replace_native_volume_flyout(),
             widget_layout: default_widget_layout(),
             plugin_widget_layout: Vec::new(),
-            compact_widget_layout: default_compact_widget_layout(),
+            compact_widget_layout: Vec::new(),
         }
     }
 }

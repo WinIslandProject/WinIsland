@@ -230,7 +230,7 @@ impl App {
             return;
         }
 
-        let plugin_dir = self.plugin_mgr.plugin_dir().to_path_buf();
+        let plugin_dir = self.plugin_mgr.plugin_dir.clone();
         let zip_path = path.to_path_buf();
         let (tx, rx) = mpsc::channel();
 
@@ -354,14 +354,6 @@ impl App {
                 Some(TrayAction::OpenSettings) => {
                     log::info!("Tray: opening settings");
                     self.open_settings(event_loop);
-                }
-                Some(TrayAction::Restart) => {
-                    log::info!("Tray: restarting application");
-                    self.close_settings();
-                    if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe).arg("--restart").spawn();
-                    }
-                    event_loop.exit();
                 }
                 Some(TrayAction::Exit) => {
                     log::info!("Tray: exiting application");

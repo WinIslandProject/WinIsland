@@ -1,6 +1,5 @@
 use skia_safe::{Canvas, Color, Paint, Path};
 
-#[allow(dead_code)]
 pub fn draw_settings_icon(canvas: &Canvas, cx: f32, cy: f32, alpha: u8, scale: f32, color: Color) {
     let mut paint = Paint::default();
     paint.set_color(Color::from_argb(alpha, color.r(), color.g(), color.b()));

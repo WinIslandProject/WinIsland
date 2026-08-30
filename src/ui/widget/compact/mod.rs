@@ -292,17 +292,13 @@ pub(crate) fn draw_widget(
 }
 
 pub(crate) fn next_refresh_delay(layout: &[CompactWidgetSlot]) -> Option<std::time::Duration> {
-    let time_delay = layout
+    let time = layout
         .iter()
         .any(|entry| entry.widget == Some(CompactWidgetKind::Time))
         .then(crate::ui::widget::time_text::until_next_minute);
-    let resource_delay = layout
+    let resource = layout
         .iter()
         .any(|entry| entry.widget == Some(CompactWidgetKind::ResourceUsage))
         .then(crate::ui::widget::resource_usage::next_refresh_delay);
-    match (time_delay, resource_delay) {
-        (Some(time), Some(resource)) => Some(time.min(resource)),
-        (Some(delay), None) | (None, Some(delay)) => Some(delay),
-        (None, None) => None,
-    }
+    [time, resource].into_iter().flatten().min()
 }

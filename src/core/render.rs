@@ -201,7 +201,7 @@ pub fn draw_island(
 
     let widget_animating = draw_expanded_content(ExpandedContentParams {
         canvas,
-        blur_filter: blur_filter.clone(),
+        blur_filter,
         expanded_alpha: expanded_alpha_f,
         view_offset,
         current_w,

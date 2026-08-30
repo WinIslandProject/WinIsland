@@ -7,7 +7,6 @@ pub struct TrayManager {
     tray: TrayIcon,
     toggle_item: MenuItem,
     settings_item: MenuItem,
-    restart_item: MenuItem,
     quit_item: MenuItem,
     is_light: bool,
 }
@@ -17,11 +16,9 @@ impl TrayManager {
         let menu = Menu::new();
         let toggle_item = MenuItem::new(tr("tray_hide"), true, None);
         let settings_item = MenuItem::new(tr("tray_settings"), true, None);
-        let restart_item = MenuItem::new(tr("tray_restart"), true, None);
         let quit_item = MenuItem::new(tr("tray_exit"), true, None);
         let _ = menu.append(&toggle_item);
         let _ = menu.append(&settings_item);
-        let _ = menu.append(&restart_item);
         let _ = menu.append(&quit_item);
 
         let tray = TrayIconBuilder::new()
@@ -34,7 +31,6 @@ impl TrayManager {
             tray,
             toggle_item,
             settings_item,
-            restart_item,
             quit_item,
             is_light,
         }
@@ -79,8 +75,6 @@ impl TrayAction {
             Some(TrayAction::ToggleVisibility)
         } else if id == tray.settings_item.id() {
             Some(TrayAction::OpenSettings)
-        } else if id == tray.restart_item.id() {
-            Some(TrayAction::Restart)
         } else if id == tray.quit_item.id() {
             Some(TrayAction::Exit)
         } else {
@@ -91,6 +85,5 @@ impl TrayAction {
 pub enum TrayAction {
     ToggleVisibility,
     OpenSettings,
-    Restart,
     Exit,
 }

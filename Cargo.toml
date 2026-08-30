@@ -36,6 +36,7 @@ winisland-plugin-api = { path = "crates/winisland-plugin-api" }
 zip = "8.6.0"
 serde_yaml = "0.9"
 pulldown-cmark = { version = "0.13.4", default-features = false }
+thiserror = "2.0"
 
 [build-dependencies]
 winres = "0.1"

@@ -1,8 +1,7 @@
 pub use winisland_plugin_api::*;
 
 pub fn read_c_str(buf: &[u8]) -> String {
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    String::from_utf8_lossy(&buf[..end]).into_owned()
+    String::from_utf8_lossy(buf.split(|&byte| byte == 0).next().unwrap_or(buf)).into_owned()
 }
 
 #[derive(Debug, Clone)]
@@ -26,26 +25,15 @@ impl From<&PluginMetadataC> for PluginMetadata {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PluginError {
-    NotFound(String),
+    #[error("Failed to load plugin: {0}")]
     LoadFailed(String),
+    #[error("Invalid plugin: {0}")]
     InvalidPlugin(String),
+    #[error("Plugin execution error: {0}")]
     ExecutionError(String),
 }
-
-impl std::fmt::Display for PluginError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotFound(message) => write!(f, "Plugin not found: {message}"),
-            Self::LoadFailed(message) => write!(f, "Failed to load plugin: {message}"),
-            Self::InvalidPlugin(message) => write!(f, "Invalid plugin: {message}"),
-            Self::ExecutionError(message) => write!(f, "Plugin execution error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for PluginError {}
 
 #[derive(Debug, Clone, Default)]
 pub struct HostState {

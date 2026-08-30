@@ -1,8 +1,6 @@
-#[allow(unused_imports)]
-use windows::Win32::Foundation::{HWND, POINT, RECT};
-#[allow(unused_imports)]
+use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{

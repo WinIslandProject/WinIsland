@@ -420,15 +420,13 @@ impl AudioProcessor {
         });
     }
 
-    #[allow(unused_variables, unused_assignments)]
     fn start_capture(&self, cancel: CancellationToken, generation: u32) {
-        let spectrum_arc = self.spectrum.clone();
         let gate_clone = self.gate.clone();
         let gate_override_clone = self.gate_override.clone();
         let process_capture_active = self.process_capture_active.clone();
         let worker_generation = self.worker_generation.clone();
         let capture_context = FallbackCaptureContext {
-            spectrum: spectrum_arc.clone(),
+            spectrum: self.spectrum.clone(),
             gate: gate_clone.clone(),
             gate_override: gate_override_clone.clone(),
             process_capture_active: process_capture_active.clone(),
@@ -439,8 +437,6 @@ impl AudioProcessor {
             let host = cpal::default_host();
             let mut current_device_name = None;
             let mut current_stream: Option<Stream> = None;
-            let mut current_session = None;
-            let mut hr = None;
             let mut stream_running = false;
             let mut next_device_refresh = Instant::now();
 
@@ -477,14 +473,7 @@ impl AudioProcessor {
 
                     // Releasing old stream and session
                     current_stream = None;
-                    current_session = None;
                     stream_running = false;
-                    if hr.is_some() {
-                        unsafe {
-                            CoUninitialize();
-                        }
-                        hr = None;
-                    }
                     current_device_name = None;
 
                     if let Some(device) = default_device {
@@ -535,36 +524,8 @@ impl AudioProcessor {
                         };
 
                         if let Ok(s) = stream {
-                            let play_hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-                            if play_hr.is_ok() {
-                                hr = Some(play_hr);
-                            }
-                            // SAFETY: CoCreateInstance and subsequent COM calls create audio session objects.
-                            // All objects are locally scoped and valid for the lifetime of this thread.
-                            let _session = unsafe {
-                                let enumerator: Option<IMMDeviceEnumerator> =
-                                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok();
-                                let mut session = None;
-                                if let Some(ref enum_val) = enumerator {
-                                    if let Ok(device) =
-                                        enum_val.GetDefaultAudioEndpoint(eRender, eConsole)
-                                        && let Ok(mgr) = device
-                                            .Activate::<IAudioSessionManager2>(CLSCTX_ALL, None)
-                                        && let Ok(ses) = mgr.GetSimpleAudioVolume(None, 0)
-                                    {
-                                        session = Some(ses);
-                                    }
-                                } else {
-                                    log::warn!(
-                                        "Audio capture: IMMDeviceEnumerator CoCreateInstance failed, running without simple audio volume"
-                                    );
-                                }
-                                session
-                            };
-
                             log::info!("Audio capture stream prepared for '{}'", device_name);
                             current_stream = Some(s);
-                            current_session = _session;
                             current_device_name = Some(device_name);
                         } else if let Err(e) = stream {
                             log::error!("Audio capture: failed to build capture stream: {:?}", e);
@@ -576,13 +537,6 @@ impl AudioProcessor {
             }
 
             // Cleanup when loop ends
-            current_stream = None;
-            current_session = None;
-            if hr.is_some() {
-                unsafe {
-                    CoUninitialize();
-                }
-            }
         });
     }
 }

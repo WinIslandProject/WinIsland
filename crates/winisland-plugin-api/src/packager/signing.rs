@@ -4,24 +4,15 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// Errors that can occur during signing operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SigningError {
+    #[error("I/O error: {0}")]
     Io(std::io::Error),
+    #[error("Key error: {0}")]
     Key(String),
+    #[error("Signature error: {0}")]
     Signature(String),
 }
-
-impl std::fmt::Display for SigningError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "I/O error: {}", e),
-            Self::Key(msg) => write!(f, "Key error: {}", msg),
-            Self::Signature(msg) => write!(f, "Signature error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for SigningError {}
 
 impl From<std::io::Error> for SigningError {
     fn from(e: std::io::Error) -> Self {

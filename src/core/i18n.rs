@@ -29,8 +29,8 @@ static I18N: LazyLock<Arc<RwLock<I18n>>> = LazyLock::new(|| {
     Arc::new(RwLock::new(i18n))
 });
 
-fn embedded_langs() -> Vec<EmbeddedLang> {
-    vec![
+fn embedded_langs() -> &'static [EmbeddedLang] {
+    &[
         (
             "en_us.lang",
             include_str!("../../resources/in_app/lang/en_us.lang"),
@@ -57,40 +57,31 @@ fn lang_dir() -> std::path::PathBuf {
 }
 
 fn parse_lang_name(content: &str) -> Option<String> {
-    for line in content.lines() {
-        if let Some(rest) = line.strip_prefix("!lang_name=") {
-            return Some(rest.trim().to_string());
-        }
-        if !line.starts_with('!') {
-            break;
-        }
-    }
-    None
+    content
+        .lines()
+        .take_while(|line| line.starts_with('!'))
+        .find_map(|line| line.strip_prefix("!lang_name="))
+        .map(|name| name.trim().to_owned())
 }
 
 fn parse_translations(content: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for line in content.lines() {
-        if line.starts_with('!') {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            map.insert(k.trim().to_string(), v.trim().to_string());
-        }
-    }
-    map
+    content
+        .lines()
+        .filter_map(|line| {
+            (!line.starts_with('!'))
+                .then(|| line.split_once('='))
+                .flatten()
+        })
+        .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
+        .collect()
 }
 
-#[allow(dead_code)]
 fn format_args(template: &str, args: &[&str]) -> String {
-    if args.is_empty() {
-        return template.to_string();
-    }
-    let mut result = template.to_string();
-    for (i, arg) in args.iter().enumerate() {
-        result = result.replace(&format!("{{{}}}", i), arg);
-    }
-    result
+    args.iter()
+        .enumerate()
+        .fold(template.to_owned(), |result, (index, value)| {
+            result.replace(&format!("{{{index}}}"), value)
+        })
 }
 
 fn discover_disk_langs() -> (Vec<Language>, HashMap<String, String>) {
@@ -124,7 +115,7 @@ impl I18n {
         let mut available = disk_langs;
         let file_map = disk_files;
 
-        for (filename, content) in &embedded_langs() {
+        for (filename, content) in embedded_langs() {
             let code = Path::new(filename)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -159,7 +150,7 @@ impl I18n {
                 return Some(content);
             }
         }
-        for (filename, content) in &embedded_langs() {
+        for (filename, content) in embedded_langs() {
             let code = Path::new(filename)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -235,7 +226,6 @@ pub fn tr(key: &str) -> String {
     I18N.read().unwrap().get(key)
 }
 
-#[allow(dead_code)]
 pub fn tr_args(key: &str, args: &[&str]) -> String {
     let template = I18N.read().unwrap().get(key);
     format_args(&template, args)

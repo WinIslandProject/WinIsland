@@ -29,134 +29,104 @@ pub(super) enum BehaviorAction {
 impl SettingsApp {
     pub(super) fn build_behavior_page(&self) -> SettingsPage<BehaviorAction> {
         let mut page = SettingsPage::new();
-        page.push(SettingsItem::SectionHeader {
-            label: tr("section_behavior"),
-        });
-        page.push(SettingsItem::GroupStart);
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("start_boot"),
-                on: self.config.auto_start,
-                enabled: true,
-            },
+        page.section(tr("section_behavior"));
+        page.group_start();
+        page.row_switch(
+            tr("start_boot"),
+            self.config.auto_start,
+            true,
             BehaviorAction::AutoStart,
         );
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("auto_hide"),
-                on: self.config.auto_hide,
-                enabled: true,
-            },
+        page.row_switch(
+            tr("auto_hide"),
+            self.config.auto_hide,
+            true,
             BehaviorAction::AutoHide,
         );
         if self.config.auto_hide {
-            page.push_action(
-                SettingsItem::RowStepper {
-                    label: tr("hide_delay"),
-                    value: format!("{:.0}", self.config.auto_hide_delay),
-                    enabled: true,
-                },
+            page.row_stepper(
+                tr("hide_delay"),
+                format!("{:.0}", self.config.auto_hide_delay),
+                true,
                 BehaviorAction::HideDelay,
             );
         }
-        page.push_action(
-            SettingsItem::RowStepper {
-                label: tr("hidden_width"),
-                value: if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
-                    tr("hidden_width_off")
-                } else {
-                    format!("{:.0}", self.config.hidden_width)
-                },
-                enabled: true,
+        page.row_stepper(
+            tr("hidden_width"),
+            if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
+                tr("hidden_width_off")
+            } else {
+                format!("{:.0}", self.config.hidden_width)
             },
+            true,
             BehaviorAction::HiddenWidth,
         );
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("right_click_drag"),
-                on: self.config.right_click_drag,
-                enabled: true,
-            },
+        page.row_switch(
+            tr("right_click_drag"),
+            self.config.right_click_drag,
+            true,
             BehaviorAction::RightClickDrag,
         );
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("notification_display"),
-                on: self.config.notification_display,
-                enabled: true,
-            },
+        page.row_switch(
+            tr("notification_display"),
+            self.config.notification_display,
+            true,
             BehaviorAction::NotificationDisplay,
         );
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("replace_native_volume_flyout"),
-                on: self.config.replace_native_volume_flyout,
-                enabled: true,
-            },
+        page.row_switch(
+            tr("replace_native_volume_flyout"),
+            self.config.replace_native_volume_flyout,
+            true,
             BehaviorAction::ReplaceNativeVolumeFlyout,
         );
 
         let language = current_lang();
-        page.push_action(
-            SettingsItem::RowSourceSelect {
-                label: tr("language"),
-                options: available_langs()
-                    .iter()
-                    .map(|entry| (entry.name.clone(), entry.code == language))
-                    .collect(),
-                enabled: true,
-            },
+        page.row_source(
+            tr("language"),
+            available_langs()
+                .iter()
+                .map(|entry| (entry.name.clone(), entry.code == language))
+                .collect(),
+            true,
             BehaviorAction::Language,
         );
-        page.push(SettingsItem::GroupEnd);
-        page.push(SettingsItem::SectionHeader {
-            label: tr("section_updates"),
-        });
-        page.push(SettingsItem::GroupStart);
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("check_updates"),
-                on: self.config.check_for_updates,
-                enabled: true,
-            },
+        page.group_end();
+        page.section(tr("section_updates"));
+        page.group_start();
+        page.row_switch(
+            tr("check_updates"),
+            self.config.check_for_updates,
+            true,
             BehaviorAction::CheckForUpdates,
         );
         if self.config.check_for_updates {
-            page.push_action(
-                SettingsItem::RowSourceSelect {
-                    label: tr("update_channel"),
-                    options: vec![
-                        (tr("channel_stable"), self.config.update_channel == "stable"),
-                        (tr("channel_beta"), self.config.update_channel == "beta"),
-                    ],
-                    enabled: true,
-                },
+            page.row_source(
+                tr("update_channel"),
+                vec![
+                    (tr("channel_stable"), self.config.update_channel == "stable"),
+                    (tr("channel_beta"), self.config.update_channel == "beta"),
+                ],
+                true,
                 BehaviorAction::UpdateChannel,
             );
-            page.push_action(
-                SettingsItem::RowStepper {
-                    label: tr("update_interval"),
-                    value: format!("{:.0}", self.config.update_check_interval),
-                    enabled: true,
-                },
+            page.row_stepper(
+                tr("update_interval"),
+                format!("{:.0}", self.config.update_check_interval),
+                true,
                 BehaviorAction::UpdateInterval,
             );
         }
-        page.push_action(
-            SettingsItem::RowButton {
-                label: tr("check_updates_manual"),
-                btn_label: tr("update_check_btn"),
-                enabled: true,
-            },
+        page.row_button(
+            tr("check_updates_manual"),
+            tr("update_check_btn"),
+            true,
             BehaviorAction::CheckUpdatesNow,
         );
-        page.push(SettingsItem::GroupEnd);
+        page.group_end();
         page.push(SettingsItem::Spacer { height: 10.0 });
-        page.push_action(
-            SettingsItem::CenterLink {
-                label: tr("reset_defaults"),
-                color: self.theme().danger,
-            },
+        page.center_link(
+            tr("reset_defaults"),
+            self.theme().danger,
             BehaviorAction::ResetDefaults,
         );
         page

@@ -313,12 +313,8 @@ impl SettingsApp {
                 let (mouse_x, mouse_y) = self.logical_mouse_pos;
                 if removable
                     && widget_delete_button_hit(
-                        mouse_x - SIDEBAR_W,
-                        mouse_y + self.scroll_y,
-                        x,
-                        y,
-                        width,
-                        height,
+                        (mouse_x - SIDEBAR_W, mouse_y + self.scroll_y),
+                        (x, y, width, height),
                         geometry.cap_scale,
                     )
                 {
@@ -372,12 +368,8 @@ impl SettingsApp {
                 };
                 let (mouse_x, mouse_y) = self.logical_mouse_pos;
                 if widget_delete_button_hit(
-                    mouse_x - SIDEBAR_W,
-                    mouse_y + self.scroll_y,
-                    x,
-                    y,
-                    width,
-                    height,
+                    (mouse_x - SIDEBAR_W, mouse_y + self.scroll_y),
+                    (x, y, width, height),
                     geometry.cap_scale,
                 ) {
                     return false;
@@ -477,8 +469,12 @@ impl SettingsApp {
                 return None;
             }
             let (x, y, width, height) = geometry.footprint_rect(widget.span(), entry.slot);
-            widget_delete_button_hit(mouse_x, mouse_y, x, y, width, height, geometry.cap_scale)
-                .then_some(entry.slot)
+            widget_delete_button_hit(
+                (mouse_x, mouse_y),
+                (x, y, width, height),
+                geometry.cap_scale,
+            )
+            .then_some(entry.slot)
         });
         if let Some(anchor) = built_in_anchor {
             clear_widget_slot(&mut self.config.widget_layout, anchor);
@@ -493,8 +489,12 @@ impl SettingsApp {
                 .iter()
                 .find(|widget| widget.layout_id().as_ref() == Some(&entry.id()))?;
             let (x, y, width, height) = geometry.footprint_rect(widget.span(), entry.slot);
-            widget_delete_button_hit(mouse_x, mouse_y, x, y, width, height, geometry.cap_scale)
-                .then(|| entry.id())
+            widget_delete_button_hit(
+                (mouse_x, mouse_y),
+                (x, y, width, height),
+                geometry.cap_scale,
+            )
+            .then(|| entry.id())
         });
         let Some(plugin_id) = plugin_id else {
             return false;
@@ -529,8 +529,12 @@ impl SettingsApp {
         let position = self.config.compact_widget_layout.iter().find_map(|entry| {
             entry.widget?;
             let (x, y, width, height) = geometry.slot_rect(entry.position())?;
-            widget_delete_button_hit(mouse_x, mouse_y, x, y, width, height, geometry.cap_scale)
-                .then_some(entry.position())
+            widget_delete_button_hit(
+                (mouse_x, mouse_y),
+                (x, y, width, height),
+                geometry.cap_scale,
+            )
+            .then_some(entry.position())
         });
         let Some(position) = position else {
             return false;
