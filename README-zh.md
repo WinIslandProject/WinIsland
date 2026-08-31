@@ -14,6 +14,12 @@
 ## 社区
 加入 QQ 群：`435799156`
 
+## 支持项目
+
+<a href="https://eatgrapes.github.io/Donate_to_me/" target="_blank">
+  <img src="https://img.shields.io/badge/Support_WinIsland-7C3AED?style=for-the-badge&logo=buymeacoffee&logoColor=white" alt="支持 WinIsland">
+</a>
+
 ## 构建项目
 
 - **Rust** 环境
