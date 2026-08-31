@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::LazyLock;
@@ -46,6 +47,7 @@ const UPDATE_URL_JSON: &str =
 const UPDATE_URL_NIGHTLY_INSTALLER: &str = "https://github.com/WinIslandProject/WinIsland/releases/download/nightly/WinIsland-Nightly-Setup.exe";
 const UPDATE_URL_STABLE_RELEASE: &str =
     "https://api.github.com/repos/WinIslandProject/WinIsland/releases/latest";
+const MAX_INSTALLER_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 enum InstallerChannel {
@@ -56,7 +58,7 @@ enum InstallerChannel {
 struct UpdatePackage {
     channel: InstallerChannel,
     download_url: String,
-    expected_sha256: Option<String>,
+    expected_sha256: String,
 }
 
 impl InstallerChannel {
@@ -114,11 +116,10 @@ fn parse_release_digest(value: Option<&str>) -> Option<String> {
         .and_then(validate_sha256)
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+fn hex_bytes(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let digest = Sha256::digest(bytes);
-    let mut output = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
         output.push(HEX[(byte >> 4) as usize] as char);
         output.push(HEX[(byte & 0x0f) as usize] as char);
     }
@@ -296,7 +297,7 @@ async fn do_beta_check(app_dir: &Path, manual: bool) {
             UpdatePackage {
                 channel: InstallerChannel::Nightly,
                 download_url: format!("{UPDATE_URL_NIGHTLY_INSTALLER}?build={remote_build}"),
-                expected_sha256: Some(expected_sha256),
+                expected_sha256,
             },
             app_dir,
         )
@@ -344,13 +345,18 @@ async fn do_stable_check(app_dir: &Path, manual: bool) {
             return;
         };
 
+        let Some(expected_sha256) = parse_release_digest(asset.digest.as_deref()) else {
+            log::warn!("Update check (Stable): installer has no valid SHA-256 digest");
+            notify_check_failed(manual).await;
+            return;
+        };
         prompt_update(
             &tr("channel_stable"),
             remote_version,
             UpdatePackage {
                 channel: InstallerChannel::Stable,
                 download_url: asset.browser_download_url,
-                expected_sha256: parse_release_digest(asset.digest.as_deref()),
+                expected_sha256,
             },
             app_dir,
         )
@@ -364,54 +370,78 @@ async fn do_stable_check(app_dir: &Path, manual: bool) {
     }
 }
 
-async fn perform_update(package: UpdatePackage, app_dir: PathBuf) {
-    log::info!(
-        "Update: downloading installer from {}",
-        package.download_url
-    );
-    let resp = match HTTP_CLIENT
+async fn download_installer(package: &UpdatePackage, destination: &Path) -> Result<u64, String> {
+    let response = HTTP_CLIENT
         .get(&package.download_url)
         .header(CACHE_CONTROL, "no-cache, no-store")
         .header(PRAGMA, "no-cache")
         .send()
         .await
+        .map_err(|error| format!("download request failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("download returned HTTP {}", response.status()));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length == 0 || length > MAX_INSTALLER_BYTES)
     {
-        Ok(r) => r,
-        Err(_) => {
-            log::error!("Update: download request failed");
-            show_error_box(tr("update_failed_title"), tr("update_failed_dl")).await;
-            return;
-        }
-    };
-
-    if !resp.status().is_success() {
-        log::error!("Update: download failed with status {}", resp.status());
-        show_error_box(tr("update_failed_title"), tr("update_failed_dl")).await;
-        return;
+        return Err("installer size is invalid".into());
     }
 
-    let bytes = match resp.bytes().await {
-        Ok(b) => b.to_vec(),
-        Err(_) => {
-            log::error!("Update: download failed (read response)");
-            show_error_box(tr("update_failed_title"), tr("update_failed_dl")).await;
-            return;
+    let temporary = destination.with_extension("download");
+    let result = async {
+        let mut response = response;
+        let mut file = fs::File::create(&temporary)
+            .map_err(|error| format!("failed to create installer file: {error}"))?;
+        let mut hasher = Sha256::new();
+        let mut total = 0u64;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| format!("failed to read installer response: {error}"))?
+        {
+            total = total
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| "installer size overflow".to_string())?;
+            if total > MAX_INSTALLER_BYTES {
+                return Err("installer exceeds the size limit".into());
+            }
+            hasher.update(&chunk);
+            file.write_all(&chunk)
+                .map_err(|error| format!("failed to write installer: {error}"))?;
         }
-    };
-    log::info!("Update: downloaded {} bytes", bytes.len());
-
-    if let Some(expected_hash) = package.expected_sha256 {
-        let actual_hash = sha256_hex(&bytes);
-        if actual_hash != expected_hash {
-            log::error!(
-                "Update: installer hash mismatch (expected {}, got {})",
-                expected_hash,
-                actual_hash
-            );
-            show_error_box(tr("update_failed_title"), tr("update_failed_dl")).await;
-            return;
+        if total == 0 {
+            return Err("installer is empty".into());
         }
+        let actual_hash = hex_bytes(&hasher.finalize());
+        if actual_hash != package.expected_sha256 {
+            return Err(format!(
+                "installer hash mismatch (expected {}, got {})",
+                package.expected_sha256, actual_hash
+            ));
+        }
+        file.sync_all()
+            .map_err(|error| format!("failed to flush installer: {error}"))?;
+        if destination.exists() {
+            fs::remove_file(destination)
+                .map_err(|error| format!("failed to replace installer: {error}"))?;
+        }
+        fs::rename(&temporary, destination)
+            .map_err(|error| format!("failed to activate installer: {error}"))?;
+        Ok(total)
     }
+    .await;
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
+}
+
+async fn perform_update(package: UpdatePackage, app_dir: PathBuf) {
+    log::info!(
+        "Update: downloading installer from {}",
+        package.download_url
+    );
 
     let installer_directory = app_dir.join("updates");
     if fs::create_dir_all(&installer_directory).is_err() {
@@ -423,18 +453,17 @@ async fn perform_update(package: UpdatePackage, app_dir: PathBuf) {
         return;
     }
     let installer_path = installer_directory.join(package.channel.installer_name());
-
-    if fs::write(&installer_path, &bytes).is_err() {
-        log::error!(
-            "Update: failed to write installer to {}",
-            installer_path.display()
-        );
-        show_error_box(tr("update_failed_title"), tr("update_failed_save")).await;
-        return;
-    }
+    let downloaded = match download_installer(&package, &installer_path).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            log::error!("Update: {error}");
+            show_error_box(tr("update_failed_title"), tr("update_failed_dl")).await;
+            return;
+        }
+    };
 
     log::info!(
-        "Update: installer written to {}, scheduling update",
+        "Update: downloaded {downloaded} bytes to {}, scheduling update",
         installer_path.display()
     );
 

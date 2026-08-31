@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use skia_safe::canvas::SrcRectConstraint;
@@ -10,7 +11,7 @@ use skia_safe::{
 };
 use windows::ApplicationModel::AppDisplayInfo;
 use windows::Foundation::Size;
-use windows::Storage::Streams::DataReader;
+use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
 use windows::UI::Notifications::Management::{
     UserNotificationListener, UserNotificationListenerAccessStatus,
 };
@@ -76,6 +77,26 @@ struct NotificationRecord {
     creation_time: i64,
 }
 
+#[derive(Default)]
+struct CancelSlot(Mutex<Option<Box<dyn Fn() + Send + Sync>>>);
+
+impl CancelSlot {
+    fn set(&self, cancel: impl Fn() + Send + Sync + 'static) {
+        *self.0.lock().unwrap_or_else(|error| error.into_inner()) = Some(Box::new(cancel));
+    }
+
+    fn cancel(&self) {
+        if let Some(cancel) = self
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            cancel();
+        }
+    }
+}
+
 enum NotificationReadResult {
     Notifications(Vec<NotificationRecord>),
     Failed(HRESULT),
@@ -86,8 +107,11 @@ pub(super) struct NotificationMonitor {
     listener: Option<UserNotificationListener>,
     event_subscription: Option<NotificationEventSubscription>,
     access_receiver: Option<Receiver<bool>>,
+    access_cancel: Option<Arc<CancelSlot>>,
     read_receiver: Option<Receiver<(NotificationReadKind, NotificationReadResult)>>,
+    read_cancel: Option<Arc<CancelSlot>>,
     icon_receiver: Option<Receiver<(u32, Option<NotificationIconData>)>>,
+    icon_cancel: Option<Arc<CancelSlot>>,
     access_attempted: bool,
     retry_after: Option<Instant>,
     seen_notifications: HashSet<(u32, i64)>,
@@ -135,6 +159,12 @@ impl NotificationMonitor {
                     return;
                 };
                 let (sender, receiver) = mpsc::sync_channel(1);
+                let cancel_operation = operation.clone();
+                let cancel = Arc::new(CancelSlot::default());
+                cancel.set(move || {
+                    let _ = cancel_operation.Cancel();
+                });
+                self.access_cancel = Some(cancel);
                 tokio::task::spawn_blocking(move || {
                     let granted = matches!(
                         operation.join(),
@@ -162,6 +192,7 @@ impl NotificationMonitor {
         match result {
             Some(Ok(true)) => {
                 self.access_receiver = None;
+                self.access_cancel = None;
                 let Ok(listener) = UserNotificationListener::Current() else {
                     log::warn!("Notification listener is unavailable after access was granted");
                     self.schedule_retry();
@@ -171,10 +202,12 @@ impl NotificationMonitor {
             }
             Some(Ok(false)) => {
                 self.access_receiver = None;
+                self.access_cancel = None;
                 log::warn!("Notification access was not granted");
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.access_receiver = None;
+                self.access_cancel = None;
                 log::warn!("Notification access request ended unexpectedly");
                 self.schedule_retry();
             }
@@ -201,15 +234,18 @@ impl NotificationMonitor {
         match result {
             Some(Ok((kind, NotificationReadResult::Notifications(notifications)))) => {
                 self.read_receiver = None;
+                self.read_cancel = None;
                 self.handle_notification_snapshot(kind, notifications);
             }
             Some(Ok((_, NotificationReadResult::Failed(error)))) => {
                 self.read_receiver = None;
+                self.read_cancel = None;
                 log::warn!("Notification history could not be read: {:?}", error);
                 self.restart_monitor();
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.read_receiver = None;
+                self.read_cancel = None;
                 log::warn!("Notification history request ended unexpectedly");
                 self.restart_monitor();
             }
@@ -294,6 +330,12 @@ impl NotificationMonitor {
             return false;
         };
         let (sender, receiver) = mpsc::sync_channel(1);
+        let cancel_operation = operation.clone();
+        let cancel = Arc::new(CancelSlot::default());
+        cancel.set(move || {
+            let _ = cancel_operation.Cancel();
+        });
+        self.read_cancel = Some(cancel);
         tokio::task::spawn_blocking(move || {
             let result = operation.join().map(|notifications| {
                 let mut records = Vec::new();
@@ -328,6 +370,16 @@ impl NotificationMonitor {
     }
 
     fn stop(&mut self) {
+        for cancel in [
+            self.access_cancel.take(),
+            self.read_cancel.take(),
+            self.icon_cancel.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            cancel.cancel();
+        }
         self.listener = None;
         self.event_subscription = None;
         self.access_receiver = None;
@@ -362,9 +414,32 @@ impl NotificationMonitor {
     }
 
     fn start_icon_read(&mut self, notification_id: u32, display: AppDisplayInfo) {
+        if let Some(cancel) = self.icon_cancel.take() {
+            cancel.cancel();
+        }
+        self.icon_receiver = None;
+        let Some(operation) = display
+            .GetLogo(Size {
+                Width: 64.0,
+                Height: 64.0,
+            })
+            .ok()
+            .and_then(|logo| logo.OpenReadAsync().ok())
+        else {
+            return;
+        };
         let (sender, receiver) = mpsc::sync_channel(1);
+        let cancel_operation = operation.clone();
+        let cancel = Arc::new(CancelSlot::default());
+        cancel.set(move || {
+            let _ = cancel_operation.Cancel();
+        });
+        self.icon_cancel = Some(Arc::clone(&cancel));
         tokio::task::spawn_blocking(move || {
-            let icon = read_app_icon(&display);
+            let icon = operation
+                .join()
+                .ok()
+                .and_then(|stream| read_app_icon(stream, &cancel));
             if sender.send((notification_id, icon)).is_ok() {
                 crate::utils::event_loop::wake();
             }
@@ -380,6 +455,7 @@ impl NotificationMonitor {
         match result {
             Some(Ok((notification_id, icon))) => {
                 self.icon_receiver = None;
+                self.icon_cancel = None;
                 icon.map(|icon| NotificationMonitorUpdate::Icon {
                     notification_id,
                     icon,
@@ -387,6 +463,7 @@ impl NotificationMonitor {
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.icon_receiver = None;
+                self.icon_cancel = None;
                 None
             }
             Some(Err(mpsc::TryRecvError::Empty)) | None => None,
@@ -484,20 +561,21 @@ fn read_notification_text(notification: &UserNotification) -> (String, String) {
     )
 }
 
-fn read_app_icon(display: &AppDisplayInfo) -> Option<NotificationIconData> {
-    let logo = display
-        .GetLogo(Size {
-            Width: 64.0,
-            Height: 64.0,
-        })
-        .ok()?;
-    let stream = logo.OpenReadAsync().ok()?.join().ok()?;
+fn read_app_icon(
+    stream: IRandomAccessStreamWithContentType,
+    cancel: &CancelSlot,
+) -> Option<NotificationIconData> {
     let size = stream.Size().ok()?;
     if size == 0 || size > MAX_ICON_BYTES {
         return None;
     }
     let reader = DataReader::CreateDataReader(&stream).ok()?;
-    reader.LoadAsync(size as u32).ok()?.join().ok()?;
+    let operation = reader.LoadAsync(size as u32).ok()?;
+    let cancel_operation = operation.clone();
+    cancel.set(move || {
+        let _ = cancel_operation.Cancel();
+    });
+    operation.join().ok()?;
     let mut bytes = vec![0; size as usize];
     reader.ReadBytes(&mut bytes).ok()?;
     Some(NotificationIconData {

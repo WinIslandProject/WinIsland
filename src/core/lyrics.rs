@@ -37,6 +37,7 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 });
 
 const MOZILLA_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+const MAX_LYRICS_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 fn winisland_ua() -> String {
     format!("WinIsland/{} ({})", APP_VERSION, APP_HOMEPAGE)
@@ -57,7 +58,22 @@ async fn get_json_with_referer(url: &str, user_agent: &str, referer: &str) -> Op
 }
 
 async fn get_json_request(request: reqwest::RequestBuilder) -> Option<Value> {
-    request.send().await.ok()?.json().await.ok()
+    let mut response = request.send().await.ok()?;
+    if !response.status().is_success()
+        || response
+            .content_length()
+            .is_some_and(|length| length > MAX_LYRICS_RESPONSE_BYTES as u64)
+    {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if bytes.len().saturating_add(chunk.len()) > MAX_LYRICS_RESPONSE_BYTES {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).ok()
 }
 
 #[derive(Clone, Default, Debug)]
