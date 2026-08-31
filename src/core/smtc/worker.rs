@@ -33,7 +33,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         mut lyrics_source_rx,
         mut lyrics_local_dir_rx,
         mut allowed_apps_rx,
-        mut known_apps,
+        known_apps,
     } = channels;
     let _winrt_guard = match WinRtGuard::new() {
         Ok(guard) => guard,
@@ -65,9 +65,6 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
     });
     let sessions_changed_token = manager.SessionsChanged(&handler).ok();
     let mut enabled = *enabled_rx.borrow_and_update();
-    let mut thumbnail_fetcher = enabled
-        .then(|| ThumbnailFetcher::new(info_tx.clone()))
-        .flatten();
 
     let mut current_lyrics_mode = LyricsMode::Online;
     let mut current_lyrics_source = "163".to_string();
@@ -87,25 +84,26 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         current_allowed_apps = apps;
     }
 
-    let mut last_session_seen = Instant::now();
-    let mut last_was_playing = false;
-    let mut timeline_cache = TimelineCache::default();
+    let mut media_state = MediaUpdateState {
+        allowed_apps: current_allowed_apps,
+        known_apps,
+        last_session_seen: Instant::now(),
+        last_was_playing: false,
+        thumbnail_fetcher: enabled
+            .then(|| ThumbnailFetcher::new(info_tx.clone()))
+            .flatten(),
+        timeline_cache: TimelineCache::default(),
+    };
 
     if enabled {
         for attempt in 0..10 {
-            update_media_info(
+            media_state.update(
                 &manager,
                 &info_tx,
                 current_lyrics_mode,
                 &current_lyrics_source,
                 current_lyrics_local_dir.as_deref(),
-                &mut current_allowed_apps,
-                &mut known_apps,
                 true,
-                &mut last_session_seen,
-                &mut last_was_playing,
-                thumbnail_fetcher.as_ref(),
-                &mut timeline_cache,
             );
             let info = info_tx.borrow();
             let timeline_ready = info.duration_ms > 0
@@ -158,23 +156,23 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             );
         }
         while let Ok(apps) = allowed_apps_rx.try_recv() {
-            current_allowed_apps = apps;
+            media_state.allowed_apps = apps;
         }
 
         let next_enabled = *enabled_rx.borrow_and_update();
         if next_enabled != enabled {
             enabled = next_enabled;
             if enabled {
-                thumbnail_fetcher = ThumbnailFetcher::new(info_tx.clone());
+                media_state.thumbnail_fetcher = ThumbnailFetcher::new(info_tx.clone());
                 last_regular_update = Instant::now() - Duration::from_millis(301);
-                last_session_seen = Instant::now();
-                timeline_cache.clear();
+                media_state.last_session_seen = Instant::now();
+                media_state.timeline_cache.clear();
                 log::info!("SMTC: listener enabled");
             } else {
-                thumbnail_fetcher = None;
+                media_state.thumbnail_fetcher = None;
                 let _ = info_tx.send(MediaInfo::default());
-                last_was_playing = false;
-                timeline_cache.clear();
+                media_state.last_was_playing = false;
+                media_state.timeline_cache.clear();
                 log::info!("SMTC: listener disabled");
             }
         }
@@ -192,7 +190,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             seek_pos = Some(v);
         }
         if let Some(seek_pos) = seek_pos
-            && let Some(session) = get_target_session(&manager, &current_allowed_apps)
+            && let Some(session) = get_target_session(&manager, &media_state.allowed_apps)
         {
             let seek_pos = seek_pos.min(i64::MAX as u64 / 10_000);
             let source_app_id = session
@@ -220,7 +218,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
 
         while let Ok(cmd) = playback_rx.try_recv() {
             log::info!("SMTC: playback command {:?}", cmd);
-            if let Some(session) = get_target_session(&manager, &current_allowed_apps) {
+            if let Some(session) = get_target_session(&manager, &media_state.allowed_apps) {
                 match cmd {
                     PlaybackCommand::Toggle => {
                         if let Ok(pb_info) = session.GetPlaybackInfo()
@@ -245,19 +243,13 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
 
         if event_rx.try_recv().is_ok() {
             log::debug!("SMTC: session change event received, updating immediately");
-            update_media_info(
+            media_state.update(
                 &manager,
                 &info_tx,
                 current_lyrics_mode,
                 &current_lyrics_source,
                 current_lyrics_local_dir.as_deref(),
-                &mut current_allowed_apps,
-                &mut known_apps,
                 true,
-                &mut last_session_seen,
-                &mut last_was_playing,
-                thumbnail_fetcher.as_ref(),
-                &mut timeline_cache,
             );
             last_regular_update = Instant::now();
         }
@@ -265,19 +257,13 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         if last_regular_update.elapsed() > Duration::from_millis(300) {
             regular_poll_count += 1;
             let do_auto_allow = regular_poll_count.is_multiple_of(10);
-            update_media_info(
+            media_state.update(
                 &manager,
                 &info_tx,
                 current_lyrics_mode,
                 &current_lyrics_source,
                 current_lyrics_local_dir.as_deref(),
-                &mut current_allowed_apps,
-                &mut known_apps,
                 do_auto_allow,
-                &mut last_session_seen,
-                &mut last_was_playing,
-                thumbnail_fetcher.as_ref(),
-                &mut timeline_cache,
             );
             last_regular_update = Instant::now();
         }
@@ -292,70 +278,75 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn update_media_info(
-    manager: &GlobalSystemMediaTransportControlsSessionManager,
-    info_tx: &watch::Sender<MediaInfo>,
-    lyrics_mode: LyricsMode,
-    lyrics_source: &str,
-    local_dir: Option<&str>,
-    allowed_apps: &mut Vec<String>,
-    known_apps: &mut Vec<String>,
-    auto_allow: bool,
-    last_session_seen: &mut Instant,
-    last_was_playing: &mut bool,
-    thumbnail_fetcher: Option<&ThumbnailFetcher>,
-    timeline_cache: &mut TimelineCache,
-) {
-    if auto_allow {
-        *allowed_apps = auto_allow_new_apps(manager, allowed_apps, known_apps);
-    }
+struct MediaUpdateState {
+    allowed_apps: Vec<String>,
+    known_apps: Vec<String>,
+    last_session_seen: Instant,
+    last_was_playing: bool,
+    thumbnail_fetcher: Option<ThumbnailFetcher>,
+    timeline_cache: TimelineCache,
+}
 
-    if let Some(session) = get_target_session(manager, allowed_apps) {
-        let result = fetch_properties(
-            &session,
-            info_tx,
-            lyrics_mode,
-            lyrics_source,
-            local_dir,
-            thumbnail_fetcher,
-            timeline_cache,
-        );
-        match result {
-            Ok(()) => {
-                *last_session_seen = Instant::now();
-                *last_was_playing = info_tx.borrow().is_playing;
-            }
-            Err(error) => {
-                log::debug!("SMTC: failed to read active session: {error}");
-                if last_session_seen.elapsed() > Duration::from_secs(5) {
-                    let info = info_tx.borrow();
-                    if !info.title.is_empty() {
-                        drop(info);
-                        let _ = info_tx.send(MediaInfo::default());
-                        timeline_cache.clear();
-                        *last_was_playing = false;
-                        log::warn!("SMTC: active session failed for >5s, cleared media info");
+impl MediaUpdateState {
+    fn update(
+        &mut self,
+        manager: &GlobalSystemMediaTransportControlsSessionManager,
+        info_tx: &watch::Sender<MediaInfo>,
+        lyrics_mode: LyricsMode,
+        lyrics_source: &str,
+        local_dir: Option<&str>,
+        auto_allow: bool,
+    ) {
+        if auto_allow {
+            self.allowed_apps =
+                auto_allow_new_apps(manager, &self.allowed_apps, &mut self.known_apps);
+        }
+
+        if let Some(session) = get_target_session(manager, &self.allowed_apps) {
+            match fetch_properties(
+                &session,
+                info_tx,
+                lyrics_mode,
+                lyrics_source,
+                local_dir,
+                self.thumbnail_fetcher.as_ref(),
+                &mut self.timeline_cache,
+            ) {
+                Ok(()) => {
+                    self.last_session_seen = Instant::now();
+                    self.last_was_playing = info_tx.borrow().is_playing;
+                }
+                Err(error) => {
+                    log::debug!("SMTC: failed to read active session: {error}");
+                    if self.last_session_seen.elapsed() > Duration::from_secs(5) {
+                        let info = info_tx.borrow();
+                        if !info.title.is_empty() {
+                            drop(info);
+                            let _ = info_tx.send(MediaInfo::default());
+                            self.timeline_cache.clear();
+                            self.last_was_playing = false;
+                            log::warn!("SMTC: active session failed for >5s, cleared media info");
+                        }
                     }
                 }
             }
-        }
-    } else if *last_was_playing {
-        let info = info_tx.borrow();
-        if !info.title.is_empty() {
-            drop(info);
-            let _ = info_tx.send(MediaInfo::default());
-            timeline_cache.clear();
-            log::info!("SMTC: app closed while playing, cleared immediately");
-        }
-        *last_was_playing = false;
-    } else if last_session_seen.elapsed() > Duration::from_secs(15) {
-        let info = info_tx.borrow();
-        if !info.title.is_empty() {
-            drop(info);
-            let _ = info_tx.send(MediaInfo::default());
-            timeline_cache.clear();
-            log::info!("SMTC: paused session lost for >15s, cleared media info");
+        } else if self.last_was_playing {
+            let info = info_tx.borrow();
+            if !info.title.is_empty() {
+                drop(info);
+                let _ = info_tx.send(MediaInfo::default());
+                self.timeline_cache.clear();
+                log::info!("SMTC: app closed while playing, cleared immediately");
+            }
+            self.last_was_playing = false;
+        } else if self.last_session_seen.elapsed() > Duration::from_secs(15) {
+            let info = info_tx.borrow();
+            if !info.title.is_empty() {
+                drop(info);
+                let _ = info_tx.send(MediaInfo::default());
+                self.timeline_cache.clear();
+                log::info!("SMTC: paused session lost for >15s, cleared media info");
+            }
         }
     }
 }

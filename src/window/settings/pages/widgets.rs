@@ -135,15 +135,14 @@ impl SettingsApp {
             return None;
         }
         Some(widget_preview_hit_test(
-            mouse_x - SIDEBAR_W,
-            mouse_y + self.scroll_y,
-            item_y,
-            width,
-            self.config.expanded_width,
-            self.config.expanded_height,
-            &self.config.widget_layout,
-            &self.config.plugin_widget_layout,
-            &self.plugin_widgets,
+            (mouse_x - SIDEBAR_W, mouse_y + self.scroll_y),
+            (item_y, width),
+            (self.config.expanded_width, self.config.expanded_height),
+            (
+                &self.config.widget_layout,
+                &self.config.plugin_widget_layout,
+                &self.plugin_widgets,
+            ),
             self.widget_dragging.as_ref(),
         ))
     }
@@ -161,12 +160,9 @@ impl SettingsApp {
             return None;
         }
         Some(compact_widget_preview_hit_test(
-            mouse_x - SIDEBAR_W,
-            mouse_y + self.scroll_y,
-            item_y,
-            width,
-            self.config.base_width,
-            self.config.base_height,
+            (mouse_x - SIDEBAR_W, mouse_y + self.scroll_y),
+            (item_y, width),
+            (self.config.base_width, self.config.base_height),
             &self.config.compact_widget_layout,
             self.compact_widget_dragging,
         ))

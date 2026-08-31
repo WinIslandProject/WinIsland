@@ -131,17 +131,25 @@ fn draw_island_background(
     if island_style == "glass" || island_style == "mica" {
         paint.set_color(Color::from_argb(220, 24, 24, 28));
     } else if island_style == "dynamic" {
-        let colors = [Color::from_rgb(18, 12, 36), Color::from_rgb(8, 24, 48)];
-        #[allow(deprecated)]
-        if let Some(shader) = skia_safe::gradient_shader::linear(
+        let colors = [
+            skia_safe::Color4f::from(Color::from_rgb(18, 12, 36)),
+            skia_safe::Color4f::from(Color::from_rgb(8, 24, 48)),
+        ];
+        let colors = skia_safe::gradient::Colors::new_evenly_spaced(
+            &colors,
+            skia_safe::TileMode::Clamp,
+            None,
+        );
+        let gradient = skia_safe::gradient::Gradient::new(
+            colors,
+            skia_safe::gradient::Interpolation::default(),
+        );
+        if let Some(shader) = skia_safe::gradient::shaders::linear_gradient(
             (
                 Point::new(rect.left, rect.top),
                 Point::new(rect.right, rect.bottom),
             ),
-            &colors[..],
-            None,
-            skia_safe::TileMode::Clamp,
-            None,
+            &gradient,
             None,
         ) {
             paint.set_shader(Some(shader));

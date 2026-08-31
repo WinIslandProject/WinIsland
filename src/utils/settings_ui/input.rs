@@ -424,17 +424,16 @@ pub fn compact_widget_grid_geom(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn compact_widget_preview_hit_test(
-    mx: f32,
-    my: f32,
-    item_y: f32,
-    width: f32,
-    base_width: f32,
-    base_height: f32,
+    mouse: (f32, f32),
+    panel: (f32, f32),
+    base_size: (f32, f32),
     layout: &[CompactWidgetSlot],
     dragging: Option<CompactWidgetKind>,
 ) -> CompactWidgetPreviewHit {
+    let (mx, my) = mouse;
+    let (item_y, width) = panel;
+    let (base_width, base_height) = base_size;
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
     let panel_y = item_y + 10.0;
     let library_y = panel_y + COMPACT_WIDGET_ISLAND_PANEL_H + WIDGET_PANEL_GAP;
@@ -457,19 +456,17 @@ pub fn compact_widget_preview_hit_test(
     CompactWidgetPreviewHit::None
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn widget_preview_hit_test(
-    mx: f32,
-    my: f32,
-    item_y: f32,
-    width: f32,
-    expanded_width: f32,
-    expanded_height: f32,
-    widget_layout: &[WidgetSlot],
-    plugin_widget_layout: &[PluginWidgetSlot],
-    plugin_widgets: &[PluginWidget],
+    mouse: (f32, f32),
+    panel: (f32, f32),
+    expanded_size: (f32, f32),
+    layouts: (&[WidgetSlot], &[PluginWidgetSlot], &[PluginWidget]),
     dragging: Option<&WidgetSource>,
 ) -> WidgetPreviewHit {
+    let (mx, my) = mouse;
+    let (item_y, width) = panel;
+    let (expanded_width, expanded_height) = expanded_size;
+    let (widget_layout, plugin_widget_layout, plugin_widgets) = layouts;
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
     let py = item_y + 10.0;
     let library_panel_y = py + WIDGET_ISLAND_PANEL_H + WIDGET_PANEL_GAP;

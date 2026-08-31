@@ -589,8 +589,7 @@ fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, width: f32, active: 
                 PluginPageTab::Installed => "plugin_tab_installed",
                 PluginPageTab::Marketplace => "plugin_tab_marketplace",
             }),
-            rect.center_x(),
-            rect.top + 21.0,
+            (rect.center_x(), rect.top + 21.0),
             12.0,
             tab == active,
             &paint,
@@ -730,8 +729,7 @@ fn draw_marketplace_action(
         canvas,
         fm,
         label,
-        rect.center_x(),
-        rect.top + 19.0,
+        (rect.center_x(), rect.top + 19.0),
         11.0,
         true,
         &paint,
@@ -770,8 +768,7 @@ fn draw_empty_state(
         canvas,
         fm,
         title,
-        width / 2.0,
-        baseline,
+        (width / 2.0, baseline),
         13.0,
         false,
         &paint,
@@ -794,8 +791,7 @@ fn draw_empty_state(
             canvas,
             fm,
             &detail,
-            width / 2.0,
-            baseline + 21.0,
+            (width / 2.0, baseline + 21.0),
             10.5,
             false,
             &paint,
@@ -814,8 +810,7 @@ fn draw_retry_button(canvas: &Canvas, theme: &SettingsTheme, width: f32, y: f32)
         canvas,
         FontManager::global(),
         &tr("plugin_marketplace_retry"),
-        rect.center_x(),
-        rect.top + 18.0,
+        (rect.center_x(), rect.top + 18.0),
         11.0,
         true,
         &paint,
@@ -903,8 +898,7 @@ pub(super) fn draw_plugin_icon_data(
         canvas,
         FontManager::global(),
         &initial,
-        rect.center_x(),
-        rect.center_y() + rect.height() * 0.16,
+        (rect.center_x(), rect.center_y() + rect.height() * 0.16),
         rect.height() * 0.44,
         true,
         &paint,
@@ -935,17 +929,16 @@ pub(super) fn ellipsize_text(
     fitted
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_centered_text(
     canvas: &Canvas,
     fm: &FontManager,
     text: &str,
-    center_x: f32,
-    baseline: f32,
+    position: (f32, f32),
     size: f32,
     bold: bool,
     paint: &Paint,
 ) {
+    let (center_x, baseline) = position;
     let style = if bold {
         FontStyle::bold()
     } else {

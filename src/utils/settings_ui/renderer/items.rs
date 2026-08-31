@@ -300,17 +300,15 @@ fn draw_row_font_picker(
     advance_group_row(ctx, y + ROW_HEIGHT, groups, visible);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_row_folder_picker(
     ctx: &ItemCtx,
     y: f32,
-    label: &str,
-    btn_label: &str,
-    clear_label: &Option<String>,
+    labels: (&str, &str, &Option<String>),
     current_path: &Option<String>,
     enabled: bool,
     groups: &mut GroupRows,
 ) {
+    let (label, btn_label, clear_label) = labels;
     let canvas = ctx.canvas;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
@@ -858,9 +856,7 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                 draw_row_folder_picker(
                     &ctx,
                     y,
-                    label,
-                    btn_label,
-                    clear_label,
+                    (label, btn_label, clear_label),
                     current_path,
                     *enabled,
                     &mut groups,

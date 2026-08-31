@@ -152,14 +152,9 @@ pub fn get_glass_background(
         // SAFETY: dimensions are non-zero and capture_pixels validates every GDI handle.
         if unsafe {
             !capture_pixels(
-                screen_x,
-                screen_y,
-                width,
-                height,
-                monitor_x,
-                monitor_y,
-                monitor_w,
-                monitor_h,
+                (screen_x, screen_y),
+                (width, height),
+                (monitor_x, monitor_y, monitor_w, monitor_h),
                 &info,
                 &mut cache.pixels,
             )
@@ -272,19 +267,16 @@ fn div_ceil(value: u32, divisor: u32) -> u32 {
     value.div_ceil(divisor).max(1)
 }
 
-#[allow(clippy::too_many_arguments)]
 unsafe fn capture_pixels(
-    screen_x: i32,
-    screen_y: i32,
-    width: u32,
-    height: u32,
-    monitor_x: i32,
-    monitor_y: i32,
-    monitor_w: u32,
-    monitor_h: u32,
+    origin: (i32, i32),
+    size: (u32, u32),
+    monitor: (i32, i32, u32, u32),
     info: &ImageInfo,
     pixels: &mut Vec<u8>,
 ) -> bool {
+    let (screen_x, screen_y) = origin;
+    let (width, height) = size;
+    let (monitor_x, monitor_y, monitor_w, monitor_h) = monitor;
     let cap_w = info.width();
     let cap_h = info.height();
     let width_i32 = width as i32;
