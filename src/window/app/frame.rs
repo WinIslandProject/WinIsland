@@ -373,9 +373,13 @@ impl App {
     }
 
     fn poll_media_info(&mut self, window: &Window) -> (bool, bool) {
-        if let Some(media) = self.smtc.take_info_if_changed() {
+        let smtc_cover_changed = self.smtc.take_info_if_changed().is_some_and(|media| {
+            let cover_changed = self.plugin_media_source.is_none()
+                && media.thumbnail.is_some()
+                && media.thumbnail_hash != self.smtc_media_info.thumbnail_hash;
             self.smtc_media_info = media;
-        }
+            cover_changed
+        });
         self.audio.set_target_app_id(self.audio_target_app_id());
         let music_active = self.media_active();
         let media_is_playing = music_active && self.current_media_info().is_playing;
@@ -400,9 +404,14 @@ impl App {
                 crate::utils::backdrop::clear_blurred_cover_cache();
             }
         }
-        if music_active && title != self.last_media_title {
+        let track_changed = music_active && title != self.last_media_title;
+        if track_changed {
             log::info!("Track changed: {title} - {artist} / {album}");
             self.last_media_title = title;
+            crate::ui::expanded::music_view::trigger_cover_flip();
+            window.request_redraw();
+        } else if smtc_cover_changed {
+            log::info!("SMTC: late thumbnail applied");
             crate::ui::expanded::music_view::trigger_cover_flip();
             window.request_redraw();
         }
