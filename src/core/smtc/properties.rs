@@ -570,6 +570,7 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
                     byte_len,
                     hash
                 );
+                crate::utils::event_loop::wake();
             }
             return;
         }

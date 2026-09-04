@@ -40,11 +40,12 @@ pub(super) fn ease_out_back(t: f32) -> f32 {
 }
 
 pub fn trigger_cover_flip() {
-    let old_img =
-        IMG_CACHE.with(|cache| cache.borrow().as_ref().and_then(|(_, image)| image.clone()));
-    COVER_FLIP_OLD_IMG.with(|cell| {
-        *cell.borrow_mut() = old_img;
-    });
+    let old_img = IMG_CACHE.with(|cache| cache.borrow_mut().take().and_then(|(_, image)| image));
+    if let Some(old_img) = old_img {
+        COVER_FLIP_OLD_IMG.with(|cell| {
+            *cell.borrow_mut() = Some(old_img);
+        });
+    }
     COVER_FLIP_ANIM.with(|cell| {
         *cell.borrow_mut() = Some(std::time::Instant::now());
     });
