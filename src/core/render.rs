@@ -2,7 +2,9 @@ mod background;
 mod expanded;
 mod mini;
 
-pub(crate) use mini::lyric_font_size as mini_lyric_font_size;
+pub(crate) use mini::{
+    lyric_font_size as mini_lyric_font_size, lyric_pair_height as mini_lyric_pair_height,
+};
 
 use self::background::{BackgroundParams, draw_background};
 use self::expanded::{ExpandedContentParams, draw_expanded_content};
@@ -39,7 +41,9 @@ pub struct MediaParams<'a> {
 
 pub struct LyricsParams<'a> {
     pub current_lyric: &'a str,
+    pub current_secondary_lyric: &'a str,
     pub old_lyric: &'a str,
+    pub old_secondary_lyric: &'a str,
     pub lyric_highlight: Option<LyricHighlight>,
     pub lyric_transition: f32,
     pub lyric_scroll_offset: f32,
@@ -114,7 +118,9 @@ pub fn draw_island(
     } = media;
     let LyricsParams {
         current_lyric,
+        current_secondary_lyric,
         old_lyric,
+        old_secondary_lyric,
         lyric_highlight,
         lyric_transition,
         lyric_scroll_offset,
@@ -253,7 +259,9 @@ pub fn draw_island(
             palette: &palette,
             viz_h_scale,
             current_lyric,
+            current_secondary_lyric,
             old_lyric,
+            old_secondary_lyric,
             lyric_highlight,
             expansion_progress,
             font_size,

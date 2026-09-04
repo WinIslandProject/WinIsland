@@ -1,5 +1,8 @@
 # Changelog
 
+### v1.3.2
+- Added optional secondary lyrics in the compact island with adaptive two-line layout
+
 ### v1.3.1
 - Added word-synced LRC lyrics with smooth per-character highlighting
 - Added QQ Music as a lyrics source

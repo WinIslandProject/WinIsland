@@ -13,6 +13,9 @@ use crate::ui::expanded::music_view::{
 use crate::utils::font::{DrawTextCachedParams, FontManager};
 
 const PENDING_LYRIC_CHANNEL: u8 = 190;
+const SECONDARY_LYRIC_SCALE: f32 = 0.85;
+const LYRIC_PAIR_GAP_SCALE: f32 = 0.18;
+const SECONDARY_LYRIC_CHANNEL: u8 = 176;
 
 pub(crate) fn lyric_font_size(font_size: f32, global_scale: f32) -> f32 {
     if font_size > 0.0 {
@@ -20,6 +23,11 @@ pub(crate) fn lyric_font_size(font_size: f32, global_scale: f32) -> f32 {
     } else {
         12.0 * global_scale
     }
+}
+
+pub(crate) fn lyric_pair_height(font_size: f32, global_scale: f32) -> f32 {
+    let primary_size = lyric_font_size(font_size, global_scale);
+    primary_size * (1.0 + SECONDARY_LYRIC_SCALE + LYRIC_PAIR_GAP_SCALE) + 8.0 * global_scale
 }
 
 pub(super) struct MiniContentParams<'a> {
@@ -35,7 +43,9 @@ pub(super) struct MiniContentParams<'a> {
     pub(super) palette: &'a [Color],
     pub(super) viz_h_scale: f32,
     pub(super) current_lyric: &'a str,
+    pub(super) current_secondary_lyric: &'a str,
     pub(super) old_lyric: &'a str,
+    pub(super) old_secondary_lyric: &'a str,
     pub(super) lyric_highlight: Option<LyricHighlight>,
     pub(super) expansion_progress: f32,
     pub(super) font_size: f32,
@@ -59,7 +69,9 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
         palette,
         viz_h_scale,
         current_lyric,
+        current_secondary_lyric,
         old_lyric,
+        old_secondary_lyric,
         lyric_highlight,
         expansion_progress,
         font_size,
@@ -136,7 +148,11 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
                     smooth_factors: (0.6, 0.08),
                 });
 
-                if !current_lyric.is_empty() || !old_lyric.is_empty() {
+                if !current_lyric.is_empty()
+                    || !current_secondary_lyric.is_empty()
+                    || !old_lyric.is_empty()
+                    || !old_secondary_lyric.is_empty()
+                {
                     let lyric_fade_f = (1.0 - expansion_progress * 2.5).clamp(0.0, 1.0);
                     let alpha = (alpha as f32 * lyric_fade_f) as u8;
 
@@ -180,26 +196,17 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
                                     ));
                                 }
 
-                                let text_y = stable_offset_y + base_h / 2.0 + 4.0 * global_scale
-                                    - (10.0 * global_scale * lyric_transition);
-                                let old_lx = if text_centered {
-                                    let w = FontManager::global().measure_text_cached(
-                                        old_lyric,
-                                        lyric_font_sz,
-                                        skia_safe::FontStyle::normal(),
-                                    );
-                                    text_x - w / 2.0
-                                } else {
-                                    text_x
-                                };
-                                draw_text_cached(DrawTextCachedParams {
+                                draw_lyric_pair(LyricPairParams {
                                     canvas,
-                                    text: old_lyric,
-                                    x: old_lx,
-                                    y: text_y,
+                                    primary: old_lyric,
+                                    secondary: old_secondary_lyric,
+                                    anchor_x: text_x,
+                                    center_y: stable_offset_y + base_h / 2.0
+                                        - 10.0 * global_scale * lyric_transition,
                                     size: lyric_font_sz,
-                                    bold: false,
+                                    centered: text_centered,
                                     paint: &text_paint,
+                                    highlight: None,
                                 });
                             }
 
@@ -224,32 +231,21 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
                                     ));
                                 }
 
-                                let text_y = stable_offset_y
-                                    + base_h / 2.0
-                                    + 4.0 * global_scale
-                                    + (10.0 * global_scale * (1.0 - lyric_transition));
-                                let cur_lx = if text_centered {
-                                    let w = FontManager::global().measure_text_cached(
-                                        current_lyric,
-                                        lyric_font_sz,
-                                        skia_safe::FontStyle::normal(),
-                                    );
-                                    text_x - w / 2.0
-                                } else {
-                                    text_x
-                                };
-                                draw_highlighted_lyric(
+                                draw_lyric_pair(LyricPairParams {
                                     canvas,
-                                    current_lyric,
-                                    cur_lx,
-                                    text_y,
-                                    lyric_font_sz,
-                                    &text_paint,
-                                    lyric_highlight,
-                                );
+                                    primary: current_lyric,
+                                    secondary: current_secondary_lyric,
+                                    anchor_x: text_x,
+                                    center_y: stable_offset_y
+                                        + base_h / 2.0
+                                        + 10.0 * global_scale * (1.0 - lyric_transition),
+                                    size: lyric_font_sz,
+                                    centered: text_centered,
+                                    paint: &text_paint,
+                                    highlight: lyric_highlight,
+                                });
                             }
                         } else {
-                            let text_y = stable_offset_y + base_h / 2.0 + 4.0 * global_scale;
                             if lyric_transition < 0.5 && !old_lyric.is_empty() {
                                 let mut text_paint = Paint::default();
                                 text_paint.set_anti_alias(true);
@@ -261,24 +257,16 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
                                     text_color.g(),
                                     text_color.b(),
                                 ));
-                                let old_lx2 = if text_centered {
-                                    let w = FontManager::global().measure_text_cached(
-                                        old_lyric,
-                                        lyric_font_sz,
-                                        skia_safe::FontStyle::normal(),
-                                    );
-                                    text_x - w / 2.0
-                                } else {
-                                    text_x
-                                };
-                                draw_text_cached(DrawTextCachedParams {
+                                draw_lyric_pair(LyricPairParams {
                                     canvas,
-                                    text: old_lyric,
-                                    x: old_lx2,
-                                    y: text_y,
+                                    primary: old_lyric,
+                                    secondary: old_secondary_lyric,
+                                    anchor_x: text_x,
+                                    center_y: stable_offset_y + base_h / 2.0,
                                     size: lyric_font_sz,
-                                    bold: false,
+                                    centered: text_centered,
                                     paint: &text_paint,
+                                    highlight: None,
                                 });
                             } else if lyric_transition >= 0.5 && !current_lyric.is_empty() {
                                 let mut text_paint = Paint::default();
@@ -291,25 +279,17 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
                                     text_color.g(),
                                     text_color.b(),
                                 ));
-                                let cur_lx2 = if text_centered {
-                                    let w = FontManager::global().measure_text_cached(
-                                        current_lyric,
-                                        lyric_font_sz,
-                                        skia_safe::FontStyle::normal(),
-                                    );
-                                    text_x - w / 2.0
-                                } else {
-                                    text_x
-                                };
-                                draw_highlighted_lyric(
+                                draw_lyric_pair(LyricPairParams {
                                     canvas,
-                                    current_lyric,
-                                    cur_lx2,
-                                    text_y,
-                                    lyric_font_sz,
-                                    &text_paint,
-                                    lyric_highlight,
-                                );
+                                    primary: current_lyric,
+                                    secondary: current_secondary_lyric,
+                                    anchor_x: text_x,
+                                    center_y: stable_offset_y + base_h / 2.0,
+                                    size: lyric_font_sz,
+                                    centered: text_centered,
+                                    paint: &text_paint,
+                                    highlight: lyric_highlight,
+                                });
                             }
                         }
                         canvas.restore();
@@ -375,6 +355,89 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
             }
             None => {}
         }
+    }
+}
+
+struct LyricPairParams<'a> {
+    canvas: &'a Canvas,
+    primary: &'a str,
+    secondary: &'a str,
+    anchor_x: f32,
+    center_y: f32,
+    size: f32,
+    centered: bool,
+    paint: &'a Paint,
+    highlight: Option<LyricHighlight>,
+}
+
+fn draw_lyric_pair(params: LyricPairParams<'_>) {
+    let LyricPairParams {
+        canvas,
+        primary,
+        secondary,
+        anchor_x,
+        center_y,
+        size,
+        centered,
+        paint,
+        highlight,
+    } = params;
+    let has_pair = !primary.is_empty() && !secondary.is_empty();
+    let secondary_size = size * SECONDARY_LYRIC_SCALE;
+    let gap = size * LYRIC_PAIR_GAP_SCALE;
+    let stack_height = size + secondary_size + gap;
+    let primary_y = if has_pair {
+        center_y - stack_height / 2.0 + size * 0.8
+    } else {
+        center_y + size / 3.0
+    };
+    let secondary_y = if has_pair {
+        center_y + stack_height / 2.0 - secondary_size * 0.2
+    } else {
+        center_y + secondary_size / 3.0
+    };
+    let text_x = |text: &str, text_size: f32| {
+        if centered {
+            let width = FontManager::global().measure_text_cached(
+                text,
+                text_size,
+                skia_safe::FontStyle::normal(),
+            );
+            anchor_x - width / 2.0
+        } else {
+            anchor_x
+        }
+    };
+
+    if !primary.is_empty() {
+        draw_highlighted_lyric(
+            canvas,
+            primary,
+            text_x(primary, size),
+            primary_y,
+            size,
+            paint,
+            highlight,
+        );
+    }
+    if !secondary.is_empty() {
+        let mut secondary_paint = paint.clone();
+        let color = paint.color();
+        secondary_paint.set_color(Color::from_argb(
+            color.a(),
+            SECONDARY_LYRIC_CHANNEL,
+            SECONDARY_LYRIC_CHANNEL,
+            SECONDARY_LYRIC_CHANNEL,
+        ));
+        draw_text_cached(DrawTextCachedParams {
+            canvas,
+            text: secondary,
+            x: text_x(secondary, secondary_size),
+            y: secondary_y,
+            size: secondary_size,
+            bold: false,
+            paint: &secondary_paint,
+        });
     }
 }
 

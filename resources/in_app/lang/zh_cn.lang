@@ -128,6 +128,7 @@ created_by=作者
 music_settings_title=音乐设置
 smtc_control=SMTC 控制
 show_lyrics=显示歌词
+show_secondary_lyrics=显示附加歌词
 lyrics_mode=歌词模式
 lyrics_mode_online=在线
 lyrics_mode_lrc=LRC 文件夹

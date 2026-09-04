@@ -243,7 +243,9 @@ impl SeekDrag {
 
 struct LyricState {
     current_text: String,
+    current_secondary_text: String,
     old_text: String,
+    old_secondary_text: String,
     highlight: Option<LyricHighlight>,
     transition: f32,
     scroll_offset: f32,
@@ -254,7 +256,9 @@ impl Default for LyricState {
     fn default() -> Self {
         Self {
             current_text: String::new(),
+            current_secondary_text: String::new(),
             old_text: String::new(),
+            old_secondary_text: String::new(),
             highlight: None,
             transition: 1.0,
             scroll_offset: 0.0,
@@ -267,10 +271,13 @@ impl LyricState {
     fn transition_to(
         &mut self,
         text: String,
+        secondary_text: String,
         highlight: Option<LyricHighlight>,
         show_immediately: bool,
     ) {
         self.old_text = std::mem::replace(&mut self.current_text, text);
+        self.old_secondary_text =
+            std::mem::replace(&mut self.current_secondary_text, secondary_text);
         self.highlight = highlight;
         self.transition = if show_immediately { 1.0 } else { 0.0 };
         self.scroll_offset = 0.0;

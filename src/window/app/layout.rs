@@ -357,7 +357,6 @@ impl App {
         };
 
         let hide_edge = self.hide.edge;
-        let scale = self.config.global_scale as f64;
         let edge_size = match hide_edge {
             HideEdge::Top | HideEdge::Bottom => self.springs.h.value as f64,
             HideEdge::Left | HideEdge::Right => self.springs.w.value as f64,
@@ -381,8 +380,12 @@ impl App {
             HideEdge::Left => (offset_x - hide_offset, island_y),
             HideEdge::Right => (offset_x + hide_offset, island_y),
         };
+        let compact_content_h = self
+            .compact_content_height()
+            .min(self.springs.h.value)
+            .max(0.0) as f64;
         let stable_base_y = if dock_bottom {
-            self.geom.os_h as f64 - TOP_OFFSET as f64 - self.config.base_height as f64 * scale
+            self.geom.os_h as f64 - TOP_OFFSET as f64 - compact_content_h
         } else {
             TOP_OFFSET as f64
         };
@@ -433,11 +436,58 @@ impl App {
         }
     }
 
+    pub(super) fn compact_content_height(&self) -> f32 {
+        let scale = self.config.global_scale.max(f32::EPSILON);
+        let base_height = self.config.base_height * scale;
+        let has_secondary_lyric = !self.lyrics.current_secondary_text.is_empty()
+            || (!self.lyrics.old_secondary_text.is_empty() && self.lyrics.transition < 1.0);
+        if !self.config.show_lyrics
+            || !self.config.show_secondary_lyrics
+            || !has_secondary_lyric
+            || !matches!(
+                self.ctx_mgr.current_mini(),
+                Some(crate::core::context::MiniContent::Music)
+            )
+        {
+            return base_height;
+        }
+
+        base_height.max(crate::core::render::mini_lyric_pair_height(
+            self.config.font_size,
+            scale,
+        ))
+    }
+
+    fn displayed_lyric_texts(&self) -> (&str, &str) {
+        let (primary, secondary) = if !self.lyrics.current_text.is_empty() {
+            (
+                self.lyrics.current_text.as_str(),
+                self.lyrics.current_secondary_text.as_str(),
+            )
+        } else {
+            (
+                self.lyrics.old_text.as_str(),
+                self.lyrics.old_secondary_text.as_str(),
+            )
+        };
+        let secondary = if self.config.show_secondary_lyrics {
+            secondary
+        } else {
+            ""
+        };
+        (primary, secondary)
+    }
+
     pub(super) fn measure_lyric_text_width(&self, text: &str) -> f32 {
         let scale = self.config.global_scale.max(f32::EPSILON);
         let font_size = crate::core::render::mini_lyric_font_size(self.config.font_size, scale);
         FontManager::global().measure_text_cached(text, font_size, skia_safe::FontStyle::normal())
             / scale
+    }
+
+    fn measure_lyric_pair_width(&self, primary: &str, secondary: &str) -> f32 {
+        self.measure_lyric_text_width(primary)
+            .max(self.measure_lyric_text_width(secondary))
     }
 
     pub(super) fn compute_lyric_target_width(
@@ -454,12 +504,8 @@ impl App {
 
             if has_visible_lyrics {
                 if self.config.lyrics_scroll {
-                    let display_text = if !self.lyrics.current_text.is_empty() {
-                        &self.lyrics.current_text
-                    } else {
-                        &self.lyrics.old_text
-                    };
-                    let text_w = self.measure_lyric_text_width(display_text);
+                    let (primary, secondary) = self.displayed_lyric_texts();
+                    let text_w = self.measure_lyric_pair_width(primary, secondary);
                     let natural_w = 60.0 + text_w;
                     let max_w = self.config.lyrics_scroll_max_width;
                     if natural_w > max_w {
@@ -489,12 +535,8 @@ impl App {
                         natural_w.clamp(min_w.min(max_w), max_w)
                     }
                 } else {
-                    let display_text = if !self.lyrics.current_text.is_empty() {
-                        &self.lyrics.current_text
-                    } else {
-                        &self.lyrics.old_text
-                    };
-                    let text_w = self.measure_lyric_text_width(display_text);
+                    let (primary, secondary) = self.displayed_lyric_texts();
+                    let text_w = self.measure_lyric_pair_width(primary, secondary);
                     self.lyrics.scroll_offset = 0.0;
                     let min_w = self.config.base_width + 35.0;
                     let w: f32 = 60.0 + text_w;

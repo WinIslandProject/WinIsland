@@ -80,6 +80,7 @@ async fn get_json_request(request: reqwest::RequestBuilder) -> Option<Value> {
 pub struct LyricLine {
     pub time_ms: u64,
     pub text: String,
+    pub(crate) secondary_text: Option<String>,
     timings: Vec<LyricTiming>,
 }
 
@@ -948,7 +949,7 @@ fn parse_lyrics(lrc: &str, tlrc: &str) -> Vec<LyricLine> {
         let mut standard_lrc = String::with_capacity(content.len());
         for source_line in content.lines() {
             if let Some(line) = parse_word_synced_line(source_line) {
-                map.entry(line.time_ms).or_insert(line);
+                merge_lyric_line(&mut map, line);
             } else {
                 standard_lrc.push_str(source_line);
                 standard_lrc.push('\n');
@@ -968,17 +969,15 @@ fn parse_lyrics(lrc: &str, tlrc: &str) -> Vec<LyricLine> {
             if timestamp < 0 {
                 continue;
             }
-            map.entry(timestamp as u64)
-                .and_modify(|current| {
-                    if current.text.is_empty() && !text.is_empty() {
-                        current.text = text.to_string();
-                    }
-                })
-                .or_insert_with(|| LyricLine {
+            merge_lyric_line(
+                &mut map,
+                LyricLine {
                     time_ms: timestamp as u64,
                     text: text.to_string(),
+                    secondary_text: None,
                     timings: Vec::new(),
-                });
+                },
+            );
         }
     };
 
@@ -986,6 +985,22 @@ fn parse_lyrics(lrc: &str, tlrc: &str) -> Vec<LyricLine> {
     process_content(tlrc, false);
 
     map.into_values().collect()
+}
+
+fn merge_lyric_line(map: &mut BTreeMap<u64, LyricLine>, line: LyricLine) {
+    let Some(current) = map.get_mut(&line.time_ms) else {
+        map.insert(line.time_ms, line);
+        return;
+    };
+    if line.text.is_empty() {
+        return;
+    }
+    if current.text.is_empty() {
+        current.text = line.text;
+        current.timings = line.timings;
+    } else if current.text != line.text && current.secondary_text.is_none() {
+        current.secondary_text = Some(line.text);
+    }
 }
 
 fn parse_word_synced_line(line: &str) -> Option<LyricLine> {
@@ -1033,6 +1048,7 @@ fn parse_word_synced_line(line: &str) -> Option<LyricLine> {
     Some(LyricLine {
         time_ms: timings.first()?.start_time_ms,
         text,
+        secondary_text: None,
         timings,
     })
 }

@@ -108,13 +108,13 @@ impl App {
                         } else {
                             (0.0, 0.0)
                         };
-                        let total_h = (self.config.expanded_height - self.config.base_height)
+                        let compact_target_h = self.compact_content_height();
+                        let compact_content_h = compact_target_h.min(self.springs.h.value).max(0.0);
+                        let total_h = (self.config.expanded_height * self.config.global_scale
+                            - compact_target_h)
                             .abs()
-                            .max(1.0)
-                            * self.config.global_scale;
-                        let dist_h = (self.springs.h.value
-                            - self.config.base_height * self.config.global_scale)
-                            .abs();
+                            .max(1.0);
+                        let dist_h = (self.springs.h.value - compact_target_h).abs();
                         let progress = (dist_h / total_h).clamp(0.0, 1.0);
                         if let Some(event) = crate::plugin::manager::drain_media_source_event() {
                             match event {
@@ -222,6 +222,15 @@ impl App {
                             }
                         }
                         let mini_content = self.ctx_mgr.current_mini();
+                        let (current_secondary_lyric, old_secondary_lyric) =
+                            if self.config.show_secondary_lyrics {
+                                (
+                                    self.lyrics.current_secondary_text.as_str(),
+                                    self.lyrics.old_secondary_text.as_str(),
+                                )
+                            } else {
+                                ("", "")
+                            };
 
                         let render_result =
                             renderer.draw(MAIN_D3D_TARGET, |direct_context, surface| {
@@ -242,8 +251,7 @@ impl App {
                                             island_x: island_layout.current_island_x as f32,
                                             island_y: island_layout.current_island_y as f32,
                                             stable_island_y: island_layout.stable_island_y as f32,
-                                            base_h: self.config.base_height
-                                                * self.config.global_scale,
+                                            base_h: compact_content_h,
                                         },
                                         media: crate::core::render::MediaParams {
                                             media: media_info,
@@ -252,7 +260,9 @@ impl App {
                                         },
                                         lyrics: crate::core::render::LyricsParams {
                                             current_lyric: &self.lyrics.current_text,
+                                            current_secondary_lyric,
                                             old_lyric: &self.lyrics.old_text,
+                                            old_secondary_lyric,
                                             lyric_highlight: self.lyrics.highlight,
                                             lyric_transition: self.lyrics.transition,
                                             lyric_scroll_offset: self.lyrics.scroll_offset,

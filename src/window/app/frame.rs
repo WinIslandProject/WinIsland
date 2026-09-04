@@ -600,20 +600,31 @@ impl App {
                     (self.config.lyrics_delay * 1000.0) as i64,
                     LYRIC_TRANSITION_LEAD_MS,
                 )
-                .map(|lyric| (lyric.text.to_owned(), lyric.highlight, lyric.started))
+                .map(|lyric| {
+                    (
+                        lyric.text.to_owned(),
+                        lyric.secondary_text.unwrap_or_default().to_owned(),
+                        lyric.highlight,
+                        lyric.started,
+                    )
+                })
         } else {
             None
         };
-        if let Some((lyric, highlight, started)) = current_lyric {
-            if lyric != self.lyrics.current_text {
-                self.lyrics.transition_to(lyric, highlight, started);
+        if let Some((lyric, secondary_lyric, highlight, started)) = current_lyric {
+            if lyric != self.lyrics.current_text
+                || secondary_lyric != self.lyrics.current_secondary_text
+            {
+                self.lyrics
+                    .transition_to(lyric, secondary_lyric, highlight, started);
                 window.request_redraw();
             } else if highlight != self.lyrics.highlight {
                 self.lyrics.highlight = highlight;
                 window.request_redraw();
             }
         } else if !is_paused && !self.lyrics.current_text.is_empty() {
-            self.lyrics.transition_to(String::new(), None, false);
+            self.lyrics
+                .transition_to(String::new(), String::new(), None, false);
         }
 
         if self.lyrics.transition < 1.0 {
@@ -625,6 +636,7 @@ impl App {
         }
         if self.lyrics.transition >= 1.0 && !self.lyrics.old_text.is_empty() {
             self.lyrics.old_text = String::new();
+            self.lyrics.old_secondary_text = String::new();
         }
     }
 
@@ -649,15 +661,16 @@ impl App {
             } else {
                 lyric_target_w
             };
-        let default_target_h = (if self.expanded {
-            self.config.expanded_height
+        let compact_content_h = self.compact_content_height();
+        let default_target_h = if self.expanded {
+            self.config.expanded_height * self.config.global_scale
         } else {
-            self.config.base_height
-        }) * self.config.global_scale;
+            compact_content_h
+        };
         let default_target_r = if self.expanded {
             32.0 * self.config.global_scale
         } else {
-            (self.config.base_height * self.config.global_scale) / 2.0
+            compact_content_h / 2.0
         };
         let (target_w, target_h, target_r) = if let Some(size) = self.compact_overlay.target_size(
             self.config.base_width,

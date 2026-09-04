@@ -175,6 +175,10 @@ impl MediaInfo {
         let line = &lyrics[index];
         Some(CurrentLyric {
             text: &line.text,
+            secondary_text: line
+                .secondary_text
+                .as_deref()
+                .filter(|secondary| *secondary != line.text),
             started: line.time_ms <= current_pos,
             highlight: line
                 .highlight_at(current_pos, lyrics.get(index + 1).map(|next| next.time_ms)),
@@ -184,6 +188,7 @@ impl MediaInfo {
 
 pub(crate) struct CurrentLyric<'a> {
     pub(crate) text: &'a str,
+    pub(crate) secondary_text: Option<&'a str>,
     pub(crate) started: bool,
     pub(crate) highlight: Option<LyricHighlight>,
 }

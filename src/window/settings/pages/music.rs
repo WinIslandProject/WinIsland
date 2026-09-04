@@ -10,6 +10,7 @@ enum MusicAction {
     SmtcEnabled,
     LyricsMode,
     ShowLyrics,
+    ShowSecondaryLyrics,
     LyricsSource,
     LyricsDelay,
     LyricsScroll,
@@ -61,12 +62,24 @@ impl SettingsApp {
                 true,
                 MusicAction::LyricsFolder,
             );
+            page.row_switch(
+                tr("show_secondary_lyrics"),
+                self.config.show_secondary_lyrics,
+                true,
+                MusicAction::ShowSecondaryLyrics,
+            );
         } else {
             page.row_switch(
                 tr("show_lyrics"),
                 show_lyrics,
                 true,
                 MusicAction::ShowLyrics,
+            );
+            page.row_switch(
+                tr("show_secondary_lyrics"),
+                show_lyrics && self.config.show_secondary_lyrics,
+                show_lyrics,
+                MusicAction::ShowSecondaryLyrics,
             );
             page.row_source(
                 tr("lyrics_source"),
@@ -162,6 +175,10 @@ impl SettingsApp {
             }
             (MusicAction::ShowLyrics, ClickResult::Switch(_)) => {
                 self.config.show_lyrics = !self.config.show_lyrics;
+                true
+            }
+            (MusicAction::ShowSecondaryLyrics, ClickResult::Switch(_)) => {
+                self.config.show_secondary_lyrics = !self.config.show_secondary_lyrics;
                 true
             }
             (MusicAction::LyricsScroll, ClickResult::Switch(_)) => {

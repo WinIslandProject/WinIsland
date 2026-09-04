@@ -128,6 +128,7 @@ created_by=Created by
 music_settings_title=Music Settings
 smtc_control=SMTC Control
 show_lyrics=Show Lyrics
+show_secondary_lyrics=Show Secondary Lyrics
 lyrics_mode=Lyrics Mode
 lyrics_mode_online=Online
 lyrics_mode_lrc=LRC Folder

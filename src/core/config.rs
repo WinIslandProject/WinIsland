@@ -235,6 +235,8 @@ pub struct AppConfig {
     pub smtc_known_apps: Vec<String>,
     #[serde(default = "default_show_lyrics")]
     pub show_lyrics: bool,
+    #[serde(default)]
+    pub show_secondary_lyrics: bool,
     #[serde(default = "default_lyrics_mode")]
     pub lyrics_mode: String,
     #[serde(default)]
@@ -721,6 +723,7 @@ impl Default for AppConfig {
             smtc_apps: Vec::new(),
             smtc_known_apps: Vec::new(),
             show_lyrics: default_show_lyrics(),
+            show_secondary_lyrics: false,
             lyrics_mode: default_lyrics_mode(),
             lyrics_local_dir: None,
             custom_font_path: None,

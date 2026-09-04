@@ -128,6 +128,7 @@ created_by=Creado por
 music_settings_title=Ajustes de Música
 smtc_control=Control SMTC
 show_lyrics=Mostrar Letras
+show_secondary_lyrics=Mostrar Letra Secundaria
 lyrics_mode=Modo de Letras
 lyrics_mode_online=En línea
 lyrics_mode_lrc=Carpeta LRC
