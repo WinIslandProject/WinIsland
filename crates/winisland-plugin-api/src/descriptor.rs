@@ -16,6 +16,21 @@ pub const KNOWN_CAPABILITIES: u64 = CAPABILITY_CONTEXT
     | CAPABILITY_WIDGET
     | CAPABILITY_LYRICS_TRANSFORM;
 
+/// Build plugin metadata from Cargo package fields while keeping the plugin ID and display name
+/// explicit.
+#[macro_export]
+macro_rules! cargo_plugin_metadata {
+    ($id:expr, $name:expr) => {
+        $crate::PluginMetadataC::new(
+            $id,
+            $name,
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_AUTHORS"),
+            env!("CARGO_PKG_DESCRIPTION"),
+        )
+    };
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct PluginCreateInfoV1 {

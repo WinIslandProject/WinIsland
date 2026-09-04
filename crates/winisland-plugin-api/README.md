@@ -39,13 +39,7 @@ static DESCRIPTOR: PluginDescriptorV1 = PluginDescriptorV1 {
     struct_size: std::mem::size_of::<PluginDescriptorV1>() as u32,
     abi_version: ABI_VERSION_1,
     capabilities: CAPABILITY_CONTEXT,
-    metadata: PluginMetadataC::new(
-        "hello-winisland-plugin",
-        "hello-winisland-plugin",
-        "0.1.0",
-        "Example Author",
-        "Minimal WinIsland ABI v1 plugin",
-    ),
+    metadata: cargo_plugin_metadata!("hello-winisland-plugin", "Hello WinIsland Plugin"),
     create: Some(create),
     shutdown: Some(shutdown),
     destroy: Some(destroy),
@@ -313,7 +307,18 @@ jobs:
 
 After the first release, submit one registration file to [WinIslandProject/PluginMarketplace](https://github.com/WinIslandProject/PluginMarketplace). Future versions are discovered from new valid GitHub Releases without another registration pull request. The complete format is documented in the marketplace [contribution guide](https://github.com/WinIslandProject/PluginMarketplace/blob/main/CONTRIBUTING.md).
 
-`from_cargo()` reads package metadata, `repository`, and `[lib].name`. The package metadata must exactly match `PluginMetadataC`; use builder methods such as `.name(...)` or `.id(...)` when overriding it.
+`from_cargo()` reads package metadata, `repository`, `[lib].name`, and optional display metadata:
+
+```toml
+[package.metadata.winisland]
+name = "Hello WinIsland Plugin"
+# id = "hello-winisland-plugin" # Defaults to package.name
+```
+
+Use `cargo_plugin_metadata!("hello-winisland-plugin", "Hello WinIsland Plugin")` in the DLL
+descriptor so Cargo remains the source of truth for version, authors, and description. During
+packaging, the built DLL is loaded and its complete ABI metadata is compared with `plugin.yml`;
+the build fails with the mismatched field instead of publishing an uninstallable package.
 
 The generated `plugin.yml` identifies one entry DLL:
 

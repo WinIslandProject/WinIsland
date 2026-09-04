@@ -80,7 +80,9 @@ fn format_args(template: &str, args: &[&str]) -> String {
     args.iter()
         .enumerate()
         .fold(template.to_owned(), |result, (index, value)| {
-            result.replace(&format!("{{{index}}}"), value)
+            result
+                .replacen("{}", value, 1)
+                .replace(&format!("{{{index}}}"), value)
         })
 }
 

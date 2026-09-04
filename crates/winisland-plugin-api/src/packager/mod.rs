@@ -3,9 +3,14 @@ pub mod packaging;
 pub mod signing;
 
 use ed25519_dalek::SigningKey;
+use libloading::Library;
 use manifest::PluginManifest;
 use signing::{hash_file, load_signing_key, load_signing_key_from_env, sign_payload};
 use std::path::{Path, PathBuf};
+
+use crate::{
+    ABI_VERSION_1, KNOWN_CAPABILITIES, PLUGIN_ENTRY_SYMBOL_V1, PluginDescriptorV1, PluginEntryFnV1,
+};
 
 /// A build-time tool that compiles, packages, and optionally signs
 /// a WinIsland plugin DLL into a distributable ZIP archive.
@@ -59,7 +64,7 @@ impl PluginPackager {
             .get("package")
             .ok_or_else(|| "Cargo.toml missing [package] section".to_string())?;
 
-        let name = pkg
+        let package_name = pkg
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "Cargo.toml missing package.name".to_string())?
@@ -74,10 +79,14 @@ impl PluginPackager {
         let author = pkg
             .get("authors")
             .and_then(|v| v.as_array())
-            .and_then(|a| a.first())
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .map(|authors| {
+                authors
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(":")
+            })
+            .unwrap_or_default();
 
         let description = pkg
             .get("description")
@@ -91,11 +100,25 @@ impl PluginPackager {
             .unwrap_or("")
             .to_string();
 
+        let plugin_metadata = pkg
+            .get("metadata")
+            .and_then(|metadata| metadata.get("winisland"));
+        let id = plugin_metadata
+            .and_then(|metadata| metadata.get("id"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or(&package_name)
+            .to_string();
+        let name = plugin_metadata
+            .and_then(|metadata| metadata.get("name"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or(&package_name)
+            .to_string();
+
         let dll_name = value
             .get("lib")
             .and_then(|lib| lib.get("name"))
             .and_then(|value| value.as_str())
-            .map_or_else(|| name.replace('-', "_"), str::to_string);
+            .map_or_else(|| package_name.replace('-', "_"), str::to_string);
         let icon = ["icon.png", "icon.jpg", "icon.jpeg", "icon.webp"]
             .into_iter()
             .find(|path| Path::new(path).is_file())
@@ -106,7 +129,7 @@ impl PluginPackager {
             .map(str::to_string);
 
         Ok(Self {
-            id: name.clone(),
+            id,
             name,
             author,
             version,
@@ -277,7 +300,7 @@ impl PluginPackager {
         // 1. Build the DLL
         log::info!("Building plugin '{}' in release mode...", self.name);
         let status = std::process::Command::new("cargo")
-            .args(["build", "--release"])
+            .args(["build", "--release", "--locked"])
             .status()
             .map_err(|e| format!("Failed to run cargo build: {}", e))?;
 
@@ -356,6 +379,7 @@ impl PluginPackager {
         manifest
             .validate()
             .map_err(|e| format!("Invalid manifest: {}", e))?;
+        validate_dll_descriptor(&dll_path, &manifest)?;
         manifest
             .write_to_yaml(&staging_path.join("plugin.yml"))
             .map_err(|e| format!("Cannot write plugin.yml: {}", e))?;
@@ -402,6 +426,73 @@ impl PluginPackager {
             release_so.display(),
         ))
     }
+}
+
+fn validate_dll_descriptor(dll_path: &Path, manifest: &PluginManifest) -> Result<(), String> {
+    // SAFETY: The packager loads the plugin DLL it just built and resolves the documented ABI
+    // entry point. It does not create a plugin instance or invoke plugin-controlled callbacks.
+    let library = unsafe { Library::new(dll_path) }
+        .map_err(|error| format!("Cannot validate plugin DLL: {error}"))?;
+    // SAFETY: The symbol type is the public WinIsland ABI v1 entry-point signature.
+    let entry = unsafe { library.get::<PluginEntryFnV1>(PLUGIN_ENTRY_SYMBOL_V1) }
+        .map_err(|error| format!("Plugin DLL has no ABI v1 entry point: {error}"))?;
+    // SAFETY: The entry point is called synchronously while the DLL remains loaded.
+    let pointer = unsafe { entry() };
+    if pointer.is_null() {
+        return Err("Plugin DLL returned a null descriptor".into());
+    }
+    // SAFETY: Every ABI descriptor starts with a readable struct_size field.
+    let struct_size = unsafe { std::ptr::read_unaligned(pointer.cast::<u32>()) };
+    if struct_size < std::mem::size_of::<PluginDescriptorV1>() as u32 {
+        return Err("Plugin DLL returned a truncated ABI v1 descriptor".into());
+    }
+    // SAFETY: The size check proves the complete copyable ABI v1 prefix is available.
+    let descriptor = unsafe { std::ptr::read_unaligned(pointer) };
+    if descriptor.abi_version != ABI_VERSION_1
+        || descriptor.capabilities & !KNOWN_CAPABILITIES != 0
+        || descriptor.create.is_none()
+        || descriptor.shutdown.is_none()
+        || descriptor.destroy.is_none()
+    {
+        return Err("Plugin DLL contains an invalid ABI v1 descriptor".into());
+    }
+
+    let metadata = &descriptor.metadata;
+    for (field, manifest_value, descriptor_value) in [
+        ("id", manifest.id.as_str(), fixed_text(&metadata.id)?),
+        ("name", manifest.name.as_str(), fixed_text(&metadata.name)?),
+        (
+            "version",
+            manifest.version.as_str(),
+            fixed_text(&metadata.version)?,
+        ),
+        (
+            "author",
+            manifest.author.as_str(),
+            fixed_text(&metadata.author)?,
+        ),
+        (
+            "description",
+            manifest.description.as_str(),
+            fixed_text(&metadata.description)?,
+        ),
+    ] {
+        if manifest_value != descriptor_value {
+            return Err(format!(
+                "Plugin metadata mismatch for '{field}': Cargo/package value '{manifest_value}' does not match DLL descriptor '{descriptor_value}'"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn fixed_text(value: &[u8]) -> Result<&str, String> {
+    let end = value
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(value.len());
+    std::str::from_utf8(&value[..end])
+        .map_err(|error| format!("Plugin DLL metadata is not valid UTF-8: {error}"))
 }
 
 fn package_relative_path(path: &str) -> Result<&Path, String> {

@@ -2348,15 +2348,26 @@ fn validate_manifest_metadata(
     manifest: &PluginManifest,
     metadata: &super::types::PluginMetadata,
 ) -> Result<(), PluginError> {
-    let mismatched = manifest.id != metadata.id
-        || manifest.name != metadata.name
-        || manifest.version != metadata.version
-        || manifest.author != metadata.author
-        || manifest.description != metadata.description;
-    if mismatched {
-        return Err(PluginError::InvalidPlugin(
-            "plugin.yml metadata does not match the DLL descriptor".to_string(),
-        ));
+    for (field, packaged, declared) in [
+        ("id", manifest.id.as_str(), metadata.id.as_str()),
+        ("name", manifest.name.as_str(), metadata.name.as_str()),
+        (
+            "version",
+            manifest.version.as_str(),
+            metadata.version.as_str(),
+        ),
+        ("author", manifest.author.as_str(), metadata.author.as_str()),
+        (
+            "description",
+            manifest.description.as_str(),
+            metadata.description.as_str(),
+        ),
+    ] {
+        if packaged != declared {
+            return Err(PluginError::InvalidPlugin(format!(
+                "plugin.yml {field} '{packaged}' does not match DLL descriptor '{declared}'"
+            )));
+        }
     }
     Ok(())
 }
