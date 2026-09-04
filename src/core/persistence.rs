@@ -20,7 +20,7 @@ pub fn load_config() -> AppConfig {
         && let Ok(mut config) = toml::from_str::<AppConfig>(&content)
     {
         if let Ok(table) = toml::from_str::<toml::Table>(&content) {
-            if let Some(fully_hide) = table.get("fully_hide").and_then(|value| value.as_bool()) {
+            if let Some(fully_hide) = table.get("fully_hide").and_then(toml::Value::as_bool) {
                 if !table.contains_key("hidden_width") && fully_hide {
                     config.hidden_width = MIN_HIDDEN_WIDTH;
                 }

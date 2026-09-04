@@ -1,6 +1,6 @@
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
-    Canvas, ClipOp, Color, FilterMode, MipmapMode, Paint, RRect, Rect, SamplingOptions,
+    Canvas, ClipOp, Color, FilterMode, Image, MipmapMode, Paint, RRect, Rect, SamplingOptions,
     image_filters,
 };
 
@@ -16,6 +16,27 @@ const PENDING_LYRIC_CHANNEL: u8 = 190;
 const SECONDARY_LYRIC_SCALE: f32 = 0.85;
 const LYRIC_PAIR_GAP_SCALE: f32 = 0.18;
 const SECONDARY_LYRIC_CHANNEL: u8 = 176;
+const MIN_VISIBLE_OPACITY: f32 = 0.01;
+const MIN_MINI_CONTENT_WIDTH: f32 = 45.0;
+const MINI_COVER_SIZE: f32 = 18.0;
+const MINI_COVER_LEFT_INSET: f32 = 10.0;
+const MINI_COVER_RADIUS: f32 = 5.0;
+const MINI_VISUALIZER_RIGHT_INSET: f32 = 17.0;
+const MINI_VISUALIZER_WIDTH_SCALE: f32 = 0.55;
+const MINI_VISUALIZER_SMOOTHING: (f32, f32) = (0.6, 0.08);
+const LYRIC_LEFT_INSET: f32 = 30.0;
+const LYRIC_RIGHT_INSET: f32 = 29.0;
+const LYRIC_EXPANSION_FADE_RATE: f32 = 2.5;
+const LYRIC_TRANSITION_BLUR_SIGMA: f32 = 12.0;
+const LYRIC_TRANSITION_OFFSET: f32 = 10.0;
+const MIN_BLUR_SIGMA: f32 = 0.1;
+const PLUGIN_FONT_SCALE: f32 = 0.7;
+const DEFAULT_PLUGIN_FONT_SIZE: f32 = 11.0;
+const PLUGIN_HORIZONTAL_INSET: f32 = 20.0;
+const PLUGIN_PRIMARY_BASELINE_OFFSET: f32 = 0.3;
+const PLUGIN_SECONDARY_FONT_SCALE: f32 = 0.8;
+const PLUGIN_SECONDARY_ALPHA: f32 = 0.7;
+const PLUGIN_SECONDARY_LINE_SPACING: f32 = 1.3;
 
 pub(crate) fn lyric_font_size(font_size: f32, global_scale: f32) -> f32 {
     if font_size > 0.0 {
@@ -56,306 +77,292 @@ pub(super) struct MiniContentParams<'a> {
 }
 
 pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
-    let MiniContentParams {
-        canvas,
-        content: mini_content,
-        mini_alpha: mini_alpha_f,
-        current_w,
-        global_scale,
-        media,
-        offset_x,
-        stable_offset_y,
-        base_h,
-        palette,
-        viz_h_scale,
-        current_lyric,
-        current_secondary_lyric,
-        old_lyric,
-        old_secondary_lyric,
-        lyric_highlight,
-        expansion_progress,
-        font_size,
-        lyric_scroll_offset,
-        use_blur,
-        lyric_transition,
-        text_color,
-    } = params;
-    if mini_alpha_f > 0.01 && current_w > 45.0 * global_scale {
-        match mini_content {
-            Some(MiniContent::Music) => {
-                let alpha = (mini_alpha_f * 255.0) as u8;
-                if let Some(image) = get_cached_media_image(media) {
-                    let base_size = 18.0 * global_scale;
-                    let (size, ix, iy) = (
-                        base_size,
-                        offset_x + 10.0 * global_scale,
-                        stable_offset_y + (base_h - base_size) / 2.0,
-                    );
-                    let mut paint = Paint::default();
-                    paint.set_anti_alias(true);
-                    paint.set_alpha_f(alpha as f32 / 255.0);
-                    canvas.save();
-
-                    canvas.clip_rrect(
-                        RRect::new_rect_xy(
-                            Rect::from_xywh(ix, iy, size, size),
-                            5.0 * global_scale,
-                            5.0 * global_scale,
-                        ),
-                        ClipOp::Intersect,
-                        true,
-                    );
-                    let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
-                    let img_w = image.width() as f32;
-                    let img_h = image.height() as f32;
-                    let src_rect = if img_w > 0.0 && img_h > 0.0 {
-                        let aspect = img_w / img_h;
-                        let src = if aspect > 1.0 {
-                            let crop_w = img_h;
-                            let offset_x = (img_w - crop_w) / 2.0;
-                            Rect::from_xywh(offset_x, 0.0, crop_w, img_h)
-                        } else {
-                            let crop_h = img_w;
-                            let offset_y = (img_h - crop_h) / 2.0;
-                            Rect::from_xywh(0.0, offset_y, img_w, crop_h)
-                        };
-                        Some(src)
-                    } else {
-                        None
-                    };
-                    canvas.draw_image_rect_with_sampling_options(
-                        &image,
-                        src_rect.as_ref().map(|r| (r, SrcRectConstraint::Fast)),
-                        Rect::from_xywh(ix, iy, size, size),
-                        sampling,
-                        &paint,
-                    );
-                    canvas.restore();
-                }
-                let palette = &palette;
-                let viz_x = offset_x + current_w - 17.0 * global_scale;
-                let viz_y = stable_offset_y + base_h / 2.0;
-                draw_visualizer(DrawVisualizerParams {
-                    canvas,
-                    x: viz_x,
-                    y: viz_y,
-                    alpha,
-                    is_playing: media.is_playing,
-                    palette,
-                    spectrum: &media.spectrum,
-                    w_scale: 0.55 * global_scale,
-                    h_scale: viz_h_scale * global_scale,
-                    smooth_factors: (0.6, 0.08),
-                });
-
-                if !current_lyric.is_empty()
-                    || !current_secondary_lyric.is_empty()
-                    || !old_lyric.is_empty()
-                    || !old_secondary_lyric.is_empty()
-                {
-                    let lyric_fade_f = (1.0 - expansion_progress * 2.5).clamp(0.0, 1.0);
-                    let alpha = (alpha as f32 * lyric_fade_f) as u8;
-
-                    if alpha > 0 {
-                        let lyric_font_sz = lyric_font_size(font_size, global_scale);
-                        let space_left = offset_x + 30.0 * global_scale;
-                        let space_right = offset_x + current_w - 29.0 * global_scale;
-                        let available_w = space_right - space_left;
-                        let scrolling = lyric_scroll_offset > 0.0;
-                        let text_x = if scrolling {
-                            space_left - lyric_scroll_offset
-                        } else {
-                            space_left + available_w / 2.0
-                        };
-                        let text_centered = !scrolling;
-
-                        canvas.save();
-                        let clip_rect =
-                            Rect::from_xywh(space_left, stable_offset_y, available_w, base_h);
-                        canvas.clip_rect(clip_rect, ClipOp::Intersect, true);
-
-                        if use_blur {
-                            if lyric_transition < 1.0 && !old_lyric.is_empty() {
-                                let mut text_paint = Paint::default();
-                                text_paint.set_anti_alias(true);
-                                let fade_alpha = (alpha as f32 * (1.0 - lyric_transition)) as u8;
-                                text_paint.set_color(Color::from_argb(
-                                    fade_alpha,
-                                    text_color.r(),
-                                    text_color.g(),
-                                    text_color.b(),
-                                ));
-
-                                let blur_sigma = lyric_transition * 12.0 * global_scale;
-                                if blur_sigma > 0.1 {
-                                    text_paint.set_image_filter(image_filters::blur(
-                                        (blur_sigma, 0.0),
-                                        None,
-                                        None,
-                                        None,
-                                    ));
-                                }
-
-                                draw_lyric_pair(LyricPairParams {
-                                    canvas,
-                                    primary: old_lyric,
-                                    secondary: old_secondary_lyric,
-                                    anchor_x: text_x,
-                                    center_y: stable_offset_y + base_h / 2.0
-                                        - 10.0 * global_scale * lyric_transition,
-                                    size: lyric_font_sz,
-                                    centered: text_centered,
-                                    paint: &text_paint,
-                                    highlight: None,
-                                });
-                            }
-
-                            if !current_lyric.is_empty() {
-                                let mut text_paint = Paint::default();
-                                text_paint.set_anti_alias(true);
-                                let fade_alpha = (alpha as f32 * lyric_transition) as u8;
-                                text_paint.set_color(Color::from_argb(
-                                    fade_alpha,
-                                    text_color.r(),
-                                    text_color.g(),
-                                    text_color.b(),
-                                ));
-
-                                let blur_sigma = (1.0 - lyric_transition) * 12.0 * global_scale;
-                                if blur_sigma > 0.1 {
-                                    text_paint.set_image_filter(image_filters::blur(
-                                        (blur_sigma, 0.0),
-                                        None,
-                                        None,
-                                        None,
-                                    ));
-                                }
-
-                                draw_lyric_pair(LyricPairParams {
-                                    canvas,
-                                    primary: current_lyric,
-                                    secondary: current_secondary_lyric,
-                                    anchor_x: text_x,
-                                    center_y: stable_offset_y
-                                        + base_h / 2.0
-                                        + 10.0 * global_scale * (1.0 - lyric_transition),
-                                    size: lyric_font_sz,
-                                    centered: text_centered,
-                                    paint: &text_paint,
-                                    highlight: lyric_highlight,
-                                });
-                            }
-                        } else {
-                            if lyric_transition < 0.5 && !old_lyric.is_empty() {
-                                let mut text_paint = Paint::default();
-                                text_paint.set_anti_alias(true);
-                                let progress = lyric_transition * 2.0;
-                                let fade_alpha = (alpha as f32 * (1.0 - progress)) as u8;
-                                text_paint.set_color(Color::from_argb(
-                                    fade_alpha,
-                                    text_color.r(),
-                                    text_color.g(),
-                                    text_color.b(),
-                                ));
-                                draw_lyric_pair(LyricPairParams {
-                                    canvas,
-                                    primary: old_lyric,
-                                    secondary: old_secondary_lyric,
-                                    anchor_x: text_x,
-                                    center_y: stable_offset_y + base_h / 2.0,
-                                    size: lyric_font_sz,
-                                    centered: text_centered,
-                                    paint: &text_paint,
-                                    highlight: None,
-                                });
-                            } else if lyric_transition >= 0.5 && !current_lyric.is_empty() {
-                                let mut text_paint = Paint::default();
-                                text_paint.set_anti_alias(true);
-                                let progress = (lyric_transition - 0.5) * 2.0;
-                                let fade_alpha = (alpha as f32 * progress) as u8;
-                                text_paint.set_color(Color::from_argb(
-                                    fade_alpha,
-                                    text_color.r(),
-                                    text_color.g(),
-                                    text_color.b(),
-                                ));
-                                draw_lyric_pair(LyricPairParams {
-                                    canvas,
-                                    primary: current_lyric,
-                                    secondary: current_secondary_lyric,
-                                    anchor_x: text_x,
-                                    center_y: stable_offset_y + base_h / 2.0,
-                                    size: lyric_font_sz,
-                                    centered: text_centered,
-                                    paint: &text_paint,
-                                    highlight: lyric_highlight,
-                                });
-                            }
-                        }
-                        canvas.restore();
-                    }
-                }
-            }
-            Some(MiniContent::Plugin(ctx)) => {
-                let font_sz = if font_size > 0.0 {
-                    font_size * 0.7 * global_scale
-                } else {
-                    11.0 * global_scale
-                };
-                let alpha = (mini_alpha_f * 255.0) as u8;
-                let mut text_paint = Paint::default();
-                text_paint.set_anti_alias(true);
-                text_paint.set_color(Color::from_argb(
-                    alpha,
-                    text_color.r(),
-                    text_color.g(),
-                    text_color.b(),
-                ));
-                let text_x = offset_x + 20.0 * global_scale;
-                let text_w = current_w - 40.0 * global_scale;
-                let text_y = stable_offset_y + base_h / 2.0 - font_sz * 0.3;
-                canvas.save();
-                let clip = Rect::from_xywh(text_x, stable_offset_y, text_w, base_h);
-                canvas.clip_rect(clip, ClipOp::Intersect, true);
-                draw_text_cached(DrawTextCachedParams {
-                    canvas,
-                    text: if ctx.compact_text.is_empty() {
-                        &ctx.title
-                    } else {
-                        &ctx.compact_text
-                    },
-                    x: text_x,
-                    y: text_y,
-                    size: font_sz,
-                    bold: true,
-                    paint: &text_paint,
-                });
-                if !ctx.body.is_empty() {
-                    let sec_font_sz = font_sz * 0.8;
-                    let mut sec_paint = Paint::default();
-                    sec_paint.set_anti_alias(true);
-                    sec_paint.set_color(Color::from_argb(
-                        (alpha as f32 * 0.7) as u8,
-                        text_color.r(),
-                        text_color.g(),
-                        text_color.b(),
-                    ));
-                    let sec_y = text_y + font_sz * 1.3;
-                    draw_text_cached(DrawTextCachedParams {
-                        canvas,
-                        text: &ctx.body,
-                        x: text_x,
-                        y: sec_y,
-                        size: sec_font_sz,
-                        bold: false,
-                        paint: &sec_paint,
-                    });
-                }
-                canvas.restore();
-            }
-            None => {}
-        }
+    if params.mini_alpha <= MIN_VISIBLE_OPACITY
+        || params.current_w <= MIN_MINI_CONTENT_WIDTH * params.global_scale
+    {
+        return;
     }
+    let Some(content) = params.content else {
+        return;
+    };
+    let alpha = scaled_alpha(u8::MAX, params.mini_alpha);
+    match content {
+        MiniContent::Music => draw_music_content(&params, alpha),
+        MiniContent::Plugin(context) => draw_plugin_content(&params, context, alpha),
+    }
+}
+
+fn draw_music_content(params: &MiniContentParams<'_>, alpha: u8) {
+    draw_mini_cover(params, alpha);
+    draw_visualizer(DrawVisualizerParams {
+        canvas: params.canvas,
+        x: params.offset_x + params.current_w - MINI_VISUALIZER_RIGHT_INSET * params.global_scale,
+        y: params.stable_offset_y + params.base_h / 2.0,
+        alpha,
+        is_playing: params.media.is_playing,
+        palette: params.palette,
+        spectrum: &params.media.spectrum,
+        w_scale: MINI_VISUALIZER_WIDTH_SCALE * params.global_scale,
+        h_scale: params.viz_h_scale * params.global_scale,
+        smooth_factors: MINI_VISUALIZER_SMOOTHING,
+    });
+    draw_mini_lyrics(params, alpha);
+}
+
+fn draw_mini_cover(params: &MiniContentParams<'_>, alpha: u8) {
+    let Some(image) = get_cached_media_image(params.media) else {
+        return;
+    };
+    let size = MINI_COVER_SIZE * params.global_scale;
+    let x = params.offset_x + MINI_COVER_LEFT_INSET * params.global_scale;
+    let y = params.stable_offset_y + (params.base_h - size) / 2.0;
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_alpha_f(f32::from(alpha) / f32::from(u8::MAX));
+
+    params.canvas.save();
+    params.canvas.clip_rrect(
+        RRect::new_rect_xy(
+            Rect::from_xywh(x, y, size, size),
+            MINI_COVER_RADIUS * params.global_scale,
+            MINI_COVER_RADIUS * params.global_scale,
+        ),
+        ClipOp::Intersect,
+        true,
+    );
+    let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
+    let source_rect = center_crop_rect(&image);
+    params.canvas.draw_image_rect_with_sampling_options(
+        &image,
+        source_rect
+            .as_ref()
+            .map(|rect| (rect, SrcRectConstraint::Fast)),
+        Rect::from_xywh(x, y, size, size),
+        sampling,
+        &paint,
+    );
+    params.canvas.restore();
+}
+
+fn center_crop_rect(image: &Image) -> Option<Rect> {
+    let width = image.width() as f32;
+    let height = image.height() as f32;
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let edge = width.min(height);
+    Some(Rect::from_xywh(
+        (width - edge) / 2.0,
+        (height - edge) / 2.0,
+        edge,
+        edge,
+    ))
+}
+
+fn draw_mini_lyrics(params: &MiniContentParams<'_>, alpha: u8) {
+    if !has_lyrics(params) {
+        return;
+    }
+    let lyric_alpha = scaled_alpha(
+        alpha,
+        (1.0 - params.expansion_progress * LYRIC_EXPANSION_FADE_RATE).clamp(0.0, 1.0),
+    );
+    if lyric_alpha == 0 {
+        return;
+    }
+
+    let space_left = params.offset_x + LYRIC_LEFT_INSET * params.global_scale;
+    let space_right = params.offset_x + params.current_w - LYRIC_RIGHT_INSET * params.global_scale;
+    let available_width = space_right - space_left;
+    let scrolling = params.lyric_scroll_offset > 0.0;
+    let layout = LyricLayout {
+        anchor_x: if scrolling {
+            space_left - params.lyric_scroll_offset
+        } else {
+            space_left + available_width / 2.0
+        },
+        center_y: params.stable_offset_y + params.base_h / 2.0,
+        size: lyric_font_size(params.font_size, params.global_scale),
+        centered: !scrolling,
+    };
+
+    params.canvas.save();
+    params.canvas.clip_rect(
+        Rect::from_xywh(
+            space_left,
+            params.stable_offset_y,
+            available_width,
+            params.base_h,
+        ),
+        ClipOp::Intersect,
+        true,
+    );
+    if params.use_blur {
+        draw_blurred_lyric_transition(params, layout, lyric_alpha);
+    } else {
+        draw_crossfade_lyric_transition(params, layout, lyric_alpha);
+    }
+    params.canvas.restore();
+}
+
+fn has_lyrics(params: &MiniContentParams<'_>) -> bool {
+    !params.current_lyric.is_empty()
+        || !params.current_secondary_lyric.is_empty()
+        || !params.old_lyric.is_empty()
+        || !params.old_secondary_lyric.is_empty()
+}
+
+#[derive(Clone, Copy)]
+struct LyricLayout {
+    anchor_x: f32,
+    center_y: f32,
+    size: f32,
+    centered: bool,
+}
+
+fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
+    let transition = params.lyric_transition;
+    if transition < 1.0 && !params.old_lyric.is_empty() {
+        let paint = lyric_paint(
+            params.text_color,
+            scaled_alpha(alpha, 1.0 - transition),
+            transition * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
+        );
+        draw_lyric_pair(LyricPairParams {
+            canvas: params.canvas,
+            primary: params.old_lyric,
+            secondary: params.old_secondary_lyric,
+            anchor_x: layout.anchor_x,
+            center_y: layout.center_y - LYRIC_TRANSITION_OFFSET * params.global_scale * transition,
+            size: layout.size,
+            centered: layout.centered,
+            paint: &paint,
+            highlight: None,
+        });
+    }
+    if params.current_lyric.is_empty() {
+        return;
+    }
+    let paint = lyric_paint(
+        params.text_color,
+        scaled_alpha(alpha, transition),
+        (1.0 - transition) * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
+    );
+    draw_lyric_pair(LyricPairParams {
+        canvas: params.canvas,
+        primary: params.current_lyric,
+        secondary: params.current_secondary_lyric,
+        anchor_x: layout.anchor_x,
+        center_y: layout.center_y
+            + LYRIC_TRANSITION_OFFSET * params.global_scale * (1.0 - transition),
+        size: layout.size,
+        centered: layout.centered,
+        paint: &paint,
+        highlight: params.lyric_highlight,
+    });
+}
+
+fn draw_crossfade_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
+    let transition = params.lyric_transition;
+    let (primary, secondary, fade, highlight) = if transition < 0.5 {
+        (
+            params.old_lyric,
+            params.old_secondary_lyric,
+            1.0 - transition * 2.0,
+            None,
+        )
+    } else {
+        (
+            params.current_lyric,
+            params.current_secondary_lyric,
+            (transition - 0.5) * 2.0,
+            params.lyric_highlight,
+        )
+    };
+    if primary.is_empty() {
+        return;
+    }
+    let paint = lyric_paint(params.text_color, scaled_alpha(alpha, fade), 0.0);
+    draw_lyric_pair(LyricPairParams {
+        canvas: params.canvas,
+        primary,
+        secondary,
+        anchor_x: layout.anchor_x,
+        center_y: layout.center_y,
+        size: layout.size,
+        centered: layout.centered,
+        paint: &paint,
+        highlight,
+    });
+}
+
+fn lyric_paint(color: Color, alpha: u8, blur_sigma: f32) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(Color::from_argb(alpha, color.r(), color.g(), color.b()));
+    if blur_sigma > MIN_BLUR_SIGMA {
+        paint.set_image_filter(image_filters::blur((blur_sigma, 0.0), None, None, None));
+    }
+    paint
+}
+
+fn draw_plugin_content(
+    params: &MiniContentParams<'_>,
+    context: &crate::core::context::PluginContext,
+    alpha: u8,
+) {
+    let font_size = if params.font_size > 0.0 {
+        params.font_size * PLUGIN_FONT_SCALE * params.global_scale
+    } else {
+        DEFAULT_PLUGIN_FONT_SIZE * params.global_scale
+    };
+    let text_x = params.offset_x + PLUGIN_HORIZONTAL_INSET * params.global_scale;
+    let text_width = params.current_w - PLUGIN_HORIZONTAL_INSET * 2.0 * params.global_scale;
+    let text_y =
+        params.stable_offset_y + params.base_h / 2.0 - font_size * PLUGIN_PRIMARY_BASELINE_OFFSET;
+    let text = if context.compact_text.is_empty() {
+        &context.title
+    } else {
+        &context.compact_text
+    };
+    let paint = lyric_paint(params.text_color, alpha, 0.0);
+
+    params.canvas.save();
+    params.canvas.clip_rect(
+        Rect::from_xywh(text_x, params.stable_offset_y, text_width, params.base_h),
+        ClipOp::Intersect,
+        true,
+    );
+    draw_text_cached(DrawTextCachedParams {
+        canvas: params.canvas,
+        text,
+        x: text_x,
+        y: text_y,
+        size: font_size,
+        bold: true,
+        paint: &paint,
+    });
+    if !context.body.is_empty() {
+        let secondary_paint = lyric_paint(
+            params.text_color,
+            scaled_alpha(alpha, PLUGIN_SECONDARY_ALPHA),
+            0.0,
+        );
+        draw_text_cached(DrawTextCachedParams {
+            canvas: params.canvas,
+            text: &context.body,
+            x: text_x,
+            y: text_y + font_size * PLUGIN_SECONDARY_LINE_SPACING,
+            size: font_size * PLUGIN_SECONDARY_FONT_SCALE,
+            bold: false,
+            paint: &secondary_paint,
+        });
+    }
+    params.canvas.restore();
+}
+
+fn scaled_alpha(alpha: u8, factor: f32) -> u8 {
+    (f32::from(alpha) * factor.clamp(0.0, 1.0)) as u8
 }
 
 struct LyricPairParams<'a> {

@@ -11,7 +11,11 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
     DWMWA_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE, DwmSetWindowAttribute,
 };
-use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC,
+    DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HALFTONE, ReleaseDC, SRCCOPY,
+    STRETCH_BLT_MODE, SelectObject, SetStretchBltMode, StretchBlt,
+};
 
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::get_cached_media_image_with_key;

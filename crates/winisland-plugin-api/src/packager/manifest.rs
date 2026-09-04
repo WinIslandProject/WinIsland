@@ -55,8 +55,8 @@ impl PluginManifest {
     /// Write the manifest to a `plugin.yml` file.
     pub fn write_to_yaml(&self, path: &Path) -> Result<(), String> {
         let yaml = serde_yaml::to_string(self)
-            .map_err(|e| format!("Failed to serialise manifest: {}", e))?;
-        std::fs::write(path, &yaml).map_err(|e| format!("Failed to write manifest: {}", e))
+            .map_err(|e| format!("Failed to serialise manifest: {e}"))?;
+        std::fs::write(path, &yaml).map_err(|e| format!("Failed to write manifest: {e}"))
     }
 
     /// Compute a safe directory name from the plugin name.

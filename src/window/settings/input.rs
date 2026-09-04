@@ -5,8 +5,8 @@ use winit::keyboard::{Key, NamedKey};
 use super::pages::PageInput;
 use super::{
     NumberInput, NumberInputHandler, PAGE_NAV_GAP, PAGE_NAV_SIZE, PAGE_NAV_X, PAGE_NAV_Y,
-    POPUP_OPACITY_KEY, PageNavigation, SETTINGS_HEADER_H, SIDEBAR_PAGE_COUNT, SIDEBAR_ROW_H,
-    SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
+    PLUGINS_PAGE_INDEX, POPUP_OPACITY_KEY, PageNavigation, SETTINGS_HEADER_H, SIDEBAR_PAGE_COUNT,
+    SIDEBAR_ROW_GAP, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
 };
 
 impl SettingsApp {
@@ -35,7 +35,7 @@ impl SettingsApp {
 
         if mouse_x < SIDEBAR_W {
             for page in 0..SIDEBAR_PAGE_COUNT {
-                let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + 2.0);
+                let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
                 if mouse_y >= row_y
                     && mouse_y <= row_y + SIDEBAR_ROW_H
                     && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mouse_x)
@@ -51,7 +51,7 @@ impl SettingsApp {
             return;
         }
 
-        if let Some(direction) = self.page_navigation_at(mouse_x, mouse_y) {
+        if let Some(direction) = Self::page_navigation_at(mouse_x, mouse_y) {
             self.navigate_page_history(direction);
             return;
         }
@@ -105,7 +105,7 @@ impl SettingsApp {
         {
             return true;
         }
-        if let Some(direction) = self.page_navigation_at(mouse_x, mouse_y) {
+        if let Some(direction) = Self::page_navigation_at(mouse_x, mouse_y) {
             let is_enabled = match direction {
                 PageNavigation::Back => self.can_navigate_back(),
                 PageNavigation::Forward => self.can_navigate_forward(),
@@ -131,7 +131,7 @@ impl SettingsApp {
 
         if mouse_x < SIDEBAR_W {
             for page in 0..SIDEBAR_PAGE_COUNT {
-                let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + 2.0);
+                let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
                 if mouse_y >= row_y
                     && mouse_y <= row_y + SIDEBAR_ROW_H
                     && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mouse_x)
@@ -151,7 +151,7 @@ impl SettingsApp {
         if self.widget_drag_active() {
             return true;
         }
-        if self.active_page == 3 {
+        if self.active_page == PLUGINS_PAGE_INDEX {
             return self.plugin_hovered();
         }
         if self.widget_preview_hovered_at_mouse() {
@@ -168,7 +168,7 @@ impl SettingsApp {
         )
     }
 
-    pub(super) fn page_navigation_at(&self, mouse_x: f32, mouse_y: f32) -> Option<PageNavigation> {
+    pub(super) fn page_navigation_at(mouse_x: f32, mouse_y: f32) -> Option<PageNavigation> {
         if !(PAGE_NAV_Y..=PAGE_NAV_Y + PAGE_NAV_SIZE).contains(&mouse_y) {
             return None;
         }
@@ -201,7 +201,7 @@ impl SettingsApp {
         };
         self.page_history_index = next_index;
         self.active_page = self.page_history[next_index];
-        if self.active_page != 3 {
+        if self.active_page != PLUGINS_PAGE_INDEX {
             self.selected_plugin_id = None;
             self.plugin_detail_closing = false;
             self.anim

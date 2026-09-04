@@ -329,6 +329,14 @@ pub(super) struct LyricsFetchRequest {
     pub(super) request_id: u64,
 }
 
+impl LyricsFetchRequest {
+    fn matches(&self, media: &MediaInfo) -> bool {
+        media.title == self.title
+            && media.artist == self.artist
+            && media.lyrics_fetch_id == self.request_id
+    }
+}
+
 pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: LyricsFetchRequest) {
     let info_tx = info_tx.clone();
     tokio::spawn(async move {
@@ -343,10 +351,7 @@ pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: Ly
         .await
         .map(crate::plugin::manager::apply_lyrics_transforms);
         let applied = info_tx.send_if_modified(|current| {
-            if current.title != request.title
-                || current.artist != request.artist
-                || current.lyrics_fetch_id != request.request_id
-            {
+            if !request.matches(current) {
                 return false;
             }
             current.lyrics = lyrics.clone();

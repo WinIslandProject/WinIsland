@@ -3,17 +3,17 @@ use crate::core::plugin_widget::PluginWidget;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::{MarketplaceCatalog, MarketplacePlugin};
 use crate::utils::anim::AnimPool;
-use crate::utils::color::*;
+use crate::utils::color::{SettingsTheme, dark_settings_theme, light_settings_theme};
 use crate::utils::icon::get_app_icon;
-use crate::utils::settings_ui::items::*;
-use crate::utils::settings_ui::*;
+use crate::utils::settings_ui::items::{POPUP_MENU_R, SIDEBAR_PAD, SettingsItem};
+use crate::utils::settings_ui::{SwitchAnimator, WidgetEditorMode, WidgetSource};
 use crate::window::d3d::{D3DRenderer, D3DTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::platform::windows::WindowAttributesExtWindows;
@@ -33,8 +33,12 @@ pub(crate) const WIN_W: f32 = 760.0;
 pub(crate) const WIN_H: f32 = 680.0;
 pub(crate) const SIDEBAR_W: f32 = 184.0;
 pub(crate) const SIDEBAR_ROW_H: f32 = 34.0;
+pub(crate) const SIDEBAR_ROW_GAP: f32 = 2.0;
 pub(crate) const SIDEBAR_START_Y: f32 = 64.0;
 pub(crate) const SIDEBAR_PAGE_COUNT: usize = 5;
+pub(crate) const GENERAL_PAGE_INDEX: usize = 0;
+pub(crate) const WIDGETS_PAGE_INDEX: usize = 2;
+pub(crate) const PLUGINS_PAGE_INDEX: usize = 3;
 pub(crate) const PAGE_NAV_X: f32 = SIDEBAR_W + 18.0;
 pub(crate) const PAGE_NAV_Y: f32 = 18.0;
 pub(crate) const PAGE_NAV_SIZE: f32 = 28.0;
@@ -51,6 +55,12 @@ const SCROLLBAR_THUMB_MIN_H: f32 = 32.0;
 const SCROLLBAR_TRACK_TOP_INSET: f32 = 8.0;
 const SCROLLBAR_W: f32 = 4.0;
 const SCROLLBAR_HIT_W: f32 = 16.0;
+const CURSOR_MOVE_THRESHOLD: f32 = 0.5;
+const MOUSE_WHEEL_LINE_HEIGHT: f32 = 40.0;
+const SIDEBAR_TITLE_HEIGHT: f32 = 60.0;
+const POPUP_CLOSE_SPEED: f32 = 0.3;
+const WINDOW_CONTROL_CLOSE: usize = 0;
+const WINDOW_CONTROL_MINIMIZE: usize = 1;
 
 pub(crate) fn window_control_at(x: f32, y: f32) -> Option<usize> {
     WINDOW_CONTROL_CENTERS.iter().position(|&(cx, cy)| {
@@ -60,6 +70,13 @@ pub(crate) fn window_control_at(x: f32, y: f32) -> Option<usize> {
 
 pub(crate) fn window_controls_hovered(x: f32, y: f32) -> bool {
     (10.0..=70.0).contains(&x) && (10.0..=30.0).contains(&y)
+}
+
+fn scroll_delta(delta: MouseScrollDelta) -> f32 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, lines) => lines * MOUSE_WHEEL_LINE_HEIGHT,
+        MouseScrollDelta::PixelDelta(position) => position.y as f32,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -211,7 +228,7 @@ impl SettingsApp {
             window: None,
             renderer_target: None,
             config,
-            active_page: 0,
+            active_page: GENERAL_PAGE_INDEX,
             page_history: vec![0],
             page_history_index: 0,
             switch_anim,
@@ -308,8 +325,10 @@ impl SettingsApp {
         }
     }
 
-    pub(crate) fn get_monitor_list(&self) -> Vec<String> {
-        use windows::Win32::Graphics::Gdi::*;
+    pub(crate) fn get_monitor_list() -> Vec<String> {
+        use windows::Win32::Graphics::Gdi::{
+            DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW, EnumDisplayDevicesW,
+        };
         let mut monitors: Vec<String> = Vec::new();
         unsafe {
             let mut idx = 0u32;
@@ -344,7 +363,7 @@ impl SettingsApp {
                         } else {
                             name.clone()
                         };
-                        label = format!("Display {}: {}", active_count, label);
+                        label = format!("Display {active_count}: {label}");
                         monitors.push(label);
                     }
                     idx += 1;
@@ -473,23 +492,9 @@ impl SettingsApp {
     ) {
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => self.close_requested = true,
-            WindowEvent::Focused(focused) => {
-                self.focused = focused;
-                if !focused {
-                    self.commit_number_input();
-                    self.dots_hovered = false;
-                    self.scroll_dragging = false;
-                }
-                if let Some(win) = &self.window {
-                    win.request_redraw();
-                }
-            }
+            WindowEvent::Focused(focused) => self.handle_focus_changed(focused),
             WindowEvent::ThemeChanged(theme) if self.config.settings_theme == "system" => {
-                self.is_light = theme == winit::window::Theme::Light;
-                if let Some(win) = &self.window {
-                    Self::apply_titlebar_theme(win, self.is_light);
-                    win.request_redraw();
-                }
+                self.handle_system_theme_changed(theme);
             }
             WindowEvent::Resized(_)
                 if self
@@ -501,250 +506,272 @@ impl SettingsApp {
                     window.set_maximized(false);
                 }
             }
-            WindowEvent::Resized(new_size) => {
-                self.win_w = new_size.width as f32;
-                self.win_h = new_size.height as f32;
-                if let Some(target) = self.renderer_target
-                    && let Err(error) = renderer.resize(target, new_size.width, new_size.height)
-                {
-                    log::error!("D3D12 settings renderer resize failed: {error}");
-                    self.close_requested = true;
-                }
-                if let Some(win) = &self.window {
-                    win.request_redraw();
-                }
-            }
-            WindowEvent::ScaleFactorChanged { .. } => {
-                if let (Some(win), Some(target)) = (&self.window, self.renderer_target) {
-                    let size = win.inner_size();
-                    if let Err(error) = renderer.resize(target, size.width, size.height) {
-                        log::error!("D3D12 settings renderer resize failed: {error}");
-                        self.close_requested = true;
-                    }
-                    win.request_redraw();
-                }
-            }
+            WindowEvent::Resized(new_size) => self.handle_resized(renderer, new_size),
+            WindowEvent::ScaleFactorChanged { .. } => self.handle_scale_changed(renderer),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                if self.handle_number_input_key(&event.logical_key) {
-                    return;
-                }
-                match event.logical_key {
-                    Key::Named(NamedKey::F11) => {}
-                    Key::Named(NamedKey::ArrowLeft) => {
-                        self.navigate_page_history(PageNavigation::Back);
-                    }
-                    Key::Named(NamedKey::ArrowRight) => {
-                        self.navigate_page_history(PageNavigation::Forward);
-                    }
-                    _ => {}
-                }
+                self.handle_pressed_key(&event.logical_key);
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                let scale = self
-                    .window
-                    .as_ref()
-                    .map(|w| w.scale_factor() as f32)
-                    .unwrap_or(1.0);
-                let new_pos = (position.x as f32 / scale, position.y as f32 / scale);
-                let mouse_moved = (new_pos.0 - self.last_hover_mouse_pos.0).abs() > 0.5
-                    || (new_pos.1 - self.last_hover_mouse_pos.1).abs() > 0.5;
-                self.logical_mouse_pos = new_pos;
-                self.update_scroll_drag(new_pos.1);
-                if matches!(self.active_page, 2 | 3)
-                    && mouse_moved
-                    && let Some(win) = &self.window
-                {
-                    win.request_redraw();
-                }
-
-                let dots_hovered = self.focused && window_controls_hovered(new_pos.0, new_pos.1);
-                if dots_hovered != self.dots_hovered {
-                    self.dots_hovered = dots_hovered;
-                    if let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                }
-
-                if self.widget_drag_active() {
-                    let new_slot = self.widget_preview_slot_at_mouse();
-                    let current_slot = self.active_widget_drag_hover_slot();
-                    let needs_redraw = widget_drag_move_needs_redraw(true, current_slot, new_slot);
-                    if new_slot != current_slot {
-                        self.set_active_widget_drag_hover_slot(new_slot);
-                    }
-                    if needs_redraw && let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                } else if self.active_page == 2 {
-                    let new_slot = self.widget_preview_slot_at_mouse();
-                    let current_slot = self.active_widget_preview_hover_slot();
-                    if new_slot != current_slot {
-                        self.set_active_widget_preview_hover_slot(new_slot);
-                        if let Some(win) = &self.window {
-                            win.request_redraw();
-                        }
-                    }
-                }
-
-                if let Some(popup) = &mut self.popup {
-                    let (mx, my) = self.logical_mouse_pos;
-                    let new_hover = popup.hit_test_item(mx, my);
-                    if new_hover != popup.hover_idx {
-                        popup.hover_idx = new_hover;
-                        if let Some(win) = &self.window {
-                            win.request_redraw();
-                        }
-                    }
-                }
-
-                if mouse_moved {
-                    self.last_hover_mouse_pos = new_pos;
-                    let (mx, my) = self.logical_mouse_pos;
-                    let mut new_hover: i32 = -1;
-                    if mx < SIDEBAR_W {
-                        for i in 0..SIDEBAR_PAGE_COUNT {
-                            let row_y = SIDEBAR_START_Y + i as f32 * (SIDEBAR_ROW_H + 2.0);
-                            if my >= row_y
-                                && my <= row_y + SIDEBAR_ROW_H
-                                && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mx)
-                            {
-                                new_hover = i as i32;
-                            }
-                        }
-                    }
-                    if new_hover != self.sidebar_hover {
-                        self.sidebar_hover = new_hover;
-                        for idx in 0..SIDEBAR_PAGE_COUNT {
-                            if idx == new_hover as usize {
-                                self.anim.set(SIDEBAR_KEY_BASE + idx as u64, 1.0);
-                            } else {
-                                self.anim.set(SIDEBAR_KEY_BASE + idx as u64, 0.0);
-                            }
-                        }
-                        if let Some(win) = &self.window {
-                            win.request_redraw();
-                        }
-                    }
-                }
-
-                let cursor = if self.get_hover_state() {
-                    winit::window::CursorIcon::Pointer
-                } else {
-                    winit::window::CursorIcon::Default
-                };
-                if let Some(win) = &self.window {
-                    win.set_cursor(cursor);
-                }
-            }
-            WindowEvent::CursorLeft { .. } => {
-                if self.dots_hovered {
-                    self.dots_hovered = false;
-                    if let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                }
-            }
+            WindowEvent::CursorMoved { position, .. } => self.handle_cursor_moved(position),
+            WindowEvent::CursorLeft { .. } => self.handle_cursor_left(),
             WindowEvent::DroppedFile(path)
-                if self.active_page == 3
+                if self.active_page == PLUGINS_PAGE_INDEX
                     && path
                         .extension()
                         .is_some_and(|extension| extension.eq_ignore_ascii_case("zip")) =>
             {
-                self.plugin_status = Some((crate::core::i18n::tr("plugin_installing"), false));
-                self.plugin_request = Some(PluginSettingsRequest::Install(path));
-                self.mark_items_dirty();
-                if let Some(win) = &self.window {
-                    win.request_redraw();
-                }
+                self.handle_plugin_file_drop(path);
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                if self.popup.is_some() {
-                    self.popup = None;
-                    self.anim.set_with_speed(POPUP_OPACITY_KEY, 0.0, 0.3);
-                    if let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                    return;
-                }
-                let (mx, _) = self.logical_mouse_pos;
-                if self.active_page == 3 && self.plugin_detail_contains(mx) {
-                    let diff = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(_, y) => y * 40.0,
-                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                    };
-                    self.plugin_detail_scroll = (self.plugin_detail_scroll - diff)
-                        .clamp(0.0, self.plugin_detail_max_scroll);
-                    if let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                    return;
-                }
-                if mx >= SIDEBAR_W {
-                    let diff = match delta {
-                        winit::event::MouseScrollDelta::LineDelta(_, y) => y * 40.0,
-                        winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                    };
-                    self.target_scroll_y =
-                        (self.target_scroll_y - diff).clamp(0.0, self.cached_max_scroll);
-                    if let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                }
-            }
+            WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
-            } => {
-                let (mx, my) = self.logical_mouse_pos;
-                if self.begin_scroll_drag(mx, my) {
-                    if let Some(win) = &self.window {
-                        win.request_redraw();
-                    }
-                    return;
-                }
-                match window_control_at(mx, my) {
-                    Some(0) => self.close_requested = true,
-                    Some(1) => {
-                        if let Some(win) = &self.window {
-                            win.set_minimized(true);
-                        }
-                    }
-                    Some(2) => {}
-                    _ => {
-                        let is_in_sidebar_title = mx < SIDEBAR_W && my < 60.0;
-                        let is_in_content_title = mx >= SIDEBAR_W
-                            && my < SETTINGS_HEADER_H
-                            && self.page_navigation_at(mx, my).is_none()
-                            && self.widget_mode_at(mx, my).is_none();
-                        if (is_in_sidebar_title || is_in_content_title) && self.popup.is_none() {
-                            if let Some(win) = &self.window {
-                                let _ = win.drag_window();
-                            }
-                        } else if self.handle_widget_drag_press() {
-                            if let Some(win) = &self.window {
-                                win.request_redraw();
-                            }
-                        } else {
-                            self.handle_click(event_loop);
-                        }
-                    }
-                }
-            }
+            } => self.handle_left_mouse_pressed(event_loop),
             WindowEvent::MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
-            } => {
-                let scroll_released = std::mem::take(&mut self.scroll_dragging);
-                if (scroll_released || self.handle_widget_drag_release())
-                    && let Some(win) = &self.window
-                {
-                    win.request_redraw();
-                }
-            }
+            } => self.handle_left_mouse_released(),
             WindowEvent::RedrawRequested => self.draw(renderer),
             _ => (),
+        }
+    }
+
+    fn handle_focus_changed(&mut self, focused: bool) {
+        self.focused = focused;
+        if !focused {
+            self.commit_number_input();
+            self.dots_hovered = false;
+            self.scroll_dragging = false;
+        }
+        self.request_redraw();
+    }
+
+    fn handle_system_theme_changed(&mut self, theme: winit::window::Theme) {
+        self.is_light = theme == winit::window::Theme::Light;
+        if let Some(window) = &self.window {
+            Self::apply_titlebar_theme(window, self.is_light);
+        }
+        self.request_redraw();
+    }
+
+    fn handle_resized(&mut self, renderer: &mut D3DRenderer, size: PhysicalSize<u32>) {
+        self.win_w = size.width as f32;
+        self.win_h = size.height as f32;
+        self.resize_renderer_target(renderer, size);
+        self.request_redraw();
+    }
+
+    fn handle_scale_changed(&mut self, renderer: &mut D3DRenderer) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        let size = window.inner_size();
+        self.resize_renderer_target(renderer, size);
+        self.request_redraw();
+    }
+
+    fn resize_renderer_target(&mut self, renderer: &mut D3DRenderer, size: PhysicalSize<u32>) {
+        let Some(target) = self.renderer_target else {
+            return;
+        };
+        if let Err(error) = renderer.resize(target, size.width, size.height) {
+            log::error!("D3D12 settings renderer resize failed: {error}");
+            self.close_requested = true;
+        }
+    }
+
+    fn handle_pressed_key(&mut self, key: &Key) {
+        if self.handle_number_input_key(key) {
+            return;
+        }
+        match key {
+            Key::Named(NamedKey::ArrowLeft) => {
+                self.navigate_page_history(PageNavigation::Back);
+            }
+            Key::Named(NamedKey::ArrowRight) => {
+                self.navigate_page_history(PageNavigation::Forward);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
+        let scale = self
+            .window
+            .as_ref()
+            .map(|window| window.scale_factor() as f32)
+            .unwrap_or(1.0);
+        let new_position = (position.x as f32 / scale, position.y as f32 / scale);
+        let mouse_moved = (new_position.0 - self.last_hover_mouse_pos.0).abs()
+            > CURSOR_MOVE_THRESHOLD
+            || (new_position.1 - self.last_hover_mouse_pos.1).abs() > CURSOR_MOVE_THRESHOLD;
+        self.logical_mouse_pos = new_position;
+        self.update_scroll_drag(new_position.1);
+
+        let mut redraw =
+            matches!(self.active_page, WIDGETS_PAGE_INDEX | PLUGINS_PAGE_INDEX) && mouse_moved;
+        let dots_hovered = self.focused && window_controls_hovered(new_position.0, new_position.1);
+        if dots_hovered != self.dots_hovered {
+            self.dots_hovered = dots_hovered;
+            redraw = true;
+        }
+        redraw |= self.update_widget_hover();
+        redraw |= self.update_popup_hover();
+        if mouse_moved {
+            self.last_hover_mouse_pos = new_position;
+            redraw |= self.update_sidebar_hover();
+        }
+        if redraw {
+            self.request_redraw();
+        }
+
+        let cursor = if self.get_hover_state() {
+            winit::window::CursorIcon::Pointer
+        } else {
+            winit::window::CursorIcon::Default
+        };
+        if let Some(window) = &self.window {
+            window.set_cursor(cursor);
+        }
+    }
+
+    fn update_widget_hover(&mut self) -> bool {
+        if self.widget_drag_active() {
+            let new_slot = self.widget_preview_slot_at_mouse();
+            let current_slot = self.active_widget_drag_hover_slot();
+            if new_slot != current_slot {
+                self.set_active_widget_drag_hover_slot(new_slot);
+            }
+            return widget_drag_move_needs_redraw(true, current_slot, new_slot);
+        }
+        if self.active_page != WIDGETS_PAGE_INDEX {
+            return false;
+        }
+        let new_slot = self.widget_preview_slot_at_mouse();
+        let current_slot = self.active_widget_preview_hover_slot();
+        if new_slot == current_slot {
+            return false;
+        }
+        self.set_active_widget_preview_hover_slot(new_slot);
+        true
+    }
+
+    fn update_popup_hover(&mut self) -> bool {
+        let Some(popup) = &mut self.popup else {
+            return false;
+        };
+        let (mouse_x, mouse_y) = self.logical_mouse_pos;
+        let hover_index = popup.hit_test_item(mouse_x, mouse_y);
+        if hover_index == popup.hover_idx {
+            return false;
+        }
+        popup.hover_idx = hover_index;
+        true
+    }
+
+    fn update_sidebar_hover(&mut self) -> bool {
+        let (mouse_x, mouse_y) = self.logical_mouse_pos;
+        let hover_index = (mouse_x < SIDEBAR_W).then(|| {
+            (0..SIDEBAR_PAGE_COUNT).find(|index| {
+                let row_y = SIDEBAR_START_Y + *index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
+                (row_y..=row_y + SIDEBAR_ROW_H).contains(&mouse_y)
+                    && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mouse_x)
+            })
+        });
+        let hover_index = hover_index.flatten();
+        let sidebar_hover = hover_index.map_or(-1, |index| index as i32);
+        if sidebar_hover == self.sidebar_hover {
+            return false;
+        }
+        self.sidebar_hover = sidebar_hover;
+        for index in 0..SIDEBAR_PAGE_COUNT {
+            self.anim.set(
+                SIDEBAR_KEY_BASE + index as u64,
+                if hover_index == Some(index) { 1.0 } else { 0.0 },
+            );
+        }
+        true
+    }
+
+    fn handle_cursor_left(&mut self) {
+        if self.dots_hovered {
+            self.dots_hovered = false;
+            self.request_redraw();
+        }
+    }
+
+    fn handle_plugin_file_drop(&mut self, path: std::path::PathBuf) {
+        self.plugin_status = Some((crate::core::i18n::tr("plugin_installing"), false));
+        self.plugin_request = Some(PluginSettingsRequest::Install(path));
+        self.mark_items_dirty();
+        self.request_redraw();
+    }
+
+    fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        if self.popup.is_some() {
+            self.popup = None;
+            self.anim
+                .set_with_speed(POPUP_OPACITY_KEY, 0.0, POPUP_CLOSE_SPEED);
+            self.request_redraw();
+            return;
+        }
+        let delta = scroll_delta(delta);
+        let (mouse_x, _) = self.logical_mouse_pos;
+        if self.active_page == PLUGINS_PAGE_INDEX && self.plugin_detail_contains(mouse_x) {
+            self.plugin_detail_scroll =
+                (self.plugin_detail_scroll - delta).clamp(0.0, self.plugin_detail_max_scroll);
+            self.request_redraw();
+        } else if mouse_x >= SIDEBAR_W {
+            self.target_scroll_y =
+                (self.target_scroll_y - delta).clamp(0.0, self.cached_max_scroll);
+            self.request_redraw();
+        }
+    }
+
+    fn handle_left_mouse_pressed(&mut self, event_loop: &ActiveEventLoop) {
+        let (mouse_x, mouse_y) = self.logical_mouse_pos;
+        if self.begin_scroll_drag(mouse_x, mouse_y) {
+            self.request_redraw();
+            return;
+        }
+        match window_control_at(mouse_x, mouse_y) {
+            Some(WINDOW_CONTROL_CLOSE) => self.close_requested = true,
+            Some(WINDOW_CONTROL_MINIMIZE) => {
+                if let Some(window) = &self.window {
+                    window.set_minimized(true);
+                }
+            }
+            Some(_) => {}
+            None if self.is_window_drag_region(mouse_x, mouse_y) && self.popup.is_none() => {
+                if let Some(window) = &self.window {
+                    let _ = window.drag_window();
+                }
+            }
+            None if self.handle_widget_drag_press() => self.request_redraw(),
+            None => self.handle_click(event_loop),
+        }
+    }
+
+    fn is_window_drag_region(&self, mouse_x: f32, mouse_y: f32) -> bool {
+        let in_sidebar_title = mouse_x < SIDEBAR_W && mouse_y < SIDEBAR_TITLE_HEIGHT;
+        let in_content_title = mouse_x >= SIDEBAR_W
+            && mouse_y < SETTINGS_HEADER_H
+            && Self::page_navigation_at(mouse_x, mouse_y).is_none()
+            && self.widget_mode_at(mouse_x, mouse_y).is_none();
+        in_sidebar_title || in_content_title
+    }
+
+    fn handle_left_mouse_released(&mut self) {
+        let scroll_released = std::mem::take(&mut self.scroll_dragging);
+        if scroll_released || self.handle_widget_drag_release() {
+            self.request_redraw();
+        }
+    }
+
+    fn request_redraw(&self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 

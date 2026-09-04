@@ -194,7 +194,7 @@ pub fn check_updates_manually() {
         {
             Ok(r) => r,
             Err(e) => {
-                log::error!("Failed to build runtime for manual update check: {:?}", e);
+                log::error!("Failed to build runtime for manual update check: {e:?}");
                 return;
             }
         };
@@ -286,11 +286,7 @@ async fn do_beta_check(app_dir: &Path, manual: bool) {
     let remote_build = remote_info.build_number;
 
     if remote_build > local_build {
-        log::info!(
-            "Update available (Beta): build {} -> {}",
-            local_build,
-            remote_build
-        );
+        log::info!("Update available (Beta): build {local_build} -> {remote_build}");
         prompt_update(
             &tr("channel_beta"),
             &remote_info.built_at,
@@ -304,9 +300,7 @@ async fn do_beta_check(app_dir: &Path, manual: bool) {
         .await;
     } else {
         log::info!(
-            "Update check (Beta): current build is up-to-date (local: {}, remote: {})",
-            local_build,
-            remote_build
+            "Update check (Beta): current build is up-to-date (local: {local_build}, remote: {remote_build})"
         );
         notify_up_to_date(manual).await;
     }
@@ -513,6 +507,6 @@ trait AddNull {
 }
 impl AddNull for String {
     fn add_null(&self) -> String {
-        format!("{}\0", self)
+        format!("{self}\0")
     }
 }

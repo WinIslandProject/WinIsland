@@ -197,7 +197,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
                 .SourceAppUserModelId()
                 .map(|id| id.to_string())
                 .unwrap_or_default();
-            log::info!("SMTC: seek to {}ms", seek_pos);
+            log::info!("SMTC: seek to {seek_pos}ms");
             let ticks = seek_pos as i64 * 10_000;
             match session.TryChangePlaybackPositionAsync(ticks) {
                 Ok(_) => {
@@ -217,7 +217,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         }
 
         while let Ok(cmd) = playback_rx.try_recv() {
-            log::info!("SMTC: playback command {:?}", cmd);
+            log::info!("SMTC: playback command {cmd:?}");
             if let Some(session) = get_target_session(&manager, &media_state.allowed_apps) {
                 match cmd {
                     PlaybackCommand::Toggle => {

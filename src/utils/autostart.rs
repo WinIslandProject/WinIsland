@@ -12,7 +12,7 @@ pub fn set_autostart(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
     if enabled {
         let exe_path = env::current_exe()?;
         let exe_path_str = exe_path.to_str().ok_or("Invalid exe path")?;
-        let quoted_path = format!("\"{}\"", exe_path_str);
+        let quoted_path = format!("\"{exe_path_str}\"");
         let exe_path_wide: Vec<u16> = quoted_path
             .encode_utf16()
             .chain(std::iter::once(0))
@@ -47,9 +47,9 @@ pub fn set_autostart(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
                     )),
                 );
                 let _ = RegCloseKey(hkey);
-                log::info!("Autostart: enabled ({})", exe_path_str);
+                log::info!("Autostart: enabled ({exe_path_str})");
             } else {
-                log::error!("Autostart: RegCreateKeyExW failed: {:?}", res);
+                log::error!("Autostart: RegCreateKeyExW failed: {res:?}");
             }
         }
     } else {

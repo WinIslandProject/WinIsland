@@ -29,6 +29,34 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 const CONTENT_PADDING: f32 = 24.0;
+const PAGE_ARROW_RIGHT_INSET: f32 = 7.5;
+const PAGE_ARROW_FADE_RATE: f32 = 5.0;
+const COVER_SIZE: f32 = 72.0;
+const TRACK_TEXT_GAP: f32 = 16.0;
+const TRACK_TEXT_RIGHT_INSET: f32 = 70.0;
+const TRACK_TITLE_BASELINE_OFFSET: f32 = 26.0;
+const PROGRESS_TOP_GAP: f32 = 18.0;
+const PROGRESS_TIME_FONT_SCALE: f32 = 0.67;
+const DEFAULT_PROGRESS_TIME_FONT_SIZE: f32 = 10.0;
+const PROGRESS_TIME_WIDTH: f32 = 36.0;
+const PROGRESS_TIME_GAP: f32 = 4.0;
+const PROGRESS_START_THRESHOLD: f32 = 0.02;
+const PROGRESS_JUMP_THRESHOLD: f32 = 0.3;
+const PROGRESS_SMOOTHING: f32 = 0.15;
+const PROGRESS_HOVER_SMOOTHING: f32 = 0.18;
+const PROGRESS_HOVER_SNAP_THRESHOLD: f32 = 0.005;
+const PROGRESS_BAR_HEIGHT: f32 = 5.5;
+const PROGRESS_BAR_HOVER_GROWTH: f32 = 3.5;
+const PROGRESS_TIME_BASELINE_SCALE: f32 = 0.35;
+const PROGRESS_TIME_IDLE_ALPHA: f32 = 0.5;
+const PROGRESS_TRACK_ALPHA: f32 = 0.25;
+const PLAYBACK_CONTROLS_TOP_GAP: f32 = 42.0;
+const SKIP_BUTTON_GAP: f32 = 75.0;
+const SKIP_ANIMATION_DURATION_SECS: f32 = 0.5;
+const COLLAPSED_VISUALIZER_INSET: f32 = 17.0;
+const EXPANDED_VISUALIZER_INSET: f32 = 37.0;
+const VISUALIZER_TITLE_OFFSET: f32 = 4.0;
+const VISUALIZER_SMOOTHING: (f32, f32) = (0.6, 0.08);
 
 struct ProgressTextCache {
     elapsed_secs: u32,
@@ -200,18 +228,19 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         palette,
     } = params;
 
-    let arrow_alpha = (alpha as f32 * (1.0 - view_offset * 5.0).clamp(0.0, 1.0)) as u8;
+    let arrow_alpha =
+        (alpha as f32 * (1.0 - view_offset * PAGE_ARROW_FADE_RATE).clamp(0.0, 1.0)) as u8;
     if arrow_alpha > 0 {
         draw_arrow_right(
             canvas,
-            ox + w - 7.5 * scale,
+            ox + w - PAGE_ARROW_RIGHT_INSET * scale,
             oy + h / 2.0,
             arrow_alpha,
             scale,
             text_color,
         );
     }
-    let base_img_size = 72.0 * scale;
+    let base_img_size = COVER_SIZE * scale;
     let (img_size, img_x, img_y) = (
         base_img_size,
         ox + CONTENT_PADDING * scale,
@@ -231,9 +260,9 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         text_color,
     });
 
-    let text_x = img_x + img_size + 16.0 * scale;
-    let max_text_w = w - (text_x - ox) - 70.0 * scale;
-    let title_y = img_y + 26.0 * scale;
+    let text_x = img_x + img_size + TRACK_TEXT_GAP * scale;
+    let max_text_w = w - (text_x - ox) - TRACK_TEXT_RIGHT_INSET * scale;
+    let title_y = img_y + TRACK_TITLE_BASELINE_OFFSET * scale;
     draw_track_text(TrackTextParams {
         canvas,
         media,
@@ -249,13 +278,13 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
     });
 
     if music_active {
-        let bar_y = img_y + img_size + 18.0 * scale;
+        let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
         let time_font_size = if font_size > 0.0 {
-            font_size * 0.67 * scale
+            font_size * PROGRESS_TIME_FONT_SCALE * scale
         } else {
-            10.0 * scale
+            DEFAULT_PROGRESS_TIME_FONT_SIZE * scale
         };
-        let time_w = 36.0 * scale;
+        let time_w = PROGRESS_TIME_WIDTH * scale;
 
         let current_pos_ms = if media.is_playing {
             media
@@ -279,14 +308,17 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         let progress = PROGRESS_SMOOTH.with(|cell| {
             let mut smooth = cell.borrow_mut();
             let dragging = PROGRESS_DRAGGING.with(|d| *d.borrow());
-            if dragging || *smooth < 0.0 || (*smooth < 0.02 && raw_progress > 0.02) {
+            if dragging
+                || *smooth < 0.0
+                || (*smooth < PROGRESS_START_THRESHOLD && raw_progress > PROGRESS_START_THRESHOLD)
+            {
                 *smooth = raw_progress;
             } else {
                 let diff = (raw_progress - *smooth).abs();
-                if diff > 0.3 {
+                if diff > PROGRESS_JUMP_THRESHOLD {
                     *smooth = raw_progress;
                 } else {
-                    *smooth += (raw_progress - *smooth) * 0.15;
+                    *smooth += (raw_progress - *smooth) * PROGRESS_SMOOTHING;
                 }
             }
             *smooth
@@ -302,27 +334,28 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         let bar_full_left = ox + CONTENT_PADDING * scale;
         let bar_full_right = ox + w - CONTENT_PADDING * scale;
 
-        let bar_left = bar_full_left + time_w + 4.0 * scale;
-        let bar_right = bar_full_right - time_w - 4.0 * scale;
+        let bar_left = bar_full_left + time_w + PROGRESS_TIME_GAP * scale;
+        let bar_right = bar_full_right - time_w - PROGRESS_TIME_GAP * scale;
         let bar_total_w = bar_right - bar_left;
 
         let hover_t = PROGRESS_HOVER.with(|cell| {
             let mut state = cell.borrow_mut();
             let target = if state.0 { 1.0_f32 } else { 0.0 };
-            state.1 += (target - state.1) * 0.18;
-            if (state.1 - target).abs() < 0.005 {
+            state.1 += (target - state.1) * PROGRESS_HOVER_SMOOTHING;
+            if (state.1 - target).abs() < PROGRESS_HOVER_SNAP_THRESHOLD {
                 state.1 = target;
             }
             state.1
         });
 
-        let bar_h = (5.5 + 3.5 * hover_t) * scale;
+        let bar_h = (PROGRESS_BAR_HEIGHT + PROGRESS_BAR_HOVER_GROWTH * hover_t) * scale;
         let bar_center_y = bar_y;
         let bar_radius = bar_h / 2.0;
 
-        let text_baseline_y = bar_center_y + time_font_size * 0.35;
+        let text_baseline_y = bar_center_y + time_font_size * PROGRESS_TIME_BASELINE_SCALE;
 
-        let time_alpha_factor = 0.5 + 0.5 * hover_t;
+        let time_alpha_factor =
+            PROGRESS_TIME_IDLE_ALPHA + (1.0 - PROGRESS_TIME_IDLE_ALPHA) * hover_t;
         let mut time_paint = Paint::default();
         time_paint.set_anti_alias(true);
         time_paint.set_color(Color::from_argb(
@@ -376,7 +409,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         let mut track_paint = Paint::default();
         track_paint.set_anti_alias(true);
         track_paint.set_color(Color::from_argb(
-            (alpha as f32 * 0.25) as u8,
+            (alpha as f32 * PROGRESS_TRACK_ALPHA) as u8,
             text_color.r(),
             text_color.g(),
             text_color.b(),
@@ -406,14 +439,14 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         canvas.draw_rrect(fill_rrect, &fill_paint);
 
         let btn_cx = ox + w / 2.0;
-        let btn_cy = bar_center_y + bar_h / 2.0 + 42.0 * scale;
-        let skip_gap = 75.0 * scale;
+        let btn_cy = bar_center_y + bar_h / 2.0 + PLAYBACK_CONTROLS_TOP_GAP * scale;
+        let skip_gap = SKIP_BUTTON_GAP * scale;
 
         let prev_t = PREV_SKIP_ANIM.with(|cell| {
             let start = *cell.borrow();
             match start {
                 Some(s) => {
-                    let t = s.elapsed().as_secs_f32() / 0.5;
+                    let t = s.elapsed().as_secs_f32() / SKIP_ANIMATION_DURATION_SECS;
                     if t >= 1.0 {
                         *cell.borrow_mut() = None;
                         return None;
@@ -448,7 +481,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
             let start = *cell.borrow();
             match start {
                 Some(s) => {
-                    let t = s.elapsed().as_secs_f32() / 0.5;
+                    let t = s.elapsed().as_secs_f32() / SKIP_ANIMATION_DURATION_SECS;
                     if t >= 1.0 {
                         *cell.borrow_mut() = None;
                         return None;
@@ -474,18 +507,19 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         }
     }
 
-    let viz_x_offset = 17.0 + (37.0 - 17.0) * expansion_progress;
+    let viz_x_offset = COLLAPSED_VISUALIZER_INSET
+        + (EXPANDED_VISUALIZER_INSET - COLLAPSED_VISUALIZER_INSET) * expansion_progress;
     draw_visualizer(DrawVisualizerParams {
         canvas,
         x: ox + w - viz_x_offset * scale,
-        y: title_y - 4.0 * scale,
+        y: title_y - VISUALIZER_TITLE_OFFSET * scale,
         alpha,
         is_playing: music_active && media.is_playing,
         palette,
         spectrum: &media.spectrum,
         w_scale: scale,
         h_scale: viz_h_scale,
-        smooth_factors: (0.6, 0.08),
+        smooth_factors: VISUALIZER_SMOOTHING,
     });
 
     false

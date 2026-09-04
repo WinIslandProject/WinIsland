@@ -56,7 +56,7 @@ pub(super) fn auto_allow_new_apps(
 
     if changed {
         save_config(&config);
-        log::info!("SMTC: recorded new media session(s): {:?}", new_app_ids);
+        log::info!("SMTC: recorded new media session(s): {new_app_ids:?}");
     }
     known_apps.clone_from(&config.smtc_known_apps);
 

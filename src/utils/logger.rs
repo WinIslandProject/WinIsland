@@ -12,6 +12,7 @@ const LOG_DIR: &str = ".winisland/logs";
 const LOG_FILE: &str = "winisland.log";
 const CRASH_FLAG: &str = ".winisland/.crash_flag";
 const MAX_LOG_SIZE: u64 = 1_024_000; // 1MB
+const ERROR_MESSAGE_BOX_STYLE: MESSAGEBOX_STYLE = MESSAGEBOX_STYLE(0x0000_0010);
 
 struct FileLogger {
     file: Mutex<File>,
@@ -152,7 +153,7 @@ fn write_crash_report(panic_info: &PanicHookInfo) {
     let msg = panic_info
         .payload()
         .downcast_ref::<&str>()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| panic_info.payload().downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "Unknown panic".into());
 
@@ -163,25 +164,24 @@ fn write_crash_report(panic_info: &PanicHookInfo) {
 
     let report = format!(
         r#"---- WinIsland Crash Report ----
-Time: {}
+Time: {ts}
 Version: 1.0.0
 Thread: main
 
 // The crash happened at
-Location: {}
+Location: {location}
 
 // Reason
-{}
+{msg}
 
 // Logs
 See ~/.winisland/logs/winisland.log for recent activity.
 "#,
-        ts, location, msg,
     );
 
     // Try writing to log directory first
     let mut path = log_dir();
-    path.push(format!("crash-{}.txt", ts));
+    path.push(format!("crash-{ts}.txt"));
 
     if write_report_to(&path, &report).is_ok() {
         show_message_box(
@@ -192,10 +192,10 @@ See ~/.winisland/logs/winisland.log for recent activity.
     }
 
     // Fallback: write to Desktop
-    let msg_text = format!("WinIsland crashed at {}\n\nReason: {}", location, msg);
+    let msg_text = format!("WinIsland crashed at {location}\n\nReason: {msg}");
     if let Some(desktop) = get_desktop_path() {
         let mut desktop_path = desktop;
-        desktop_path.push(format!("WinIsland-crash-{}.txt", ts));
+        desktop_path.push(format!("WinIsland-crash-{ts}.txt"));
         if write_report_to(&desktop_path, &report).is_ok() {
             show_message_box(
                 "WinIsland Crash",
@@ -221,7 +221,7 @@ fn show_message_box(title: &str, text: &str) {
             None,
             PCWSTR(text_w.as_ptr()),
             PCWSTR(title_w.as_ptr()),
-            MESSAGEBOX_STYLE(0x00000010),
+            ERROR_MESSAGE_BOX_STYLE,
         );
     }
 }

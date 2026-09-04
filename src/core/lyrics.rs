@@ -40,7 +40,7 @@ const MOZILLA_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 const MAX_LYRICS_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 fn winisland_ua() -> String {
-    format!("WinIsland/{} ({})", APP_VERSION, APP_HOMEPAGE)
+    format!("WinIsland/{APP_VERSION} ({APP_HOMEPAGE})")
 }
 
 async fn get_json(url: &str, user_agent: &str) -> Option<Value> {
@@ -702,7 +702,7 @@ async fn fetch_lyrics_163_inner(title: &str, artist: &str) -> Option<Arc<Vec<Lyr
     let query = if artist.is_empty() {
         title.to_string()
     } else {
-        format!("{} {}", title, artist)
+        format!("{title} {artist}")
     };
     let url = format!(
         "https://music.163.com/api/search/get/web?s={}&type=1&offset=0&total=true&limit=10",
@@ -730,7 +730,7 @@ async fn fetch_lyrics_163_inner(title: &str, artist: &str) -> Option<Arc<Vec<Lyr
                     if let Some(name) = a.get("name").and_then(|n| n.as_str())
                         && name.to_lowercase() == artist_lower
                     {
-                        song_id = s.get("id").and_then(|id| id.as_i64());
+                        song_id = s.get("id").and_then(serde_json::Value::as_i64);
                         break;
                     }
                 }
@@ -757,10 +757,7 @@ async fn fetch_lyrics_163_inner(title: &str, artist: &str) -> Option<Arc<Vec<Lyr
 
     let id = song_id?;
 
-    let lyric_url = format!(
-        "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1",
-        id
-    );
+    let lyric_url = format!("https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=-1");
 
     let lyric_json = get_json(&lyric_url, MOZILLA_UA).await?;
 
@@ -812,7 +809,7 @@ async fn fetch_lyrics_lrclib_search(title: &str, artist: &str) -> Option<Arc<Vec
     let query = if artist.is_empty() {
         title.to_string()
     } else {
-        format!("{} {}", title, artist)
+        format!("{title} {artist}")
     };
     let url = format!("https://lrclib.net/api/search?q={}", url_encode(&query));
 
@@ -1147,7 +1144,7 @@ fn url_encode(input: &str) -> String {
                 output.push_str("%20");
             }
             _ => {
-                output.push_str(&format!("%{:02X}", b));
+                output.push_str(&format!("%{b:02X}"));
             }
         }
     }

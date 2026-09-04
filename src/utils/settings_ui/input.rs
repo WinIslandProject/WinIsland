@@ -1,4 +1,7 @@
-use super::items::*;
+use super::items::{
+    CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_H, POPUP_BTN_W, ROW_HEIGHT, STEPPER_BTN_SIZE,
+    STEPPER_GAP, STEPPER_VALUE_W, SettingsItem, TOGGLE_H, TOGGLE_W,
+};
 use crate::core::config::{
     AVAILABLE_COMPACT_WIDGETS, AVAILABLE_WIDGETS, CompactWidgetAlignment, CompactWidgetKind,
     CompactWidgetPosition, CompactWidgetSlot, PluginWidgetId, PluginWidgetSlot, WidgetKind,

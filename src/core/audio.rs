@@ -19,13 +19,31 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFOR
 use windows::core::{Interface, PWSTR};
 
 const FFT_LEN: usize = 1024;
+const SPECTRUM_BAND_COUNT: usize = 6;
+const FFT_BIN_RANGES: [(usize, usize); SPECTRUM_BAND_COUNT] =
+    [(2, 8), (8, 20), (20, 50), (50, 120), (120, 280), (280, 511)];
+const SPECTRUM_OUTPUT_MAPPING: [(usize, f32); SPECTRUM_BAND_COUNT] =
+    [(5, 0.8), (3, 0.9), (0, 1.0), (1, 1.0), (2, 0.9), (4, 0.8)];
 const PROCESS_CAPTURE_BYTES_PER_FRAME: usize = 8;
-const PROCESS_CAPTURE_BUFFER_LIMIT: usize = 48_000 * PROCESS_CAPTURE_BYTES_PER_FRAME;
+const PROCESS_CAPTURE_BUFFER_LIMIT: usize = LOOPBACK_SAMPLE_RATE * PROCESS_CAPTURE_BYTES_PER_FRAME;
+const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const AUDIO_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const AUDIO_RETRY_INTERVAL: Duration = Duration::from_millis(500);
+const PROCESS_CAPTURE_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const ACTIVE_AUDIO_PEAK_THRESHOLD: f32 = 0.002;
+const ADAPTIVE_LEVEL_INITIAL: f32 = 0.1;
+const ADAPTIVE_LEVEL_FLOOR: f32 = 0.01;
+const ADAPTIVE_LEVEL_DECAY: f32 = 0.995;
+const ADAPTIVE_LEVEL_LEARNING_RATE: f32 = 0.005;
+const SPECTRUM_NORMALIZATION_GAIN: f32 = 2.3;
+const LOOPBACK_SAMPLE_RATE: usize = 48_000;
+const LOOPBACK_CHANNELS: usize = 2;
+const LOOPBACK_SAMPLE_BITS: usize = 32;
 
 struct AtomicF32(AtomicU32);
 
 impl AtomicF32 {
-    fn new(value: f32) -> Self {
+    const fn new(value: f32) -> Self {
         Self(AtomicU32::new(value.to_bits()))
     }
 
@@ -43,7 +61,7 @@ struct SpectrumAnalyzer {
     output: Vec<realfft::num_complex::Complex32>,
     input: Vec<f32>,
     input_len: usize,
-    adaptive_max: [f32; 6],
+    adaptive_max: [f32; SPECTRUM_BAND_COUNT],
 }
 
 impl SpectrumAnalyzer {
@@ -56,14 +74,14 @@ impl SpectrumAnalyzer {
             output,
             input: vec![0.0; FFT_LEN],
             input_len: 0,
-            adaptive_max: [0.1; 6],
+            adaptive_max: [ADAPTIVE_LEVEL_INITIAL; SPECTRUM_BAND_COUNT],
         }
     }
 
     fn push_sample(
         &mut self,
         sample: f32,
-        spectrum: &Arc<Mutex<[f32; 6]>>,
+        spectrum: &Arc<Mutex<[f32; SPECTRUM_BAND_COUNT]>>,
         gate: &Arc<AtomicF32>,
         gate_override: &Arc<AtomicF32>,
     ) {
@@ -90,7 +108,7 @@ struct ProcessCaptureContext {
     worker_generation: Arc<AtomicU32>,
     target_process_id: Arc<AtomicU32>,
     process_capture_active: Arc<AtomicBool>,
-    spectrum: Arc<Mutex<[f32; 6]>>,
+    spectrum: Arc<Mutex<[f32; SPECTRUM_BAND_COUNT]>>,
     gate: Arc<AtomicF32>,
     gate_override: Arc<AtomicF32>,
 }
@@ -109,7 +127,7 @@ impl ProcessCaptureContext {
 
 #[derive(Clone)]
 struct FallbackCaptureContext {
-    spectrum: Arc<Mutex<[f32; 6]>>,
+    spectrum: Arc<Mutex<[f32; SPECTRUM_BAND_COUNT]>>,
     gate: Arc<AtomicF32>,
     gate_override: Arc<AtomicF32>,
     process_capture_active: Arc<AtomicBool>,
@@ -124,7 +142,7 @@ impl FallbackCaptureContext {
 }
 
 pub struct AudioProcessor {
-    spectrum: Arc<Mutex<[f32; 6]>>,
+    spectrum: Arc<Mutex<[f32; SPECTRUM_BAND_COUNT]>>,
     gate: Arc<AtomicF32>,
     gate_override: Arc<AtomicF32>,
     target_app_id: Arc<RwLock<String>>,
@@ -136,7 +154,7 @@ pub struct AudioProcessor {
 
 impl AudioProcessor {
     pub fn new() -> Self {
-        let spectrum = Arc::new(Mutex::new([0.0f32; 6]));
+        let spectrum = Arc::new(Mutex::new([0.0f32; SPECTRUM_BAND_COUNT]));
         let gate = Arc::new(AtomicF32::new(1.0));
         let gate_override = Arc::new(AtomicF32::new(0.0));
         let target_app_id = Arc::new(RwLock::new(String::new()));
@@ -157,8 +175,11 @@ impl AudioProcessor {
         processor
     }
 
-    pub fn get_spectrum(&self) -> [f32; 6] {
-        *self.spectrum.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn get_spectrum(&self) -> [f32; SPECTRUM_BAND_COUNT] {
+        *self
+            .spectrum
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn set_gate_override(&self, value: bool) {
@@ -170,7 +191,7 @@ impl AudioProcessor {
             let mut target_app_id = self
                 .target_app_id
                 .write()
-                .unwrap_or_else(|error| error.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if *target_app_id == app_id {
                 false
             } else {
@@ -194,7 +215,7 @@ impl AudioProcessor {
             let mut workers = self
                 .workers
                 .lock()
-                .unwrap_or_else(|error| error.into_inner());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if workers.is_some() {
                 return;
             }
@@ -216,7 +237,7 @@ impl AudioProcessor {
         let cancel = self
             .workers
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(cancel) = cancel {
             self.worker_generation.fetch_add(1, Ordering::AcqRel);
@@ -227,7 +248,7 @@ impl AudioProcessor {
             *self
                 .spectrum
                 .lock()
-                .unwrap_or_else(|error| error.into_inner()) = [0.0; 6];
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = [0.0; SPECTRUM_BAND_COUNT];
             log::info!("Audio media ended, stopping capture workers");
         }
     }
@@ -255,7 +276,7 @@ impl AudioProcessor {
             {
                 let now = Instant::now();
                 if now >= next_device_refresh {
-                    next_device_refresh = now + Duration::from_secs(1);
+                    next_device_refresh = now + DEVICE_REFRESH_INTERVAL;
                     let default_device = host.default_output_device();
                     let default_device_name = default_device
                         .as_ref()
@@ -282,8 +303,7 @@ impl AudioProcessor {
                             };
                             current_device_name = default_device_name;
                             log::info!(
-                                "Audio meter thread: switched to device {:?}",
-                                current_device_name
+                                "Audio meter thread: switched to device {current_device_name:?}"
                             );
                         }
                     }
@@ -291,7 +311,7 @@ impl AudioProcessor {
 
                 let requested_app_id = target_app_id
                     .read()
-                    .unwrap_or_else(|error| error.into_inner())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .clone();
                 if requested_app_id != current_target_app_id || now >= next_target_refresh {
                     current_target_app_id = requested_app_id;
@@ -303,12 +323,12 @@ impl AudioProcessor {
                         break;
                     }
                     target_process_id.store(current_target_process_id, Ordering::Relaxed);
-                    next_target_refresh = now + Duration::from_secs(1);
+                    next_target_refresh = now + DEVICE_REFRESH_INTERVAL;
                 }
 
                 if current_target_app_id.is_empty() {
                     gate_clone.set(0.0);
-                    std::thread::sleep(Duration::from_millis(100));
+                    std::thread::sleep(AUDIO_POLL_INTERVAL);
                     continue;
                 }
 
@@ -343,12 +363,16 @@ impl AudioProcessor {
                         }
                     }
                 }
-                let gate_val = if max_peak > 0.002 { 1.0f32 } else { 0.0f32 };
+                let gate_val = if max_peak > ACTIVE_AUDIO_PEAK_THRESHOLD {
+                    1.0f32
+                } else {
+                    0.0f32
+                };
                 if worker_generation.load(Ordering::Acquire) != generation {
                     break;
                 }
                 gate_clone.set(gate_val);
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(AUDIO_POLL_INTERVAL);
             }
             // Drop COM objects while COM is still initialized, then clean up.
             drop(session_manager);
@@ -401,13 +425,11 @@ impl AudioProcessor {
 
                 if let Err(error) = capture_process_audio(process_id, &context, &mut analyzer) {
                     context.set_process_capture_active(false);
-                    retry_after = Instant::now() + Duration::from_secs(1);
+                    retry_after = Instant::now() + PROCESS_CAPTURE_RETRY_INTERVAL;
                     if unavailable_process_id != Some(process_id) {
                         unavailable_process_id = Some(process_id);
                         log::warn!(
-                            "Audio capture: process loopback unavailable for PID {}: {}",
-                            process_id,
-                            error
+                            "Audio capture: process loopback unavailable for PID {process_id}: {error}"
                         );
                     }
                 }
@@ -455,10 +477,10 @@ impl AudioProcessor {
                             stream_running = false;
                         }
                     }
-                    std::thread::sleep(Duration::from_millis(100));
+                    std::thread::sleep(AUDIO_POLL_INTERVAL);
                     continue;
                 }
-                next_device_refresh = now + Duration::from_secs(1);
+                next_device_refresh = now + DEVICE_REFRESH_INTERVAL;
                 let default_device = host.default_output_device();
                 let default_device_name = default_device
                     .as_ref()
@@ -466,9 +488,7 @@ impl AudioProcessor {
 
                 if default_device_name != current_device_name {
                     log::info!(
-                        "Audio capture: default device changed from {:?} to {:?}",
-                        current_device_name,
-                        default_device_name
+                        "Audio capture: default device changed from {current_device_name:?} to {default_device_name:?}"
                     );
 
                     // Releasing old stream and session
@@ -484,11 +504,9 @@ impl AudioProcessor {
                             Ok(c) => c,
                             Err(e) => {
                                 log::warn!(
-                                    "Audio capture: no default output config for '{}': {:?}",
-                                    device_name,
-                                    e
+                                    "Audio capture: no default output config for '{device_name}': {e:?}"
                                 );
-                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                std::thread::sleep(AUDIO_RETRY_INTERVAL);
                                 continue;
                             }
                         };
@@ -518,22 +536,22 @@ impl AudioProcessor {
                                 capture_context.clone(),
                             ),
                             _ => {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                std::thread::sleep(AUDIO_RETRY_INTERVAL);
                                 continue;
                             }
                         };
 
                         if let Ok(s) = stream {
-                            log::info!("Audio capture stream prepared for '{}'", device_name);
+                            log::info!("Audio capture stream prepared for '{device_name}'");
                             current_stream = Some(s);
                             current_device_name = Some(device_name);
                         } else if let Err(e) = stream {
-                            log::error!("Audio capture: failed to build capture stream: {:?}", e);
+                            log::error!("Audio capture: failed to build capture stream: {e:?}");
                         }
                     }
                 }
 
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(AUDIO_POLL_INTERVAL);
             }
 
             // Cleanup when loop ends
@@ -546,7 +564,14 @@ fn capture_process_audio(
     context: &ProcessCaptureContext,
     analyzer: &mut SpectrumAnalyzer,
 ) -> Result<(), wasapi::WasapiError> {
-    let format = WaveFormat::new(32, 32, &SampleType::Float, 48_000, 2, None);
+    let format = WaveFormat::new(
+        LOOPBACK_SAMPLE_BITS,
+        LOOPBACK_SAMPLE_BITS,
+        &SampleType::Float,
+        LOOPBACK_SAMPLE_RATE,
+        LOOPBACK_CHANNELS,
+        None,
+    );
     let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)?;
     audio_client.initialize_client(
         &format,
@@ -722,7 +747,7 @@ where
                 );
             }
         },
-        |err| log::error!("Audio error: {}", err),
+        |err| log::error!("Audio error: {err}"),
         None,
     )
 }
@@ -731,43 +756,44 @@ fn update_spectrum(
     input: &mut [f32],
     fft: &Arc<dyn realfft::RealToComplex<f32>>,
     output: &mut [realfft::num_complex::Complex32],
-    adaptive_max: &mut [f32; 6],
-    spectrum_arc: &Arc<Mutex<[f32; 6]>>,
+    adaptive_max: &mut [f32; SPECTRUM_BAND_COUNT],
+    spectrum_arc: &Arc<Mutex<[f32; SPECTRUM_BAND_COUNT]>>,
     gate_clone: &Arc<AtomicF32>,
     gate_override_clone: &Arc<AtomicF32>,
 ) {
     if !analysis_enabled(gate_clone, gate_override_clone) {
         if let Ok(mut spectrum) = spectrum_arc.try_lock() {
-            *spectrum = [0.0; 6];
+            *spectrum = [0.0; SPECTRUM_BAND_COUNT];
         }
         return;
     }
     if let Err(e) = fft.process(input, output) {
-        log::warn!("FFT processing failed: {:?}", e);
+        log::warn!("FFT processing failed: {e:?}");
         // Feed the floor value into adaptive_max to prevent slow baseline decay
         // when FFT frames are intermittently dropped.
         for v in adaptive_max.iter_mut() {
-            *v = *v * 0.995 + 0.01 * 0.005;
+            *v = *v * ADAPTIVE_LEVEL_DECAY + ADAPTIVE_LEVEL_FLOOR * ADAPTIVE_LEVEL_LEARNING_RATE;
         }
         return;
     }
     let effective_gate = gate_clone.get() * gate_override_clone.get();
-    let mut raw_bins = [0.0f32; 6];
-    let ranges = [(2, 8), (8, 20), (20, 50), (50, 120), (120, 280), (280, 511)];
-    for (j, (start, end)) in ranges.iter().enumerate() {
-        let mut sum = 0.0f32;
-        sum += output[*start..*end].iter().map(|v| v.norm()).sum::<f32>();
+    let mut raw_bins = [0.0f32; SPECTRUM_BAND_COUNT];
+    for (band, (start, end)) in FFT_BIN_RANGES.iter().enumerate() {
+        let sum = output[*start..*end]
+            .iter()
+            .map(|value| value.norm())
+            .sum::<f32>();
         let avg = sum / (*end - *start) as f32;
-        adaptive_max[j] = adaptive_max[j] * 0.995 + avg.max(0.01) * 0.005;
-        raw_bins[j] = (avg / (adaptive_max[j] * 2.3) * effective_gate).clamp(0.0, 1.0);
+        adaptive_max[band] = adaptive_max[band] * ADAPTIVE_LEVEL_DECAY
+            + avg.max(ADAPTIVE_LEVEL_FLOOR) * ADAPTIVE_LEVEL_LEARNING_RATE;
+        raw_bins[band] = (avg / (adaptive_max[band] * SPECTRUM_NORMALIZATION_GAIN)
+            * effective_gate)
+            .clamp(0.0, 1.0);
     }
-    let mut final_bins = [0.0f32; 6];
-    final_bins[0] = raw_bins[5] * 0.8;
-    final_bins[1] = raw_bins[3] * 0.9;
-    final_bins[2] = raw_bins[0] * 1.0;
-    final_bins[3] = raw_bins[1] * 1.0;
-    final_bins[4] = raw_bins[2] * 0.9;
-    final_bins[5] = raw_bins[4] * 0.8;
+    let mut final_bins = [0.0f32; SPECTRUM_BAND_COUNT];
+    for (output_band, (input_band, gain)) in SPECTRUM_OUTPUT_MAPPING.iter().enumerate() {
+        final_bins[output_band] = raw_bins[*input_band] * gain;
+    }
     if let Ok(mut s) = spectrum_arc.try_lock() {
         *s = final_bins;
     }
@@ -777,10 +803,10 @@ fn analysis_enabled(gate: &AtomicF32, gate_override: &AtomicF32) -> bool {
     gate.get() > 0.0 && gate_override.get() > 0.0
 }
 
-fn reset_spectrum(analyzer: &mut SpectrumAnalyzer, spectrum: &Mutex<[f32; 6]>) {
+fn reset_spectrum(analyzer: &mut SpectrumAnalyzer, spectrum: &Mutex<[f32; SPECTRUM_BAND_COUNT]>) {
     analyzer.input_len = 0;
     if let Ok(mut spectrum) = spectrum.try_lock() {
-        *spectrum = [0.0; 6];
+        *spectrum = [0.0; SPECTRUM_BAND_COUNT];
     }
 }
 

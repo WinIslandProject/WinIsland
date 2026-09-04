@@ -3,14 +3,18 @@ use crate::ui::expanded::widget_view::draw_plugin_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::{DrawTextCachedParams, FontManager};
-use crate::utils::settings_ui::items::*;
-use crate::utils::settings_ui::*;
+use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
+use crate::utils::settings_ui::{
+    ActiveStepperValue, DrawItemsParams, WidgetSource, draw_items, widget_grid_geom,
+    widget_source_span,
+};
 use crate::window::d3d::D3DRenderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 
 use super::{
-    PAGE_NAV_GAP, PAGE_NAV_SIZE, PAGE_NAV_X, PAGE_NAV_Y, POPUP_MENU_R, POPUP_OPACITY_KEY,
-    SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WINDOW_RADIUS, WidgetEditorMode,
+    PAGE_NAV_GAP, PAGE_NAV_SIZE, PAGE_NAV_X, PAGE_NAV_Y, PLUGINS_PAGE_INDEX, POPUP_MENU_R,
+    POPUP_OPACITY_KEY, SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WIDGETS_PAGE_INDEX,
+    WINDOW_RADIUS, WidgetEditorMode,
 };
 
 impl SettingsApp {
@@ -139,7 +143,7 @@ impl SettingsApp {
                 );
             }
 
-            if self.active_page == 3 {
+            if self.active_page == PLUGINS_PAGE_INDEX {
                 self.draw_plugins_page(direct_context, canvas, &theme, win_w, win_h);
             }
 
@@ -166,7 +170,7 @@ impl SettingsApp {
     }
 
     fn widget_preview_item_y_cached(&self) -> Option<f32> {
-        if self.active_page != 2 {
+        if self.active_page != WIDGETS_PAGE_INDEX {
             return None;
         }
         let mut y = SETTINGS_HEADER_H;
@@ -368,7 +372,7 @@ impl SettingsApp {
     }
 
     fn draw_widget_mode_control(&self, canvas: &Canvas, theme: &SettingsTheme) {
-        if self.active_page != 2 {
+        if self.active_page != WIDGETS_PAGE_INDEX {
             return;
         }
         let control = self.widget_mode_control_rect();

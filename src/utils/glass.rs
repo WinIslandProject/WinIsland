@@ -9,7 +9,11 @@ use skia_safe::{
     gpu::{self, DirectContext},
     image_filters,
 };
-use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC,
+    DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, HALFTONE, ReleaseDC, SRCCOPY,
+    STRETCH_BLT_MODE, SelectObject, SetStretchBltMode, StretchBlt,
+};
 
 const GLASS_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
 const GLASS_REFRESH_INTERVAL_INTEGRATED: Duration = Duration::from_millis(100);

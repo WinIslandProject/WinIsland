@@ -201,7 +201,7 @@ impl App {
                     "plugin_install_failed",
                     &[&e],
                 ));
-                log::error!("Failed to install plugin from drop: {}", e);
+                log::error!("Failed to install plugin from drop: {e}");
             }
             Err(mpsc::TryRecvError::Empty) => {
                 self.pending_install = Some(rx);
@@ -297,11 +297,7 @@ impl App {
             && (dx.abs() >= RIGHT_DRAG_THRESHOLD || dy.abs() >= RIGHT_DRAG_THRESHOLD)
         {
             self.is_right_dragging = true;
-            log::info!(
-                "Right click drag started at offsets: ({}, {})",
-                start_ox,
-                start_oy
-            );
+            log::info!("Right click drag started at offsets: ({start_ox}, {start_oy})");
         }
         if !self.is_right_dragging {
             return;

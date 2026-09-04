@@ -51,14 +51,11 @@ impl PluginPackager {
     pub fn from_cargo() -> Result<Self, String> {
         let cargo_toml_path = Path::new("Cargo.toml");
         let contents = std::fs::read_to_string(cargo_toml_path).map_err(|e| {
-            format!(
-                "Cannot read Cargo.toml (run from the plugin project root): {}",
-                e
-            )
+            format!("Cannot read Cargo.toml (run from the plugin project root): {e}")
         })?;
 
         let value: toml::Value =
-            toml::from_str(&contents).map_err(|e| format!("Cannot parse Cargo.toml: {}", e))?;
+            toml::from_str(&contents).map_err(|e| format!("Cannot parse Cargo.toml: {e}"))?;
 
         let pkg = value
             .get("package")
@@ -246,7 +243,7 @@ impl PluginPackager {
                 self.signing_key = Some(key);
             }
             Err(e) => {
-                log::warn!("Signing key not loaded: {}", e);
+                log::warn!("Signing key not loaded: {e}");
             }
         }
         self
@@ -259,7 +256,7 @@ impl PluginPackager {
                 self.signing_key = Some(key);
             }
             Err(e) => {
-                log::warn!("Signing key not loaded from env '{}': {}", var, e);
+                log::warn!("Signing key not loaded from env '{var}': {e}");
             }
         }
         self
@@ -272,7 +269,7 @@ impl PluginPackager {
                 self.signing_key = Some(key);
             }
             Err(e) => {
-                log::warn!("Signing key not loaded from bytes: {}", e);
+                log::warn!("Signing key not loaded from bytes: {e}");
             }
         }
         self
@@ -302,7 +299,7 @@ impl PluginPackager {
         let status = std::process::Command::new("cargo")
             .args(["build", "--release", "--locked"])
             .status()
-            .map_err(|e| format!("Failed to run cargo build: {}", e))?;
+            .map_err(|e| format!("Failed to run cargo build: {e}"))?;
 
         if !status.success() {
             return Err("cargo build --release failed".to_string());
@@ -316,12 +313,12 @@ impl PluginPackager {
             .unwrap_or("plugin.dll");
 
         // 3. Create staging directory
-        let staging = tempfile::tempdir().map_err(|e| format!("Cannot create temp dir: {}", e))?;
+        let staging = tempfile::tempdir().map_err(|e| format!("Cannot create temp dir: {e}"))?;
         let staging_path = staging.path();
 
         // 4. Copy DLL
         std::fs::copy(&dll_path, staging_path.join(dll_dest_name))
-            .map_err(|e| format!("Cannot copy DLL: {}", e))?;
+            .map_err(|e| format!("Cannot copy DLL: {e}"))?;
 
         // 5. Copy extra directories
         for dir in &self.extra_dirs {
@@ -330,7 +327,7 @@ impl PluginPackager {
                 let dst = staging_path.join(src);
                 copy_dir_all(src, &dst)?;
             } else {
-                log::warn!("Extra directory '{}' not found, skipping", dir);
+                log::warn!("Extra directory '{dir}' not found, skipping");
             }
         }
         for asset in [&self.icon, &self.readme].into_iter().flatten() {
@@ -339,7 +336,7 @@ impl PluginPackager {
 
         // 6. Compute DLL hashes
         let mut dll_hashes = Vec::new();
-        let dll_hash = hash_file(&dll_path).map_err(|e| format!("Cannot hash DLL: {}", e))?;
+        let dll_hash = hash_file(&dll_path).map_err(|e| format!("Cannot hash DLL: {e}"))?;
         dll_hashes.push(dll_hash);
         // Also hash any extra DLLs in extra dirs
         for dir in &self.extra_dirs {
@@ -378,11 +375,11 @@ impl PluginPackager {
         // 9. Validate and write plugin.yml
         manifest
             .validate()
-            .map_err(|e| format!("Invalid manifest: {}", e))?;
+            .map_err(|e| format!("Invalid manifest: {e}"))?;
         validate_dll_descriptor(&dll_path, &manifest)?;
         manifest
             .write_to_yaml(&staging_path.join("plugin.yml"))
-            .map_err(|e| format!("Cannot write plugin.yml: {}", e))?;
+            .map_err(|e| format!("Cannot write plugin.yml: {e}"))?;
 
         // 10. Create ZIP
         let output_path = self
@@ -534,10 +531,10 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     for entry in
         std::fs::read_dir(src).map_err(|e| format!("Cannot read dir '{}': {}", src.display(), e))?
     {
-        let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
+        let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
         let ty = entry
             .file_type()
-            .map_err(|e| format!("File type error: {}", e))?;
+            .map_err(|e| format!("File type error: {e}"))?;
         let src_path = entry.path();
         let file_name = src_path
             .file_name()
@@ -555,8 +552,8 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 fn collect_dll_hashes(dir: &Path, hashes: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| format!("Cannot read dir: {}", e))? {
-        let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("Cannot read dir: {e}"))? {
+        let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "dll") {
             let hash = hash_file(&path)?;

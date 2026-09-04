@@ -394,13 +394,13 @@ fn validate_icon(plugin_id: &str, bytes: &[u8]) -> Result<(), String> {
 
 fn validate_package_manifest(plugin: &MarketplacePlugin, path: &Path) -> Result<(), String> {
     let manifest = zip_loader::read_manifest_from_zip(path)?;
-    if manifest.id != plugin.id
-        || manifest.name != plugin.name
-        || manifest.author != plugin.author
-        || manifest.version != plugin.version
-        || manifest.description != plugin.description
-        || manifest.github_link != plugin.repository
-    {
+    let metadata_matches = manifest.id == plugin.id
+        && manifest.name == plugin.name
+        && manifest.author == plugin.author
+        && manifest.version == plugin.version
+        && manifest.description == plugin.description
+        && manifest.github_link == plugin.repository;
+    if !metadata_matches {
         return Err("The plugin package metadata does not match the signed catalog".into());
     }
     Ok(())

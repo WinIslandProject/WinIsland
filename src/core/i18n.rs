@@ -49,7 +49,7 @@ fn embedded_langs() -> &'static [EmbeddedLang] {
 fn lang_dir() -> std::path::PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("resources")
         .join("in_app")

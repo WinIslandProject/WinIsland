@@ -7,17 +7,11 @@ use std::path::Path;
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
     #[error("I/O error: {0}")]
-    Io(std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("Key error: {0}")]
     Key(String),
     #[error("Signature error: {0}")]
     Signature(String),
-}
-
-impl From<std::io::Error> for SigningError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
 }
 
 impl From<SigningError> for String {
@@ -48,9 +42,9 @@ pub fn load_signing_key(path: &Path) -> Result<SigningKey, SigningError> {
 /// Load an Ed25519 signing key from a PEM-encoded environment variable.
 pub fn load_signing_key_from_env(var: &str) -> Result<SigningKey, SigningError> {
     let pem = std::env::var(var)
-        .map_err(|_| SigningError::Key(format!("Environment variable '{}' not set", var)))?;
+        .map_err(|_| SigningError::Key(format!("Environment variable '{var}' not set")))?;
     let key = SigningKey::from_pkcs8_pem(&pem)
-        .map_err(|e| SigningError::Key(format!("Invalid PEM key in env '{}': {}", var, e)))?;
+        .map_err(|e| SigningError::Key(format!("Invalid PEM key in env '{var}': {e}")))?;
     Ok(key)
 }
 

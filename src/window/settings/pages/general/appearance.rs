@@ -72,7 +72,7 @@ impl SettingsApp {
             AppearanceAction::FontSize,
         );
 
-        let monitors = self.get_monitor_list();
+        let monitors = Self::get_monitor_list();
         let selected_monitor =
             (self.config.monitor_index as usize).min(monitors.len().saturating_sub(1));
         page.row_source(
@@ -180,7 +180,7 @@ impl SettingsApp {
 
         let popup = match action {
             AppearanceAction::Monitor => {
-                let monitors = self.get_monitor_list();
+                let monitors = Self::get_monitor_list();
                 let selected =
                     (self.config.monitor_index as usize).min(monitors.len().saturating_sub(1));
                 let values = (0..monitors.len()).map(|index| index.to_string()).collect();

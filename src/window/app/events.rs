@@ -27,7 +27,7 @@ impl App {
                     self.is_light_theme = is_light;
                     crate::plugin::manager::update_host_theme(is_light);
                     win.request_redraw();
-                    log::info!("Window theme changed to {:?}", theme);
+                    log::info!("Window theme changed to {theme:?}");
                     if let Some(tray) = self.tray.as_mut() {
                         tray.update_theme(is_light);
                     }
@@ -52,7 +52,6 @@ impl App {
                         ));
                     }
                 }
-                WindowEvent::CloseRequested => (),
                 WindowEvent::DroppedFile(path)
                     if path
                         .extension()
@@ -61,8 +60,6 @@ impl App {
                     log::info!("File dropped: {}", path.display());
                     self.install_zip_drop(&path);
                 }
-                WindowEvent::HoveredFile(_) => (),
-                WindowEvent::HoveredFileCancelled => (),
                 WindowEvent::MouseInput { state, button, .. } => {
                     let (px, py) = get_global_cursor_pos();
                     if button == MouseButton::Left {

@@ -23,22 +23,22 @@ pub enum DockPosition {
 }
 
 impl DockPosition {
-    pub fn is_bottom(&self) -> bool {
+    pub const fn is_bottom(self) -> bool {
         matches!(
             self,
             Self::BottomCenter | Self::BottomLeft | Self::BottomRight
         )
     }
 
-    pub fn is_left(&self) -> bool {
+    pub const fn is_left(self) -> bool {
         matches!(self, Self::TopLeft | Self::BottomLeft)
     }
 
-    pub fn is_right(&self) -> bool {
+    pub const fn is_right(self) -> bool {
         matches!(self, Self::TopRight | Self::BottomRight)
     }
 
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::TopCenter => "top_center",
             Self::TopLeft => "top_left",
@@ -52,7 +52,7 @@ impl DockPosition {
 
 impl std::fmt::Display for DockPosition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str((*self).as_str())
     }
 }
 
@@ -94,12 +94,11 @@ pub enum WidgetKind {
 }
 
 impl WidgetKind {
-    pub const fn span(&self) -> (usize, usize) {
+    pub const fn span(self) -> (usize, usize) {
         match self {
-            WidgetKind::Clock => (2, 1),
-            WidgetKind::Calendar => (2, 2),
-            WidgetKind::ResourceUsage => (2, 1),
-            WidgetKind::Settings => (1, 1),
+            Self::Clock | Self::ResourceUsage => (2, 1),
+            Self::Calendar => (2, 2),
+            Self::Settings => (1, 1),
         }
     }
 }

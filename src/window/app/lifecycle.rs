@@ -16,7 +16,7 @@ impl ApplicationHandler for App {
         if self
             .settings
             .as_ref()
-            .and_then(|settings| settings.window_id())
+            .and_then(super::super::settings::SettingsApp::window_id)
             == Some(id)
         {
             if let (Some(settings), Some(renderer)) =
@@ -35,7 +35,7 @@ impl ApplicationHandler for App {
             if self
                 .settings
                 .as_ref()
-                .is_some_and(|settings| settings.close_requested())
+                .is_some_and(super::super::settings::SettingsApp::close_requested)
             {
                 self.close_settings();
             }
@@ -49,7 +49,7 @@ impl ApplicationHandler for App {
         if let Some(settings_deadline) = self
             .settings
             .as_mut()
-            .and_then(|settings| settings.update())
+            .and_then(super::super::settings::SettingsApp::update)
         {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 self.next_frame_deadline.min(settings_deadline),

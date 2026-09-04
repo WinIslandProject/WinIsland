@@ -105,7 +105,7 @@ impl VolumeMonitor {
             .state
             .snapshot
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(super) fn set_key_handling_enabled(&self, enabled: bool) {
@@ -122,7 +122,7 @@ impl VolumeMonitor {
             if self.keyboard_hook.is_some() {
                 *VOLUME_KEY_HANDLER
                     .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(handler);
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
             } else {
                 self.keyboard_hook = install_volume_keyboard_hook(handler);
             }
@@ -135,7 +135,7 @@ impl VolumeMonitor {
         self.display_enabled.store(false, Ordering::Release);
         *VOLUME_KEY_HANDLER
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = None;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         if let Some(hook) = self.keyboard_hook {
             // SAFETY: hook was returned by SetWindowsHookExW and is removed once while the
             // callback function remains valid for the process lifetime.
@@ -179,7 +179,7 @@ fn install_volume_keyboard_hook(handler: VolumeKeyHandler) -> Option<HHOOK> {
     };
     *VOLUME_KEY_HANDLER
         .lock()
-        .unwrap_or_else(|error| error.into_inner()) = Some(handler);
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
     log::info!("Volume keys are handled by WinIsland");
     Some(hook)
 }
@@ -208,7 +208,7 @@ unsafe extern "system" fn volume_keyboard_hook(
             let is_key_down = matches!(wparam.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
             let handled = VOLUME_KEY_HANDLER
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .as_ref()
                 .is_some_and(|handler| {
                     handler.endpoint_ready.load(Ordering::Acquire)
@@ -252,7 +252,7 @@ fn spawn_volume_monitor(
             let now = Instant::now();
             if notifier
                 .as_ref()
-                .is_some_and(|notifier| notifier.take_change())
+                .is_some_and(DefaultEndpointNotifier::take_change)
             {
                 endpoint = None;
                 endpoint_ready.store(false, Ordering::Release);
@@ -376,7 +376,7 @@ fn publish_volume_snapshot(
     let mut snapshot = state
         .snapshot
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let revision = if changed {
         snapshot.revision.wrapping_add(1)
     } else {
@@ -530,7 +530,7 @@ impl VolumeIndicator {
             .is_some_and(|until| until + FADE_DURATION > Instant::now())
     }
 
-    pub(super) fn target_size(&self, base_width: f32, base_height: f32, scale: f32) -> CompactSize {
+    pub(super) fn target_size(base_width: f32, base_height: f32, scale: f32) -> CompactSize {
         CompactSize {
             width: (base_width + 72.0) * scale,
             height: (base_height + 10.0) * scale,

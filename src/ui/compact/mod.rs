@@ -35,8 +35,10 @@ enum ActiveCompactOverlay<'a> {
 impl ActiveCompactOverlay<'_> {
     fn target_size(&self, base_width: f32, base_height: f32, scale: f32) -> CompactSize {
         match self {
-            Self::Notification(indicator) => indicator.target_size(base_width, base_height, scale),
-            Self::Volume(indicator) => indicator.target_size(base_width, base_height, scale),
+            Self::Notification(_) => {
+                NotificationIndicator::target_size(base_width, base_height, scale)
+            }
+            Self::Volume(_) => VolumeIndicator::target_size(base_width, base_height, scale),
         }
     }
 

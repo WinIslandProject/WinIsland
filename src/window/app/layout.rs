@@ -21,7 +21,9 @@ impl App {
                 .primary_monitor()
                 .or_else(|| window.current_monitor());
         }
-        use windows::Win32::Graphics::Gdi::*;
+        use windows::Win32::Graphics::Gdi::{
+            DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW, EnumDisplayDevicesW,
+        };
         let mut win32_names: Vec<String> = Vec::new();
         // SAFETY: EnumDisplayDevicesW reads display device info. We provide a zeroed
         // DISPLAY_DEVICEW with correct cb size. idx increments safely. No mutable global state.
@@ -170,13 +172,13 @@ impl App {
         let expanded_h = self.config.expanded_height as f64 * scale;
         let horizontal = if center_x - expanded_half_w <= mon_pos.x as f64 {
             -1
-        } else if center_x + expanded_half_w >= mon_pos.x as f64 + mon_size.width as f64 {
+        } else if center_x + expanded_half_w >= (mon_pos.x as f64 + f64::from(mon_size.width)) {
             1
         } else {
             0
         };
         let bottom =
-            center_y - base_half_h + expanded_h >= mon_pos.y as f64 + mon_size.height as f64;
+            center_y - base_half_h + expanded_h >= (mon_pos.y as f64 + f64::from(mon_size.height));
 
         match (bottom, horizontal) {
             (false, -1) => DockPosition::TopLeft,

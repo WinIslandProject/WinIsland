@@ -1726,7 +1726,7 @@ impl PluginManager {
             validate_manifest_metadata(manifest, plugin.metadata())?;
         }
         if disabled_plugin_ids(&self.plugin_dir).contains(&plugin_id) {
-            log::info!("Plugin '{}' is disabled", plugin_id);
+            log::info!("Plugin '{plugin_id}' is disabled");
             return Ok(());
         }
         let mut entries = self.entries.try_borrow_mut().map_err(|_| {
@@ -1734,8 +1734,7 @@ impl PluginManager {
         })?;
         if entries.iter().any(|entry| entry.metadata().id == plugin_id) {
             return Err(PluginError::InvalidPlugin(format!(
-                "plugin '{}' is already loaded",
-                plugin_id
+                "plugin '{plugin_id}' is already loaded"
             )));
         }
 

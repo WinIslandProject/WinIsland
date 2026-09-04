@@ -29,7 +29,7 @@ fn main() {
 
     let args: Vec<String> = env::args().collect();
     let is_restart = args.iter().any(|arg| arg == "--restart");
-    log::info!("Args: {:?}", args);
+    log::info!("Args: {args:?}");
     log::info!(
         "Config: style={:?}, scale={}, lang={}",
         config.island_style,

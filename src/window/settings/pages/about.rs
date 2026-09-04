@@ -49,7 +49,7 @@ impl SettingsApp {
         self.build_about_page().into_items()
     }
 
-    pub(crate) fn handle_about_click(&mut self, input: PageInput) {
+    pub(crate) fn handle_about_click(&self, input: PageInput) {
         let page = self.build_about_page();
         let result = input.hit_test(&page);
         if matches!(

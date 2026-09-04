@@ -3,7 +3,10 @@ use skia_safe::{Canvas, Color, FontStyle, Paint, Rect};
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::{DrawTextInRectParams, FontManager};
 
-use super::super::items::*;
+use super::super::items::{
+    CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_R, STEPPER_BTN_SIZE, TOGGLE_H, TOGGLE_INSET,
+    TOGGLE_KNOB, TOGGLE_R, TOGGLE_W,
+};
 
 pub(super) struct PillBtnParams<'a> {
     pub(super) canvas: &'a Canvas,

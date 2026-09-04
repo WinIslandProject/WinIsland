@@ -12,7 +12,7 @@ use crate::utils::settings_ui::{
     widget_grid_geom, widget_library_items, widget_preview_height, widget_preview_hit_test,
 };
 
-use super::super::{SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp};
+use super::super::{SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WIDGETS_PAGE_INDEX};
 use crate::utils::settings_ui::WidgetEditorMode;
 
 const MODE_CONTROL_W: f32 = 154.0;
@@ -71,7 +71,9 @@ impl SettingsApp {
 
     pub(crate) fn widget_mode_at(&self, x: f32, y: f32) -> Option<WidgetEditorMode> {
         let point = Point::new(x, y);
-        if self.active_page != 2 || !self.widget_mode_control_rect().contains(point) {
+        if self.active_page != WIDGETS_PAGE_INDEX
+            || !self.widget_mode_control_rect().contains(point)
+        {
             return None;
         }
         if self
@@ -108,7 +110,7 @@ impl SettingsApp {
     }
 
     fn widget_preview_item_y(&mut self) -> Option<f32> {
-        if self.active_page != 2 {
+        if self.active_page != WIDGETS_PAGE_INDEX {
             return None;
         }
         self.ensure_items_cache();

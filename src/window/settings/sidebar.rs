@@ -3,14 +3,14 @@ use std::cell::RefCell;
 use crate::core::i18n::tr;
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::{DrawTextCachedParams, FontManager};
-use crate::utils::settings_ui::items::*;
+use crate::utils::settings_ui::items::{SIDEBAR_PAD, SIDEBAR_SEL_RADIUS};
 use skia_safe::{
     Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Rect, SamplingOptions,
     gpu::{DirectContext, Mipmapped},
 };
 
 use super::{
-    SIDEBAR_KEY_BASE, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
+    SIDEBAR_KEY_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
     WINDOW_CONTROL_CENTERS, WINDOW_CONTROL_RADIUS,
 };
 
@@ -172,7 +172,7 @@ impl SettingsApp {
             tr("tab_about"),
         ];
         for (i, label) in pages.iter().enumerate() {
-            let row_y = SIDEBAR_START_Y + i as f32 * (SIDEBAR_ROW_H + 2.0);
+            let row_y = SIDEBAR_START_Y + i as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
             let row_x = SIDEBAR_PAD;
             let row_w = SIDEBAR_W - SIDEBAR_PAD * 2.0;
 

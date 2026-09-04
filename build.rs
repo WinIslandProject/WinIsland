@@ -16,8 +16,7 @@ fn main() {
             res.set_icon(icon_path);
         } else {
             println!(
-                "cargo:warning=Icon file not found: {}, executable will use default icon",
-                icon_path
+                "cargo:warning=Icon file not found: {icon_path}, executable will use default icon"
             );
         }
 

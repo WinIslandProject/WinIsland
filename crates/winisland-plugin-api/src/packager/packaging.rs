@@ -13,7 +13,7 @@ pub fn create_zip(source_dir: &Path, output_path: &Path) -> Result<(), String> {
     add_dir(&mut zip, source_dir, source_dir, &options)?;
 
     zip.finish()
-        .map_err(|e| format!("Cannot finalise ZIP: {}", e))?;
+        .map_err(|e| format!("Cannot finalise ZIP: {e}"))?;
     Ok(())
 }
 
@@ -23,8 +23,8 @@ fn add_dir(
     dir: &Path,
     options: &zip::write::FileOptions<()>,
 ) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| format!("Cannot read dir: {}", e))? {
-        let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("Cannot read dir: {e}"))? {
+        let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
         let path = entry.path();
         let relative = path
             .strip_prefix(base)
@@ -33,16 +33,16 @@ fn add_dir(
         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             let name = relative.to_string_lossy().replace('\\', "/") + "/";
             zip.add_directory(&name, *options)
-                .map_err(|e| format!("Cannot add dir '{}': {}", name, e))?;
+                .map_err(|e| format!("Cannot add dir '{name}': {e}"))?;
             add_dir(zip, base, &path, options)?;
         } else {
             let name = relative.to_string_lossy().replace('\\', "/");
             zip.start_file(&name, *options)
-                .map_err(|e| format!("Cannot add file '{}': {}", name, e))?;
+                .map_err(|e| format!("Cannot add file '{name}': {e}"))?;
             let data = std::fs::read(&path)
                 .map_err(|e| format!("Cannot read '{}': {}", path.display(), e))?;
             zip.write_all(&data)
-                .map_err(|e| format!("Cannot write '{}': {}", name, e))?;
+                .map_err(|e| format!("Cannot write '{name}': {e}"))?;
         }
     }
     Ok(())

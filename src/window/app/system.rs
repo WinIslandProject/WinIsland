@@ -177,7 +177,7 @@ impl App {
             match ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02) {
                 Ok(t) => t,
                 Err(e) => {
-                    log::error!("Toast template failed: {:?}", e);
+                    log::error!("Toast template failed: {e:?}");
                     return;
                 }
             };
@@ -192,7 +192,7 @@ impl App {
         let toast = match ToastNotification::CreateToastNotification(&tmpl) {
             Ok(t) => t,
             Err(e) => {
-                log::error!("CreateToastNotification failed: {:?}", e);
+                log::error!("CreateToastNotification failed: {e:?}");
                 return;
             }
         };
@@ -206,12 +206,12 @@ impl App {
         let notifier = match notifier_result {
             Ok(n) => n,
             Err(e) => {
-                log::error!("CreateToastNotifier failed: {:?}", e);
+                log::error!("CreateToastNotifier failed: {e:?}");
                 return;
             }
         };
         if let Err(e) = notifier.Show(&toast) {
-            log::error!("Toast Show failed: {:?}", e);
+            log::error!("Toast Show failed: {e:?}");
         }
     }
 

@@ -82,14 +82,17 @@ struct CancelSlot(Mutex<Option<Box<dyn Fn() + Send + Sync>>>);
 
 impl CancelSlot {
     fn set(&self, cancel: impl Fn() + Send + Sync + 'static) {
-        *self.0.lock().unwrap_or_else(|error| error.into_inner()) = Some(Box::new(cancel));
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(cancel));
     }
 
     fn cancel(&self) {
         if let Some(cancel) = self
             .0
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
         {
             cancel();
@@ -176,9 +179,9 @@ impl NotificationMonitor {
                 });
                 self.access_receiver = Some(receiver);
             }
-            Ok(status) => log::warn!("Notification access was not granted: {:?}", status),
+            Ok(status) => log::warn!("Notification access was not granted: {status:?}"),
             Err(error) => {
-                log::warn!("Notification access status is unavailable: {:?}", error);
+                log::warn!("Notification access status is unavailable: {error:?}");
                 self.schedule_retry();
             }
         }
@@ -188,7 +191,7 @@ impl NotificationMonitor {
         let result = self
             .access_receiver
             .as_ref()
-            .map(|receiver| receiver.try_recv());
+            .map(std::sync::mpsc::Receiver::try_recv);
         match result {
             Some(Ok(true)) => {
                 self.access_receiver = None;
@@ -230,7 +233,7 @@ impl NotificationMonitor {
         let result = self
             .read_receiver
             .as_ref()
-            .map(|receiver| receiver.try_recv());
+            .map(std::sync::mpsc::Receiver::try_recv);
         match result {
             Some(Ok((kind, NotificationReadResult::Notifications(notifications)))) => {
                 self.read_receiver = None;
@@ -240,7 +243,7 @@ impl NotificationMonitor {
             Some(Ok((_, NotificationReadResult::Failed(error)))) => {
                 self.read_receiver = None;
                 self.read_cancel = None;
-                log::warn!("Notification history could not be read: {:?}", error);
+                log::warn!("Notification history could not be read: {error:?}");
                 self.restart_monitor();
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
@@ -451,7 +454,7 @@ impl NotificationMonitor {
         let result = self
             .icon_receiver
             .as_ref()
-            .map(|receiver| receiver.try_recv());
+            .map(std::sync::mpsc::Receiver::try_recv);
         match result {
             Some(Ok((notification_id, icon))) => {
                 self.icon_receiver = None;
@@ -753,7 +756,7 @@ impl NotificationIndicator {
             .is_some_and(|until| until + FADE_DURATION > Instant::now())
     }
 
-    pub(super) fn target_size(&self, base_width: f32, base_height: f32, scale: f32) -> CompactSize {
+    pub(super) fn target_size(base_width: f32, base_height: f32, scale: f32) -> CompactSize {
         CompactSize {
             width: base_width.max(330.0) * scale,
             height: base_height.max(82.0) * scale,

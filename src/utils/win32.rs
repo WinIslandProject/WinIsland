@@ -139,11 +139,7 @@ pub fn activate_application(app_user_model_id: &str) -> bool {
     }
     match result {
         Ok(process_id) => {
-            log::info!(
-                "Notification application activated: {} (process {})",
-                app_id,
-                process_id
-            );
+            log::info!("Notification application activated: {app_id} (process {process_id})");
             true
         }
         Err(error) => {
