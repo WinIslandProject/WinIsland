@@ -16,6 +16,23 @@ const MAX_OUTPUT_DIMENSION: u32 = 1024;
 const MAX_SMTC_SOURCE_DIMENSION: u32 = 32_768;
 const MAX_SMTC_SOURCE_PIXELS: u64 = 16 * 1024 * 1024;
 
+pub(crate) fn smtc_thumbnail_requires_compression(
+    stream: &IRandomAccessStreamWithContentType,
+) -> Option<bool> {
+    let decoder = BitmapDecoder::CreateAsync(stream).ok()?.join().ok()?;
+    let width = decoder.PixelWidth().ok()?;
+    let height = decoder.PixelHeight().ok()?;
+    let pixel_count = u64::from(width).saturating_mul(u64::from(height));
+    Some(
+        width == 0
+            || height == 0
+            || width > MAX_SOURCE_DIMENSION
+            || height > MAX_SOURCE_DIMENSION
+            || pixel_count > MAX_SOURCE_PIXELS
+            || pixel_count.saturating_mul(4) > MAX_DECODE_BYTES,
+    )
+}
+
 pub(crate) fn decode_cover_image(data: &Data) -> Option<Image> {
     let mut reader = ImageReader::new(Cursor::new(data.as_bytes()))
         .with_guessed_format()

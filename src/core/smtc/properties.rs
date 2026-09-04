@@ -10,7 +10,7 @@ use windows::Media::Control::{
 use windows::Storage::Streams::DataReader;
 
 use crate::core::lyrics::LyricsMode;
-use crate::utils::cover::compress_smtc_thumbnail;
+use crate::utils::cover::{compress_smtc_thumbnail, smtc_thumbnail_requires_compression};
 
 use super::session::is_music_session;
 use super::{LyricsFetchRequest, MediaInfo, WinRtGuard, spawn_lyrics_fetch};
@@ -513,7 +513,10 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
                     "Thumbnail exceeds 64 MiB",
                 ));
             }
-            if size > MAX_THUMBNAIL_BYTES {
+            let requires_compression =
+                smtc_thumbnail_requires_compression(&stream).unwrap_or(false);
+            stream.Seek(0)?;
+            if size > MAX_THUMBNAIL_BYTES || requires_compression {
                 return compress_smtc_thumbnail(&stream, size).ok_or_else(|| {
                     windows::core::Error::new(
                         THUMBNAIL_COMPRESSION_FAILED,
