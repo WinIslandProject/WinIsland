@@ -443,15 +443,12 @@ impl AudioProcessor {
     }
 
     fn start_capture(&self, cancel: CancellationToken, generation: u32) {
-        let gate_clone = self.gate.clone();
-        let gate_override_clone = self.gate_override.clone();
-        let process_capture_active = self.process_capture_active.clone();
         let worker_generation = self.worker_generation.clone();
         let capture_context = FallbackCaptureContext {
             spectrum: self.spectrum.clone(),
-            gate: gate_clone.clone(),
-            gate_override: gate_override_clone.clone(),
-            process_capture_active: process_capture_active.clone(),
+            gate: self.gate.clone(),
+            gate_override: self.gate_override.clone(),
+            process_capture_active: self.process_capture_active.clone(),
             worker_generation: worker_generation.clone(),
             generation,
         };
@@ -459,22 +456,53 @@ impl AudioProcessor {
             let host = cpal::default_host();
             let mut current_device_name = None;
             let mut current_stream: Option<Stream> = None;
+            let mut current_stream_failed: Option<Arc<AtomicBool>> = None;
             let mut stream_running = false;
             let mut next_device_refresh = Instant::now();
 
             while !cancel.is_cancelled() && worker_generation.load(Ordering::Acquire) == generation
             {
                 let now = Instant::now();
+                if current_stream_failed
+                    .as_ref()
+                    .is_some_and(|failed| failed.swap(false, Ordering::AcqRel))
+                {
+                    current_stream = None;
+                    current_stream_failed = None;
+                    current_device_name = None;
+                    stream_running = false;
+                    next_device_refresh = now + AUDIO_RETRY_INTERVAL;
+                }
                 if now < next_device_refresh {
-                    let should_run = analysis_enabled(&gate_clone, &gate_override_clone)
-                        && !process_capture_active.load(Ordering::Acquire);
+                    let should_run = capture_context.gate_override.get() > 0.0
+                        && !capture_context
+                            .process_capture_active
+                            .load(Ordering::Acquire);
                     if let Some(stream) = current_stream.as_ref() {
                         if should_run && !stream_running {
-                            if stream.play().is_ok() {
-                                stream_running = true;
+                            match stream.play() {
+                                Ok(()) => stream_running = true,
+                                Err(error) => {
+                                    log::warn!(
+                                        "Audio capture: failed to start fallback stream: {error}"
+                                    );
+                                    if let Some(failed) = current_stream_failed.as_ref() {
+                                        failed.store(true, Ordering::Release);
+                                    }
+                                }
                             }
-                        } else if !should_run && stream_running && stream.pause().is_ok() {
-                            stream_running = false;
+                        } else if !should_run && stream_running {
+                            match stream.pause() {
+                                Ok(()) => stream_running = false,
+                                Err(error) => {
+                                    log::warn!(
+                                        "Audio capture: failed to pause fallback stream: {error}"
+                                    );
+                                    if let Some(failed) = current_stream_failed.as_ref() {
+                                        failed.store(true, Ordering::Release);
+                                    }
+                                }
+                            }
                         }
                     }
                     std::thread::sleep(AUDIO_POLL_INTERVAL);
@@ -493,6 +521,7 @@ impl AudioProcessor {
 
                     // Releasing old stream and session
                     current_stream = None;
+                    current_stream_failed = None;
                     stream_running = false;
                     current_device_name = None;
 
@@ -519,21 +548,25 @@ impl AudioProcessor {
                         );
 
                         let stream_config: StreamConfig = config.config();
+                        let stream_failed = Arc::new(AtomicBool::new(false));
                         let stream = match config.sample_format() {
                             SampleFormat::F32 => build_capture_stream::<f32>(
                                 &device,
                                 &stream_config,
                                 capture_context.clone(),
+                                stream_failed.clone(),
                             ),
                             SampleFormat::I16 => build_capture_stream::<i16>(
                                 &device,
                                 &stream_config,
                                 capture_context.clone(),
+                                stream_failed.clone(),
                             ),
                             SampleFormat::U16 => build_capture_stream::<u16>(
                                 &device,
                                 &stream_config,
                                 capture_context.clone(),
+                                stream_failed.clone(),
                             ),
                             _ => {
                                 std::thread::sleep(AUDIO_RETRY_INTERVAL);
@@ -544,6 +577,7 @@ impl AudioProcessor {
                         if let Ok(s) = stream {
                             log::info!("Audio capture stream prepared for '{device_name}'");
                             current_stream = Some(s);
+                            current_stream_failed = Some(stream_failed);
                             current_device_name = Some(device_name);
                         } else if let Err(e) = stream {
                             log::error!("Audio capture: failed to build capture stream: {e:?}");
@@ -607,7 +641,7 @@ fn capture_process_audio(
                     .is_some_and(|frame_count| frame_count > 0);
                 if !newer_packet_pending && analysis_enabled(&context.gate, &context.gate_override)
                 {
-                    for sample in bytes[..bytes_read].chunks_exact(4) {
+                    for sample in bytes[..bytes_read].as_chunks::<4>().0 {
                         analyzer.push_sample(
                             f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]),
                             &context.spectrum,
@@ -718,6 +752,7 @@ fn build_capture_stream<T>(
     device: &cpal::Device,
     config: &StreamConfig,
     context: FallbackCaptureContext,
+    stream_failed: Arc<AtomicBool>,
 ) -> Result<Stream, cpal::Error>
 where
     T: cpal::SizedSample + Copy,
@@ -747,7 +782,24 @@ where
                 );
             }
         },
-        |err| log::error!("Audio error: {err}"),
+        move |error| match error.kind() {
+            cpal::ErrorKind::Xrun => {
+                log::debug!("Audio capture stream recovered from a buffer discontinuity");
+            }
+            cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied => {
+                log::warn!("Audio capture stream warning: {error}");
+            }
+            cpal::ErrorKind::DeviceBusy
+            | cpal::ErrorKind::DeviceNotAvailable
+            | cpal::ErrorKind::HostUnavailable
+            | cpal::ErrorKind::ResourceExhausted
+            | cpal::ErrorKind::StreamInvalidated
+            | cpal::ErrorKind::BackendError => {
+                log::warn!("Audio capture stream interrupted: {error}; rebuilding");
+                stream_failed.store(true, Ordering::Release);
+            }
+            _ => log::error!("Audio capture stream failed: {error}"),
+        },
         None,
     )
 }
