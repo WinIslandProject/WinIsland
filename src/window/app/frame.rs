@@ -182,16 +182,12 @@ impl App {
                     "Plugin Installed",
                     &format!("{} loaded successfully!", manifest.name),
                 );
-                if self.settings.is_some() {
-                    let plugin_inventory = self.plugin_mgr.installed_plugins_async();
-                    if let Some(settings) = self.settings.as_mut() {
-                        settings.finish_marketplace_install();
-                        settings.set_plugin_inventory_receiver(plugin_inventory);
-                        settings.set_plugin_status(
-                            crate::core::i18n::tr("plugin_installed_restart"),
-                            true,
-                        );
-                    }
+                if let Some(settings) = self.settings.as_mut() {
+                    settings.finish_marketplace_install();
+                    settings
+                        .set_plugin_inventory_receiver(self.plugin_mgr.installed_plugins_async());
+                    settings
+                        .set_plugin_status(crate::core::i18n::tr("plugin_install_success"), false);
                 }
                 log::info!("Plugin '{}' installed via drop", manifest.name);
             }
