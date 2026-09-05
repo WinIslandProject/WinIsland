@@ -1,10 +1,11 @@
 use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::panic::{self, PanicHookInfo};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::SystemTime;
+use windows::Win32::Foundation::SYSTEMTIME;
+use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::WindowsAndMessaging::{MESSAGEBOX_STYLE, MessageBoxW};
 use windows::core::PCWSTR;
 
@@ -15,7 +16,68 @@ const MAX_LOG_SIZE: u64 = 1_024_000; // 1MB
 const ERROR_MESSAGE_BOX_STYLE: MESSAGEBOX_STYLE = MESSAGEBOX_STYLE(0x0000_0010);
 
 struct FileLogger {
-    file: Mutex<File>,
+    state: Mutex<LogFile>,
+}
+
+struct LogFile {
+    path: PathBuf,
+    writer: Option<BufWriter<File>>,
+    bytes_written: u64,
+}
+
+impl LogFile {
+    fn open(path: PathBuf) -> std::io::Result<Self> {
+        let _ = roll_if_needed(&path);
+        let bytes_written = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let writer = open_log_writer(&path)?;
+        Ok(Self {
+            path,
+            writer: Some(writer),
+            bytes_written,
+        })
+    }
+
+    fn write(&mut self, message: &[u8]) -> std::io::Result<()> {
+        if self.bytes_written.saturating_add(message.len() as u64) > MAX_LOG_SIZE {
+            self.rotate()?;
+        }
+        let Some(writer) = self.writer.as_mut() else {
+            return Err(std::io::Error::other("log writer is unavailable"));
+        };
+        writer.write_all(message)?;
+        self.bytes_written = self.bytes_written.saturating_add(message.len() as u64);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let Some(writer) = self.writer.as_mut() else {
+            return Err(std::io::Error::other("log writer is unavailable"));
+        };
+        writer.flush()
+    }
+
+    fn rotate(&mut self) -> std::io::Result<()> {
+        let Some(mut writer) = self.writer.take() else {
+            return Err(std::io::Error::other("log writer is unavailable"));
+        };
+        if let Err(error) = writer.flush() {
+            self.writer = Some(writer);
+            return Err(error);
+        }
+        drop(writer);
+        if let Err(error) = fs::rename(&self.path, next_archive_path(&self.path)) {
+            self.writer = open_log_writer(&self.path).ok();
+            self.bytes_written = fs::metadata(&self.path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            return Err(error);
+        }
+        self.writer = Some(open_log_writer(&self.path)?);
+        self.bytes_written = 0;
+        Ok(())
+    }
 }
 
 impl Log for FileLogger {
@@ -27,79 +89,47 @@ impl Log for FileLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default();
-        let secs = now.as_secs();
-        // Format: [2026-06-07 20:15:00] [INFO] target - message
         let msg = format!(
             "[{}] [{}] {} - {}\n",
-            format_timestamp(secs),
+            timestamp(),
             record.level(),
             record.target(),
             record.args()
         );
-        if let Ok(mut file) = self.file.lock() {
-            let _ = file.write_all(msg.as_bytes());
-            let _ = file.flush();
+        if let Ok(mut state) = self.state.lock()
+            && state.write(msg.as_bytes()).is_ok()
+            && record.level() <= Level::Warn
+        {
+            let _ = state.flush();
         }
     }
 
     fn flush(&self) {
-        if let Ok(mut file) = self.file.lock() {
-            let _ = file.flush();
+        if let Ok(mut state) = self.state.lock() {
+            let _ = state.flush();
         }
     }
 }
 
-fn format_timestamp(secs: u64) -> String {
-    let secs = secs as i64;
-    let days = secs / 86400;
-    let rem = secs % 86400;
-    let hours = rem / 3600;
-    let rem = rem % 3600;
-    let minutes = rem / 60;
-    let seconds = rem % 60;
-
-    // Compute year/month/day from Unix epoch (2026-06-07 is just a reference
-    // for the algorithm; this works for any date).
-    let mut y = 1970i64;
-    let mut d = days;
-    loop {
-        let yd = if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
-            366
-        } else {
-            365
-        };
-        if d < yd {
-            break;
-        }
-        d -= yd;
-        y += 1;
-    }
-    let months_days = if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut m = 0usize;
-    for (i, &md) in months_days.iter().enumerate() {
-        if d < md {
-            m = i;
-            break;
-        }
-        d -= md;
-    }
-
+fn timestamp() -> String {
+    let time = local_time();
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        y,
-        m + 1,
-        d + 1,
-        hours,
-        minutes,
-        seconds
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond
     )
+}
+
+fn file_timestamp() -> String {
+    let time = local_time();
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond
+    )
+}
+
+fn local_time() -> SYSTEMTIME {
+    // SAFETY: GetLocalTime returns a fully initialized SYSTEMTIME value without input pointers.
+    unsafe { GetLocalTime() }
 }
 
 fn home_dir() -> PathBuf {
@@ -119,13 +149,37 @@ fn log_file_path() -> PathBuf {
     path
 }
 
-fn roll_if_needed(path: &PathBuf) {
+fn open_log_writer(path: &Path) -> std::io::Result<BufWriter<File>> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map(BufWriter::new)
+}
+
+fn roll_if_needed(path: &Path) -> std::io::Result<()> {
     if let Ok(meta) = fs::metadata(path)
         && meta.len() > MAX_LOG_SIZE
     {
-        let mut old = path.clone();
-        old.set_extension("old.log");
-        let _ = fs::rename(path, old);
+        fs::rename(path, next_archive_path(path))?;
+    }
+    Ok(())
+}
+
+fn next_archive_path(path: &Path) -> PathBuf {
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let timestamp = file_timestamp();
+    let mut index = 0;
+    loop {
+        let suffix = (index > 0).then(|| format!("-{index}"));
+        let archive = directory.join(format!(
+            "winisland-{timestamp}{}.log",
+            suffix.unwrap_or_default()
+        ));
+        if !archive.exists() {
+            return archive;
+        }
+        index += 1;
     }
 }
 
@@ -144,11 +198,13 @@ pub fn check_crash_flag() {
     }
 }
 
+pub fn flush() {
+    log::logger().flush();
+}
+
 fn write_crash_report(panic_info: &PanicHookInfo) {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let ts = format_timestamp(now.as_secs());
+    let ts = timestamp();
+    let file_ts = file_timestamp();
 
     let msg = panic_info
         .payload()
@@ -165,7 +221,7 @@ fn write_crash_report(panic_info: &PanicHookInfo) {
     let report = format!(
         r#"---- WinIsland Crash Report ----
 Time: {ts}
-Version: 1.0.0
+Version: {}
 Thread: main
 
 // The crash happened at
@@ -177,11 +233,12 @@ Location: {location}
 // Logs
 See ~/.winisland/logs/winisland.log for recent activity.
 "#,
+        env!("CARGO_PKG_VERSION"),
     );
 
     // Try writing to log directory first
     let mut path = log_dir();
-    path.push(format!("crash-{ts}.txt"));
+    path.push(format!("crash-{file_ts}.txt"));
 
     if write_report_to(&path, &report).is_ok() {
         show_message_box(
@@ -195,7 +252,7 @@ See ~/.winisland/logs/winisland.log for recent activity.
     let msg_text = format!("WinIsland crashed at {location}\n\nReason: {msg}");
     if let Some(desktop) = get_desktop_path() {
         let mut desktop_path = desktop;
-        desktop_path.push(format!("WinIsland-crash-{ts}.txt"));
+        desktop_path.push(format!("WinIsland-crash-{file_ts}.txt"));
         if write_report_to(&desktop_path, &report).is_ok() {
             show_message_box(
                 "WinIsland Crash",
@@ -207,15 +264,12 @@ See ~/.winisland/logs/winisland.log for recent activity.
 
     // Final fallback: show message box with crash info
     show_message_box("WinIsland Crash", &msg_text);
-
-    // Create crash flag for delayed startup next time
-    let flag = crash_flag_path();
-    let _ = fs::write(&flag, "");
 }
 
 fn show_message_box(title: &str, text: &str) {
     let title_w: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
     let text_w: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: both UTF-16 buffers are NUL-terminated and remain valid for the synchronous call.
     unsafe {
         MessageBoxW(
             None,
@@ -246,21 +300,17 @@ fn get_desktop_path() -> Option<std::path::PathBuf> {
 }
 
 fn panic_hook(info: &PanicHookInfo) {
+    log::logger().flush();
+    let _ = fs::write(crash_flag_path(), "");
     write_crash_report(info);
 }
 
 pub fn init() -> Result<(), SetLoggerError> {
     let path = log_file_path();
-    roll_if_needed(&path);
-
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .expect("Failed to open log file");
+    let state = LogFile::open(path).expect("Failed to open log file");
 
     let logger = FileLogger {
-        file: Mutex::new(file),
+        state: Mutex::new(state),
     };
 
     log::set_boxed_logger(Box::new(logger))?;
