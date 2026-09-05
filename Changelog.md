@@ -5,6 +5,7 @@
 - Improved several animations
 - Fixed delayed or inconsistent playback progress after seeking
 - Improved the settings light theme
+- Improved the compact resource usage widget
 - Fixed known issues
 
 ### v1.3.1
