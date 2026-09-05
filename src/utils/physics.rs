@@ -2,6 +2,7 @@ pub struct Spring {
     pub value: f32,
     pub velocity: f32,
 }
+
 impl Spring {
     pub fn new(value: f32) -> Self {
         Self {
@@ -22,6 +23,18 @@ impl Spring {
         }
         if !self.velocity.is_finite() {
             self.velocity = 0.0;
+        }
+    }
+
+    pub fn redirect_velocity_towards(&mut self, target: f32) {
+        const MOMENTUM_RETENTION: f32 = 0.35;
+        const MAX_DISTANCE_RATIO: f32 = 0.2;
+
+        let distance = target - self.value;
+        if self.velocity * distance < 0.0 {
+            let speed =
+                (self.velocity.abs() * MOMENTUM_RETENTION).min(distance.abs() * MAX_DISTANCE_RATIO);
+            self.velocity = speed.copysign(distance);
         }
     }
 }

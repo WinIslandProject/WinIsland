@@ -336,9 +336,15 @@ impl App {
 
     fn expand(&mut self) {
         let widget_view = should_show_widget_view(self.music_page_available);
+        let compact_height = self.compact_content_height();
+        let interrupts_collapse = self.springs.h.value - compact_height
+            > 0.5 * self.config.global_scale
+            || self.springs.h.velocity.abs() > 0.001;
         self.widget_view = widget_view;
-        self.springs.view.value = f32::from(widget_view);
-        self.springs.view.velocity = 0.0;
+        if !interrupts_collapse {
+            self.springs.view.value = f32::from(widget_view);
+            self.springs.view.velocity = 0.0;
+        }
         self.expanded = true;
     }
 }

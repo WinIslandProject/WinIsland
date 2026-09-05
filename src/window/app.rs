@@ -319,6 +319,7 @@ struct IslandSprings {
     r: Spring,
     view: Spring,
     hide: Spring,
+    expanded_target: bool,
 }
 
 impl IslandSprings {
@@ -329,7 +330,26 @@ impl IslandSprings {
             r: Spring::new((config.base_height * config.global_scale) / 2.0),
             view: Spring::new(0.0),
             hide: Spring::new(0.0),
+            expanded_target: false,
         }
+    }
+
+    fn retarget_expansion(
+        &mut self,
+        expanded: bool,
+        target_w: f32,
+        target_h: f32,
+        target_r: f32,
+        target_view: f32,
+    ) {
+        if self.expanded_target == expanded {
+            return;
+        }
+        self.expanded_target = expanded;
+        self.w.redirect_velocity_towards(target_w);
+        self.h.redirect_velocity_towards(target_h);
+        self.r.redirect_velocity_towards(target_r);
+        self.view.redirect_velocity_towards(target_view);
     }
 
     fn any_animating(&self) -> bool {

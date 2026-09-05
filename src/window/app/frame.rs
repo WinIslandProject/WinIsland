@@ -682,6 +682,8 @@ impl App {
         } else {
             0.0
         };
+        self.springs
+            .retarget_expansion(self.expanded, target_w, target_h, target_r, target_view);
         let width_hiding = self.is_width_hiding();
         if self.width_hiding_last_frame && !width_hiding {
             self.restoring_hide_width = true;
