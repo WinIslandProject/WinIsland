@@ -53,6 +53,14 @@ const PROGRESS_TRACK_ALPHA: f32 = 0.25;
 const PLAYBACK_CONTROLS_TOP_GAP: f32 = 42.0;
 const SKIP_BUTTON_GAP: f32 = 75.0;
 const SKIP_ANIMATION_DURATION_SECS: f32 = 0.5;
+const PLAY_STATE_RESPONSE: f32 = 0.18;
+pub(super) const PAUSE_CONTROL_PRESS_VELOCITY: f32 = -0.18;
+const PAUSE_CONTROL_STIFFNESS: f32 = 0.18;
+const PAUSE_CONTROL_DAMPING: f32 = 0.64;
+const PAUSE_CONTROL_MIN_SCALE: f32 = 0.8;
+const PAUSE_CONTROL_MAX_SCALE: f32 = 1.03;
+const PAUSE_CONTROL_BLUR_SCALE: f32 = 16.0;
+const PAUSE_CONTROL_MAX_BLUR: f32 = 2.5;
 const COLLAPSED_VISUALIZER_INSET: f32 = 17.0;
 const EXPANDED_VISUALIZER_INSET: f32 = 37.0;
 const VISUALIZER_TITLE_OFFSET: f32 = 4.0;
@@ -473,7 +481,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
 
         if available_controls & crate::plugin::types::MEDIA_CONTROL_TOGGLE_PLAY != 0 {
             draw_pause_control(
-                canvas, btn_cx, btn_cy, pause_t, alpha, scale, use_blur, text_color,
+                canvas, btn_cx, btn_cy, pause_t, alpha, scale, use_blur, dt, text_color,
             );
         }
 
@@ -575,7 +583,7 @@ fn draw_cover(params: CoverParams) -> f32 {
     let pause_t = PAUSE_ANIM.with(|cell| {
         let mut v = cell.borrow_mut();
         let target = if effective_is_playing { 1.0_f32 } else { 0.0 };
-        let factor = (0.11 * dt).min(1.0);
+        let factor = 1.0 - (1.0 - PLAY_STATE_RESPONSE).powf(dt);
         *v += (target - *v) * factor;
         if (*v - target).abs() < 0.003 {
             *v = target;
@@ -805,21 +813,22 @@ fn draw_pause_control(
     alpha: u8,
     scale: f32,
     use_blur: bool,
+    dt: f32,
     text_color: Color,
 ) {
     let (pause_s, pause_blur) = PAUSE_SPRING.with(|cell| {
         let mut s = cell.borrow_mut();
-        if s.velocity < 0.0 {
-            s.value = (s.value + s.velocity).max(0.01);
-            s.velocity *= 0.8;
-            if s.velocity > -0.01 || s.value <= 0.01 {
-                s.velocity = 0.0;
-            }
-        } else {
-            s.velocity = (1.0 - s.value) * 0.15;
-            s.value += s.velocity;
+        s.update_dt(1.0, PAUSE_CONTROL_STIFFNESS, PAUSE_CONTROL_DAMPING, dt);
+        if (s.value - 1.0).abs() < 0.001 && s.velocity.abs() < 0.001 {
+            s.value = 1.0;
+            s.velocity = 0.0;
         }
-        (s.value, (s.velocity.abs() * 40.0 * scale).clamp(0.0, 15.0))
+        (
+            s.value
+                .clamp(PAUSE_CONTROL_MIN_SCALE, PAUSE_CONTROL_MAX_SCALE),
+            (s.velocity.abs() * PAUSE_CONTROL_BLUR_SCALE * scale)
+                .min(PAUSE_CONTROL_MAX_BLUR * scale),
+        )
     });
 
     canvas.save();
@@ -835,20 +844,14 @@ fn draw_pause_control(
     }
     canvas.translate((btn_cx, btn_cy));
     canvas.scale((pause_s, pause_s));
-    if pause_t > 0.99 {
-        draw_pause_button(canvas, 0.0, 0.0, alpha, scale, text_color);
-    } else if pause_t < 0.01 {
-        draw_play_button(canvas, 0.0, 0.0, alpha, scale, text_color);
-    } else {
-        let pause_alpha = (alpha as f32 * pause_t) as u8;
-        let play_alpha = (alpha as f32 * (1.0 - pause_t)) as u8;
-
-        if pause_alpha > 0 {
-            draw_pause_button(canvas, 0.0, 0.0, pause_alpha, scale, text_color);
-        }
-
-        if play_alpha > 0 {
-            draw_play_button(canvas, 0.0, 0.0, play_alpha, scale, text_color);
+    let icon_progress = ((pause_t - 0.5).abs() * 2.0).clamp(0.0, 1.0);
+    let icon_alpha =
+        (alpha as f32 * icon_progress * icon_progress * (3.0 - 2.0 * icon_progress)) as u8;
+    if icon_alpha > 0 {
+        if pause_t >= 0.5 {
+            draw_pause_button(canvas, 0.0, 0.0, icon_alpha, scale, text_color);
+        } else {
+            draw_play_button(canvas, 0.0, 0.0, icon_alpha, scale, text_color);
         }
     }
     if pause_blur > 0.1 && use_blur {

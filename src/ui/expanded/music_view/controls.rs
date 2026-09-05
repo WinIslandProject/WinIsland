@@ -2,7 +2,8 @@ use crate::core::smtc::MediaInfo;
 
 use super::{
     CONTENT_PADDING, COVER_FLIP_ANIM, COVER_FLIP_OLD_IMG, IMG_CACHE, LOCAL_PLAY_STATE,
-    NEXT_SKIP_ANIM, PAUSE_SPRING, PREV_SKIP_ANIM, PROGRESS_DRAGGING, PROGRESS_HOVER,
+    NEXT_SKIP_ANIM, PAUSE_CONTROL_PRESS_VELOCITY, PAUSE_SPRING, PREV_SKIP_ANIM, PROGRESS_DRAGGING,
+    PROGRESS_HOVER,
 };
 
 pub fn set_progress_dragging(active: bool) {
@@ -14,7 +15,7 @@ pub fn set_progress_dragging(active: bool) {
 pub fn trigger_pause_click(current_is_playing: bool) {
     PAUSE_SPRING.with(|cell| {
         let mut s = cell.borrow_mut();
-        s.velocity = -0.25;
+        s.velocity = PAUSE_CONTROL_PRESS_VELOCITY;
     });
     LOCAL_PLAY_STATE.with(|cell| {
         *cell.borrow_mut() = Some((!current_is_playing, std::time::Instant::now()));

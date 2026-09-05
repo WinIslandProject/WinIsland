@@ -2,6 +2,7 @@
 
 ### v1.3.2
 - Added optional secondary lyrics in the compact island with adaptive two-line layout
+- Improved several animations
 - Fixed known issues
 
 ### v1.3.1
