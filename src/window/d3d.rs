@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use skia_safe::{
     ColorType, Surface,
     gpu::{
-        self, BackendRenderTarget, DirectContext, Protected, SurfaceOrigin,
+        self, BackendRenderTarget, ContextOptions, DirectContext, Protected, SurfaceOrigin,
         d3d::{BackendContext, TextureResourceInfo},
         surfaces,
     },
@@ -40,7 +40,8 @@ use winit::{
 };
 
 const BUFFER_COUNT: usize = 2;
-const GPU_RESOURCE_CACHE_LIMIT: usize = 48 * 1024 * 1024;
+const GPU_RESOURCE_CACHE_LIMIT: usize = 12 * 1024 * 1024;
+const GPU_GLYPH_CACHE_LIMIT: usize = 2 * 1024 * 1024;
 const INITIALIZATION_ATTEMPTS: usize = 3;
 const INITIALIZATION_RETRY_DELAY: Duration = Duration::from_millis(500);
 const RESOURCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
@@ -127,9 +128,14 @@ impl D3DRenderer {
             memory_allocator: None,
             protected_context: Protected::No,
         };
+        let mut context_options = ContextOptions::new();
+        context_options.glyph_cache_texture_maximum_bytes = GPU_GLYPH_CACHE_LIMIT;
+        context_options.allow_multiple_glyph_cache_textures =
+            gpu::ganesh::context_options::Enable::No;
+        context_options.reduce_ops_task_splitting = gpu::ganesh::context_options::Enable::No;
         let mut direct_context = unsafe {
             // SAFETY: BackendContext is stored in D3DRenderer and outlives DirectContext.
-            gpu::direct_contexts::make_d3d(&backend_context, None)
+            gpu::direct_contexts::make_d3d(&backend_context, Some(&context_options))
         }
         .ok_or_else(|| "Skia failed to create a D3D12 DirectContext".to_string())?;
         direct_context.set_resource_cache_limit(GPU_RESOURCE_CACHE_LIMIT);
