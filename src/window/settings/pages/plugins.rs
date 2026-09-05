@@ -398,6 +398,9 @@ impl SettingsApp {
     }
 
     pub(crate) fn plugin_hovered(&self) -> bool {
+        if self.plugin_detail_active() {
+            return self.plugin_detail_hovered();
+        }
         self.plugin_tab_hit().is_some()
             || match self.plugin_page_tab {
                 PluginPageTab::Installed => self.installed_plugin_hit().is_some(),
@@ -406,7 +409,6 @@ impl SettingsApp {
                 }
             }
             || self.plugin_restart_hit()
-            || (self.anim.get(PLUGIN_DETAIL_KEY) > 0.005 && self.plugin_detail_hovered())
     }
 
     pub(super) fn marketplace_action(&self, plugin: &MarketplacePlugin) -> MarketplaceAction {
@@ -437,10 +439,15 @@ impl SettingsApp {
     }
 
     fn card_hovered(&self, card: Rect) -> bool {
-        card.contains(Point::new(
-            self.logical_mouse_pos.0 - SIDEBAR_W,
-            self.logical_mouse_pos.1 + self.scroll_y,
-        ))
+        !self.plugin_detail_active()
+            && card.contains(Point::new(
+                self.logical_mouse_pos.0 - SIDEBAR_W,
+                self.logical_mouse_pos.1 + self.scroll_y,
+            ))
+    }
+
+    fn plugin_detail_active(&self) -> bool {
+        self.selected_plugin_id.is_some()
     }
 
     fn plugin_tab_hit(&self) -> Option<PluginPageTab> {
