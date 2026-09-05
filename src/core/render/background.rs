@@ -35,6 +35,12 @@ fn draw_solid(canvas: &Canvas, path: &Path, color: Color) {
     canvas.draw_path(path, &paint);
 }
 
+fn draw_effect_base(canvas: &Canvas, rect: Rect) {
+    let mut paint = Paint::default();
+    paint.set_color(Color::from_rgb(32, 32, 36));
+    canvas.draw_rect(rect, &paint);
+}
+
 fn draw_glass(
     canvas: &Canvas,
     direct_context: &mut DirectContext,
@@ -101,6 +107,9 @@ pub(super) fn draw_background(params: BackgroundParams<'_>) {
 
     canvas.save();
     canvas.clip_path(island_path, ClipOp::Intersect, true);
+    if matches!(island_style, "glass" | "mica" | "dynamic") {
+        draw_effect_base(canvas, rect);
+    }
     match island_style {
         "glass" => {
             if !draw_glass(canvas, direct_context, rect, glass_params()) {

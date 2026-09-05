@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use skia_safe::{
     AlphaType, Color, ColorType, FilterMode, ISize, Image, ImageInfo, MipmapMode, Paint, Rect,
-    SamplingOptions, Surface,
+    SamplingOptions, Surface, TileMode,
     gpu::{self, Budgeted, DirectContext, SurfaceOrigin},
     image_filters,
 };
@@ -218,7 +218,7 @@ fn capture_mica_pixels(
         let _ = DeleteDC(hdc_mem);
         ReleaseDC(None, hdc_screen);
 
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel[3] = 255;
         }
 
@@ -262,7 +262,7 @@ fn update_mica_cache(
     cache.blur_surface.canvas().clear(Color::TRANSPARENT);
     let mut blur_paint = Paint::default();
     blur_paint.set_anti_alias(true);
-    if let Some(filter) = image_filters::blur((6.0, 6.0), None, None, None) {
+    if let Some(filter) = image_filters::blur((6.0, 6.0), Some(TileMode::Clamp), None, None) {
         blur_paint.set_image_filter(filter);
     }
     cache
@@ -334,7 +334,7 @@ pub fn get_blurred_cover_background(
     )?;
     let mut blur_paint = Paint::default();
     blur_paint.set_anti_alias(true);
-    if let Some(filter) = image_filters::blur((8.0, 8.0), None, None, None) {
+    if let Some(filter) = image_filters::blur((8.0, 8.0), Some(TileMode::Clamp), None, None) {
         blur_paint.set_image_filter(filter);
     }
     blur_surface
