@@ -103,7 +103,7 @@ fn average_image_color(
     let mut red = 0u32;
     let mut green = 0u32;
     let mut blue = 0u32;
-    for pixel in pixels.chunks_exact(4) {
+    for pixel in pixels.as_chunks::<4>().0 {
         blue += pixel[0] as u32;
         green += pixel[1] as u32;
         red += pixel[2] as u32;

@@ -513,14 +513,18 @@ fn decode_lrc_text(bytes: &[u8]) -> String {
     }
     if let Some(bytes) = bytes.strip_prefix(&[0xff, 0xfe]) {
         let utf16 = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&utf16);
     }
     if let Some(bytes) = bytes.strip_prefix(&[0xfe, 0xff]) {
         let utf16 = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&utf16);
@@ -1052,9 +1056,7 @@ fn parse_word_synced_line(line: &str) -> Option<LyricLine> {
 
 fn parse_lrc_timestamp(timestamp: &str) -> Option<u64> {
     let (minutes, second_part) = timestamp.split_once(':')?;
-    let (seconds, fraction) = second_part
-        .split_once('.')
-        .map_or((second_part, ""), |parts| parts);
+    let (seconds, fraction) = second_part.split_once('.').unwrap_or((second_part, ""));
     if minutes.is_empty()
         || seconds.is_empty()
         || seconds.len() > 2
