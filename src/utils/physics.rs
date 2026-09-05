@@ -31,10 +31,18 @@ impl Spring {
         const MAX_DISTANCE_RATIO: f32 = 0.2;
 
         let distance = target - self.value;
-        if self.velocity * distance < 0.0 {
-            let speed =
-                (self.velocity.abs() * MOMENTUM_RETENTION).min(distance.abs() * MAX_DISTANCE_RATIO);
-            self.velocity = speed.copysign(distance);
+        if distance.abs() <= f32::EPSILON {
+            self.velocity = 0.0;
+            return;
         }
+
+        let speed = if self.velocity * distance < 0.0 {
+            self.velocity.abs() * MOMENTUM_RETENTION
+        } else {
+            self.velocity.abs()
+        };
+        self.velocity = speed
+            .min(distance.abs() * MAX_DISTANCE_RATIO)
+            .copysign(distance);
     }
 }
