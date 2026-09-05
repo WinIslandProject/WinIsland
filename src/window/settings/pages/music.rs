@@ -240,11 +240,7 @@ impl SettingsApp {
         let ClickResult::SourceButton(item_index) = result else {
             return;
         };
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
+        let (win_w, win_h) = self.logical_window_size();
         let button_rect = input.popup_button_rect(&page, item_index, self.scroll_y);
         let popup = match action {
             MusicAction::LyricsMode => PopupState::new(
@@ -253,8 +249,8 @@ impl SettingsApp {
                 vec![tr("lyrics_mode_online"), tr("lyrics_mode_lrc")],
                 vec!["online".to_string(), "lrc".to_string()],
                 usize::from(self.config.lyrics_mode == "lrc"),
-                self.win_w / scale,
-                self.win_h / scale,
+                win_w,
+                win_h,
             ),
             MusicAction::LyricsSource => PopupState::new(
                 select_lyrics_source,
@@ -275,8 +271,8 @@ impl SettingsApp {
                     .iter()
                     .position(|source| *source == self.config.lyrics_source)
                     .unwrap_or_default(),
-                self.win_w / scale,
-                self.win_h / scale,
+                win_w,
+                win_h,
             ),
             _ => return,
         };

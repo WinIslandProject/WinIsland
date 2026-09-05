@@ -2,8 +2,8 @@ use std::cell::RefCell;
 
 use crate::core::i18n::tr;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::settings_ui::items::{SIDEBAR_PAD, SIDEBAR_SEL_RADIUS};
+use crate::utils::settings_ui::{SettingsPainter, settings_paint};
 use skia_safe::{
     Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Rect, SamplingOptions,
     gpu::{DirectContext, Mipmapped},
@@ -69,9 +69,7 @@ fn draw_window_control(
     border: Color,
     highlighted: bool,
 ) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(Color::from_argb(38, 0, 0, 0));
+    let mut paint = settings_paint(Color::from_argb(38, 0, 0, 0));
     canvas.draw_circle(
         (center.0, center.1 + 0.75),
         WINDOW_CONTROL_RADIUS + 0.25,
@@ -103,11 +101,7 @@ impl SettingsApp {
         canvas: &Canvas,
         theme: &SettingsTheme,
     ) {
-        let fm = FontManager::global();
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-
-        paint.set_color(theme.sidebar_bg);
+        let mut paint = settings_paint(theme.sidebar_bg);
         canvas.draw_rect(Rect::from_xywh(0.0, 0.0, SIDEBAR_W, self.win_h), &paint);
 
         let inactive_fill = if self.is_light {
@@ -157,9 +151,7 @@ impl SettingsApp {
             canvas.draw_line((36.5, 20.0), (43.5, 20.0), &sym_paint);
         }
 
-        let mut sep = Paint::default();
-        sep.set_anti_alias(true);
-        sep.set_color(theme.separator);
+        let mut sep = settings_paint(theme.separator);
         sep.set_stroke_width(0.5);
         sep.set_style(skia_safe::paint::Style::Stroke);
         canvas.draw_line((SIDEBAR_W, 0.0), (SIDEBAR_W, self.win_h), &sep);
@@ -216,15 +208,13 @@ impl SettingsApp {
             let icon_rect = Rect::from_xywh(row_x + 7.0, row_y + 6.0, 22.0, 22.0);
             draw_sidebar_icon(direct_context, canvas, i, icon_rect);
 
-            fm.draw_text_cached(DrawTextCachedParams {
-                canvas,
-                text: label,
-                x: row_x + 36.0,
-                y: row_y + 22.0,
-                size: 13.0,
-                bold: self.active_page == i,
-                paint: &paint,
-            });
+            SettingsPainter::new(canvas).text(
+                label,
+                (row_x + 36.0, row_y + 22.0),
+                13.0,
+                self.active_page == i,
+                paint.color(),
+            );
         }
     }
 }

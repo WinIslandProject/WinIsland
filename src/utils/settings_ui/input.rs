@@ -1,6 +1,7 @@
 use super::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_H, POPUP_BTN_W, ROW_HEIGHT, STEPPER_BTN_SIZE,
-    STEPPER_GAP, STEPPER_VALUE_W, SettingsItem, TOGGLE_H, TOGGLE_W,
+    STEPPER_GAP, STEPPER_VALUE_W, SettingsItem, TOGGLE_H, TOGGLE_W, picker_button_rects,
+    trailing_control_rect,
 };
 use crate::core::config::{
     AVAILABLE_COMPACT_WIDGETS, AVAILABLE_WIDGETS, CompactWidgetAlignment, CompactWidgetKind,
@@ -10,6 +11,7 @@ use crate::core::config::{
 use crate::core::plugin_widget::PluginWidget;
 use crate::ui::widget::compact::widget_width;
 use crate::ui::widget::expanded::{WidgetGridLayout, widget_corner_radius, widget_grid_layout};
+use skia_safe::{Contains, Point};
 
 pub const WIDGET_PREVIEW_BASE_H: f32 = 480.0;
 pub const WIDGET_ISLAND_PANEL_H: f32 = 308.0;
@@ -99,6 +101,29 @@ pub enum WidgetPreviewHit {
 pub enum WidgetEditorSlot {
     Expanded(usize),
     Compact(CompactWidgetPosition),
+}
+
+impl WidgetEditorSlot {
+    pub(crate) fn mode(self) -> WidgetEditorMode {
+        match self {
+            Self::Expanded(_) => WidgetEditorMode::Expanded,
+            Self::Compact(_) => WidgetEditorMode::Compact,
+        }
+    }
+
+    pub(crate) fn expanded(self) -> Option<usize> {
+        match self {
+            Self::Expanded(slot) => Some(slot),
+            Self::Compact(_) => None,
+        }
+    }
+
+    pub(crate) fn compact(self) -> Option<CompactWidgetPosition> {
+        match self {
+            Self::Compact(position) => Some(position),
+            Self::Expanded(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -501,6 +526,7 @@ pub fn widget_preview_hit_test(
 pub fn hit_test(items: &[SettingsItem], mx: f32, my: f32, start_y: f32, width: f32) -> ClickResult {
     let mut y = start_y;
     let content_w = width - CONTENT_PADDING * 2.0;
+    let point = Point::new(mx, my);
 
     for (idx, item) in items.iter().enumerate() {
         match item {
@@ -521,27 +547,19 @@ pub fn hit_test(items: &[SettingsItem], mx: f32, my: f32, start_y: f32, width: f
                 }
             }
             SettingsItem::RowSwitch { enabled, .. } if *enabled => {
-                let cy = y + ROW_HEIGHT / 2.0;
-                let toggle_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - TOGGLE_W;
-                let toggle_y = cy - TOGGLE_H / 2.0;
-                if in_rect(mx, my, toggle_x, toggle_y, TOGGLE_W, TOGGLE_H) {
+                if trailing_control_rect(y, ROW_HEIGHT, content_w, TOGGLE_W, TOGGLE_H)
+                    .contains(point)
+                {
                     return ClickResult::Switch(idx);
                 }
             }
             SettingsItem::RowFontPicker { reset_label, .. } => {
-                let cy = y + ROW_HEIGHT / 2.0;
-                let sel_w: f32 = 72.0;
-                let sel_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - sel_w;
-                let btn_y = cy - POPUP_BTN_H / 2.0;
-                if in_rect(mx, my, sel_x, btn_y, sel_w, POPUP_BTN_H) {
+                let (select, reset) = picker_button_rects(y, ROW_HEIGHT, content_w);
+                if select.contains(point) {
                     return ClickResult::FontSelect(idx);
                 }
-                if reset_label.is_some() {
-                    let rst_w: f32 = 72.0;
-                    let rst_x = sel_x - rst_w - 6.0;
-                    if in_rect(mx, my, rst_x, btn_y, rst_w, POPUP_BTN_H) {
-                        return ClickResult::FontReset(idx);
-                    }
+                if reset_label.is_some() && reset.contains(point) {
+                    return ClickResult::FontReset(idx);
                 }
             }
             SettingsItem::RowFolderPicker {
@@ -552,34 +570,25 @@ pub fn hit_test(items: &[SettingsItem], mx: f32, my: f32, start_y: f32, width: f
             } if *enabled => {
                 let has_path = current_path.as_ref().is_some_and(|p| !p.is_empty());
                 let row_h = if has_path { 64.0 } else { ROW_HEIGHT };
-                let cy = y + row_h / 2.0;
-                let sel_w: f32 = 72.0;
-                let sel_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - sel_w;
-                let btn_y = cy - POPUP_BTN_H / 2.0;
-                if in_rect(mx, my, sel_x, btn_y, sel_w, POPUP_BTN_H) {
+                let (select, clear) = picker_button_rects(y, row_h, content_w);
+                if select.contains(point) {
                     return ClickResult::FolderSelect(idx);
                 }
-                if clear_label.is_some() {
-                    let clr_w: f32 = 72.0;
-                    let clr_x = sel_x - clr_w - 6.0;
-                    if in_rect(mx, my, clr_x, btn_y, clr_w, POPUP_BTN_H) {
-                        return ClickResult::FolderClear(idx);
-                    }
+                if clear_label.is_some() && clear.contains(point) {
+                    return ClickResult::FolderClear(idx);
                 }
             }
             SettingsItem::RowSourceSelect { enabled, .. } if *enabled => {
-                let cy = y + ROW_HEIGHT / 2.0;
-                let btn_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - POPUP_BTN_W;
-                let btn_y = cy - POPUP_BTN_H / 2.0;
-                if in_rect(mx, my, btn_x, btn_y, POPUP_BTN_W, POPUP_BTN_H) {
+                if trailing_control_rect(y, ROW_HEIGHT, content_w, POPUP_BTN_W, POPUP_BTN_H)
+                    .contains(point)
+                {
                     return ClickResult::SourceButton(idx);
                 }
             }
             SettingsItem::RowButton { enabled, .. } if *enabled => {
-                let cy = y + ROW_HEIGHT / 2.0;
-                let btn_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - POPUP_BTN_W;
-                let btn_y = cy - POPUP_BTN_H / 2.0;
-                if in_rect(mx, my, btn_x, btn_y, POPUP_BTN_W, POPUP_BTN_H) {
+                if trailing_control_rect(y, ROW_HEIGHT, content_w, POPUP_BTN_W, POPUP_BTN_H)
+                    .contains(point)
+                {
                     return ClickResult::RowButton(idx);
                 }
             }

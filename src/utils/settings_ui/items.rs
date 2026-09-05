@@ -1,4 +1,4 @@
-use skia_safe::Color;
+use skia_safe::{Color, Rect};
 
 pub const CONTENT_PADDING: f32 = 24.0;
 pub const ROW_HEIGHT: f32 = 48.0;
@@ -23,6 +23,34 @@ pub const POPUP_BTN_R: f32 = 7.0;
 pub const POPUP_ITEM_H: f32 = 32.0;
 pub const POPUP_MENU_R: f32 = 10.0;
 pub const POPUP_MENU_PAD: f32 = 5.0;
+pub const PICKER_BTN_W: f32 = 72.0;
+pub const PICKER_BTN_GAP: f32 = 6.0;
+
+pub fn trailing_control_rect(
+    y: f32,
+    row_height: f32,
+    content_width: f32,
+    control_width: f32,
+    control_height: f32,
+) -> Rect {
+    Rect::from_xywh(
+        CONTENT_PADDING + content_width - GROUP_INNER_PAD - control_width,
+        y + (row_height - control_height) / 2.0,
+        control_width,
+        control_height,
+    )
+}
+
+pub fn picker_button_rects(y: f32, row_height: f32, content_width: f32) -> (Rect, Rect) {
+    let primary = trailing_control_rect(y, row_height, content_width, PICKER_BTN_W, POPUP_BTN_H);
+    let secondary = Rect::from_xywh(
+        primary.left - PICKER_BTN_GAP - PICKER_BTN_W,
+        primary.top,
+        PICKER_BTN_W,
+        POPUP_BTN_H,
+    );
+    (primary, secondary)
+}
 
 #[derive(Clone)]
 pub enum SettingsItem {

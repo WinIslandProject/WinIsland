@@ -103,6 +103,31 @@ impl<A> SettingsPage<A> {
         self.push_action(SettingsItem::CenterLink { label, color }, action);
     }
 
+    pub(crate) fn center_text(&mut self, text: String, size: f32, color: Color) {
+        self.push(SettingsItem::CenterText { text, size, color });
+    }
+
+    pub(crate) fn spacer(&mut self, height: f32) {
+        self.push(SettingsItem::Spacer { height });
+    }
+
+    pub(crate) fn row_font(
+        &mut self,
+        label: String,
+        btn_label: String,
+        reset_label: Option<String>,
+        action: A,
+    ) {
+        self.push_action(
+            SettingsItem::RowFontPicker {
+                label,
+                btn_label,
+                reset_label,
+            },
+            action,
+        );
+    }
+
     pub(crate) fn row_label(&mut self, label: String) {
         self.push(SettingsItem::RowLabel { label });
     }
@@ -217,16 +242,12 @@ impl SettingsApp {
         self.popup = Some(popup);
         self.anim
             .set_with_speed(super::POPUP_OPACITY_KEY, 1.0, 0.25);
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn persist_settings_change(&mut self) {
         self.mark_items_dirty();
         crate::core::persistence::save_config(&self.config);
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.request_redraw();
     }
 }

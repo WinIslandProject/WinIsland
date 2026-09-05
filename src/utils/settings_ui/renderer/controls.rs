@@ -1,7 +1,7 @@
 use skia_safe::{Canvas, Color, FontStyle, Paint, Rect};
 
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextInRectParams, FontManager};
+use crate::utils::font::{DrawTextCachedParams, DrawTextInRectParams, FontManager};
 
 use super::super::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_R, STEPPER_BTN_SIZE, TOGGLE_H, TOGGLE_INSET,
@@ -10,16 +10,74 @@ use super::super::items::{
 
 pub(super) struct PillBtnParams<'a> {
     pub(super) canvas: &'a Canvas,
-    pub(super) x: f32,
-    pub(super) y: f32,
-    pub(super) w: f32,
-    pub(super) h: f32,
+    pub(super) rect: Rect,
     pub(super) label: &'a str,
     pub(super) text_color: Color,
     pub(super) bg_color: Color,
     pub(super) hover_bg_color: Color,
     pub(super) border_color: Color,
     pub(super) hovered: bool,
+}
+
+pub(crate) fn settings_paint(color: Color) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(color);
+    paint
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SettingsPainter<'a> {
+    canvas: &'a Canvas,
+}
+
+impl<'a> SettingsPainter<'a> {
+    pub(crate) fn new(canvas: &'a Canvas) -> Self {
+        Self { canvas }
+    }
+
+    pub(crate) fn text(
+        self,
+        text: &str,
+        position: (f32, f32),
+        size: f32,
+        bold: bool,
+        color: Color,
+    ) {
+        let paint = settings_paint(color);
+        FontManager::global().draw_text_cached(DrawTextCachedParams {
+            canvas: self.canvas,
+            text,
+            x: position.0,
+            y: position.1,
+            size,
+            bold,
+            paint: &paint,
+        });
+    }
+
+    pub(crate) fn centered_text(
+        self,
+        text: &str,
+        position: (f32, f32),
+        size: f32,
+        bold: bool,
+        color: Color,
+    ) {
+        let style = if bold {
+            FontStyle::bold()
+        } else {
+            FontStyle::normal()
+        };
+        let width = FontManager::global().measure_text_cached(text, size, style);
+        self.text(
+            text,
+            (position.0 - width / 2.0, position.1),
+            size,
+            bold,
+            color,
+        );
+    }
 }
 
 pub(super) fn draw_row_separator(
@@ -29,9 +87,7 @@ pub(super) fn draw_row_separator(
     sep_y: f32,
 ) {
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let mut sep = Paint::default();
-    sep.set_anti_alias(true);
-    sep.set_color(theme.separator);
+    let mut sep = settings_paint(theme.separator);
     sep.set_stroke_width(0.5);
     sep.set_style(skia_safe::paint::Style::Stroke);
     canvas.draw_line(
@@ -67,11 +123,9 @@ pub(super) fn draw_switch(
         &paint,
     );
 
-    let mut border = Paint::default();
-    border.set_anti_alias(true);
+    let mut border = settings_paint(theme.control_border);
     border.set_style(skia_safe::paint::Style::Stroke);
     border.set_stroke_width(0.75);
-    border.set_color(theme.control_border);
     canvas.draw_round_rect(
         Rect::from_xywh(x + 0.375, y + 0.375, TOGGLE_W - 0.75, TOGGLE_H - 0.75),
         TOGGLE_R,
@@ -82,9 +136,7 @@ pub(super) fn draw_switch(
     let knob_x = x + TOGGLE_INSET + (pos * (TOGGLE_W - TOGGLE_KNOB - TOGGLE_INSET * 2.0));
     let knob_y = y + TOGGLE_INSET;
 
-    let mut shadow = Paint::default();
-    shadow.set_anti_alias(true);
-    shadow.set_color(Color::from_argb(40, 0, 0, 0));
+    let shadow = settings_paint(Color::from_argb(40, 0, 0, 0));
     canvas.draw_round_rect(
         Rect::from_xywh(knob_x, knob_y + 1.0, TOGGLE_KNOB, TOGGLE_KNOB),
         TOGGLE_KNOB / 2.0,
@@ -137,28 +189,21 @@ pub(super) fn draw_stepper_btn(
 pub(super) fn draw_pill_btn(params: PillBtnParams<'_>) {
     let fm = FontManager::global();
     let canvas = params.canvas;
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(if params.hovered {
+    let mut paint = settings_paint(if params.hovered {
         params.hover_bg_color
     } else {
         params.bg_color
     });
-    canvas.draw_round_rect(
-        Rect::from_xywh(params.x, params.y, params.w, params.h),
-        POPUP_BTN_R,
-        POPUP_BTN_R,
-        &paint,
-    );
+    canvas.draw_round_rect(params.rect, POPUP_BTN_R, POPUP_BTN_R, &paint);
     paint.set_color(params.border_color);
     paint.set_style(skia_safe::paint::Style::Stroke);
     paint.set_stroke_width(0.75);
     canvas.draw_round_rect(
         Rect::from_xywh(
-            params.x + 0.375,
-            params.y + 0.375,
-            params.w - 0.75,
-            params.h - 0.75,
+            params.rect.left + 0.375,
+            params.rect.top + 0.375,
+            params.rect.width() - 0.75,
+            params.rect.height() - 0.75,
         ),
         POPUP_BTN_R,
         POPUP_BTN_R,
@@ -169,32 +214,35 @@ pub(super) fn draw_pill_btn(params: PillBtnParams<'_>) {
     fm.draw_text_in_rect(DrawTextInRectParams {
         canvas,
         text: params.label,
-        x: params.x,
-        y: params.y + 17.0,
-        w: params.w,
+        x: params.rect.left,
+        y: params.rect.top + 17.0,
+        w: params.rect.width(),
         size: 12.0,
         bold: false,
         paint: &paint,
     });
 }
 
-pub(super) fn truncate_text(fm: &FontManager, text: &str, size: f32, max_w: f32) -> String {
-    let w = fm.measure_text_cached(text, size, FontStyle::normal());
-    if w <= max_w {
+pub(crate) fn ellipsize_text(
+    fm: &FontManager,
+    text: &str,
+    size: f32,
+    style: FontStyle,
+    max_width: f32,
+) -> String {
+    if fm.measure_text_cached(text, size, style) <= max_width {
         return text.to_string();
     }
-    let ellipsis = "...";
-    let ew = fm.measure_text_cached(ellipsis, size, FontStyle::normal());
-    let mut result = String::new();
-    let mut current_w = 0.0;
-    for c in text.chars() {
-        let cw = fm.measure_text_cached(&c.to_string(), size, FontStyle::normal());
-        if current_w + cw + ew > max_w {
-            result.push_str(ellipsis);
-            return result;
+    let ellipsis = "…";
+    let ellipsis_width = fm.measure_text_cached(ellipsis, size, style);
+    let mut fitted = String::new();
+    for character in text.chars() {
+        fitted.push(character);
+        if fm.measure_text_cached(&fitted, size, style) + ellipsis_width > max_width {
+            fitted.pop();
+            break;
         }
-        current_w += cw;
-        result.push(c);
     }
-    result
+    fitted.push_str(ellipsis);
+    fitted
 }

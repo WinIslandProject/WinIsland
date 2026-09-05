@@ -35,12 +35,7 @@ impl SettingsApp {
             self.switch_anim.set_targets(&switch_states);
         }
         self.cached_content_height = content_height(&self.cached_items, SETTINGS_HEADER_H);
-        let scale = self
-            .window
-            .as_ref()
-            .map(|w| w.scale_factor() as f32)
-            .unwrap_or(1.0);
-        let view_h = self.win_h / scale;
+        let view_h = self.logical_window_size().1;
         self.cached_max_scroll = (self.cached_content_height - view_h + 20.0).max(0.0);
         self.items_dirty = false;
     }

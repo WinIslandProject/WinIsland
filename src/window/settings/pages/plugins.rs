@@ -9,8 +9,9 @@ use crate::core::i18n::tr;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::MarketplacePlugin;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextCachedParams, FontManager};
+use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{CONTENT_PADDING, SettingsItem};
+use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
 
 use super::super::{
     MarketplaceViewState, PLUGIN_DETAIL_KEY, PluginPageTab, PluginSettingsRequest,
@@ -118,7 +119,7 @@ impl SettingsApp {
         }
         canvas.restore();
 
-        draw_plugin_tabs(canvas, theme, width, self.plugin_page_tab);
+        draw_plugin_tabs(canvas, theme, self.plugin_page_tab);
 
         let detail_progress = self.anim.get(PLUGIN_DETAIL_KEY);
         if detail_progress > 0.005 {
@@ -260,20 +261,18 @@ impl SettingsApp {
             return;
         };
         let fm = FontManager::global();
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
+        let paint = settings_paint(Color::from_argb(
+            28,
+            theme.accent.r(),
+            theme.accent.g(),
+            theme.accent.b(),
+        ));
         let status = Rect::from_xywh(
             CONTENT_PADDING,
             y + 6.0,
             width - CONTENT_PADDING * 2.0,
             48.0,
         );
-        paint.set_color(Color::from_argb(
-            28,
-            theme.accent.r(),
-            theme.accent.g(),
-            theme.accent.b(),
-        ));
         canvas.draw_round_rect(status, 12.0, 12.0, &paint);
         let label = restart.then(|| tr("plugin_restart_now"));
         let label_w = label.as_ref().map_or(0.0, |label| {
@@ -286,27 +285,21 @@ impl SettingsApp {
             FontStyle::normal(),
             (status.width() - 28.0 - label_w - if *restart { 24.0 } else { 0.0 }).max(20.0),
         );
-        paint.set_color(theme.text_pri);
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: &message,
-            x: status.left + 14.0,
-            y: status.top + 29.0,
-            size: 12.0,
-            bold: false,
-            paint: &paint,
-        });
+        SettingsPainter::new(canvas).text(
+            &message,
+            (status.left + 14.0, status.top + 29.0),
+            12.0,
+            false,
+            theme.text_pri,
+        );
         if let Some(label) = label {
-            paint.set_color(theme.accent);
-            fm.draw_text_cached(DrawTextCachedParams {
-                canvas,
-                text: &label,
-                x: status.right - label_w - 14.0,
-                y: status.top + 29.0,
-                size: 12.0,
-                bold: true,
-                paint: &paint,
-            });
+            SettingsPainter::new(canvas).text(
+                &label,
+                (status.right - label_w - 14.0, status.top + 29.0),
+                12.0,
+                true,
+                theme.accent,
+            );
         }
     }
 
@@ -323,9 +316,7 @@ impl SettingsApp {
             PluginPageTab::Installed => self.handle_installed_plugin_click(),
             PluginPageTab::Marketplace => self.handle_marketplace_click(),
         }
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     fn handle_installed_plugin_click(&mut self) {
@@ -403,9 +394,7 @@ impl SettingsApp {
             }
             self.plugin_request = Some(PluginSettingsRequest::LoadMarketplace);
         }
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn plugin_hovered(&self) -> bool {
@@ -455,21 +444,15 @@ impl SettingsApp {
     }
 
     fn plugin_tab_hit(&self) -> Option<PluginPageTab> {
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
-        let width = self.win_w / scale;
         let point = Point::new(self.logical_mouse_pos.0, self.logical_mouse_pos.1);
         [PluginPageTab::Installed, PluginPageTab::Marketplace]
             .into_iter()
-            .find(|tab| plugin_tab_rect(width, *tab).contains(point))
+            .find(|tab| plugin_tab_rect(*tab).contains(point))
     }
 
     fn installed_plugin_hit(&self) -> Option<(usize, bool)> {
         let (mx, my) = self.plugin_list_mouse();
-        let width = self.plugin_content_width();
+        let width = self.content_width();
         let mut y = PLUGIN_LIST_TOP + 30.0;
         for (index, _) in self.plugins.iter().enumerate() {
             let card = plugin_card(width, y);
@@ -486,7 +469,7 @@ impl SettingsApp {
             return None;
         };
         let (mx, my) = self.plugin_list_mouse();
-        let width = self.plugin_content_width();
+        let width = self.content_width();
         let mut y = PLUGIN_LIST_TOP + 30.0;
         for (index, plugin) in plugins.iter().enumerate() {
             let card = plugin_card(width, y);
@@ -507,7 +490,7 @@ impl SettingsApp {
             return false;
         }
         let (mx, my) = self.plugin_list_mouse();
-        retry_button_rect(self.plugin_content_width(), PLUGIN_LIST_TOP + 30.0 + 84.0)
+        retry_button_rect(self.content_width(), PLUGIN_LIST_TOP + 30.0 + 84.0)
             .contains(Point::new(mx, my))
     }
 
@@ -526,7 +509,7 @@ impl SettingsApp {
             + entry_count as f32 * (PLUGIN_CARD_H + PLUGIN_CARD_GAP)
             + empty_height
             + 6.0;
-        let width = self.plugin_content_width();
+        let width = self.content_width();
         let (mx, my) = self.plugin_list_mouse();
         Rect::from_xywh(width - CONTENT_PADDING - 120.0, y, 120.0, 48.0)
             .contains(Point::new(mx, my))
@@ -538,31 +521,19 @@ impl SettingsApp {
             self.logical_mouse_pos.1 + self.scroll_y,
         )
     }
-
-    fn plugin_content_width(&self) -> f32 {
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
-        self.win_w / scale - SIDEBAR_W
-    }
 }
 
-fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, width: f32, active: PluginPageTab) {
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
+fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, active: PluginPageTab) {
+    let mut paint = settings_paint(theme.control_bg);
     let background = Rect::from_xywh(
         SIDEBAR_W + CONTENT_PADDING,
         PLUGIN_TABS_Y,
         PLUGIN_TAB_W * 2.0,
         PLUGIN_TABS_H,
     );
-    paint.set_color(theme.control_bg);
     canvas.draw_round_rect(background, 9.0, 9.0, &paint);
     for tab in [PluginPageTab::Installed, PluginPageTab::Marketplace] {
-        let rect = plugin_tab_rect(width, tab);
+        let rect = plugin_tab_rect(tab);
         if tab == active {
             paint.set_color(theme.card_highlight);
             canvas.draw_round_rect(
@@ -582,9 +553,7 @@ fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, width: f32, active: 
         } else {
             theme.text_sec
         });
-        draw_centered_text(
-            canvas,
-            fm,
+        SettingsPainter::new(canvas).centered_text(
             &tr(match tab {
                 PluginPageTab::Installed => "plugin_tab_installed",
                 PluginPageTab::Marketplace => "plugin_tab_marketplace",
@@ -592,12 +561,12 @@ fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, width: f32, active: 
             (rect.center_x(), rect.top + 21.0),
             12.0,
             tab == active,
-            &paint,
+            paint.color(),
         );
     }
 }
 
-fn plugin_tab_rect(_width: f32, tab: PluginPageTab) -> Rect {
+fn plugin_tab_rect(tab: PluginPageTab) -> Rect {
     Rect::from_xywh(
         SIDEBAR_W
             + CONTENT_PADDING
@@ -613,19 +582,13 @@ fn plugin_tab_rect(_width: f32, tab: PluginPageTab) -> Rect {
 }
 
 fn draw_section_title(canvas: &Canvas, theme: &SettingsTheme, title: String) -> f32 {
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(theme.text_pri);
-    fm.draw_text_cached(DrawTextCachedParams {
-        canvas,
-        text: &title,
-        x: CONTENT_PADDING + 4.0,
-        y: PLUGIN_LIST_TOP + 18.0,
-        size: 13.0,
-        bold: true,
-        paint: &paint,
-    });
+    SettingsPainter::new(canvas).text(
+        &title,
+        (CONTENT_PADDING + 4.0, PLUGIN_LIST_TOP + 18.0),
+        13.0,
+        true,
+        theme.text_pri,
+    );
     PLUGIN_LIST_TOP + 30.0
 }
 
@@ -639,9 +602,7 @@ fn plugin_card(width: f32, y: f32) -> Rect {
 }
 
 fn draw_card_background(canvas: &Canvas, theme: &SettingsTheme, card: Rect, hovered: bool) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(if hovered {
+    let mut paint = settings_paint(if hovered {
         theme.card_highlight
     } else {
         theme.group_bg
@@ -672,31 +633,23 @@ fn draw_card_text(
     reserved_width: f32,
 ) {
     let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
     let available = (card.width() - reserved_width).max(20.0);
-    paint.set_color(theme.text_pri);
     let name = ellipsize_text(fm, name, 14.0, FontStyle::bold(), available);
-    fm.draw_text_cached(DrawTextCachedParams {
-        canvas,
-        text: &name,
-        x: card.left + 76.0,
-        y: card.top + 29.0,
-        size: 14.0,
-        bold: true,
-        paint: &paint,
-    });
-    paint.set_color(theme.text_sec);
+    SettingsPainter::new(canvas).text(
+        &name,
+        (card.left + 76.0, card.top + 29.0),
+        14.0,
+        true,
+        theme.text_pri,
+    );
     let subtitle = ellipsize_text(fm, subtitle, 11.5, FontStyle::normal(), available);
-    fm.draw_text_cached(DrawTextCachedParams {
-        canvas,
-        text: &subtitle,
-        x: card.left + 76.0,
-        y: card.top + 51.0,
-        size: 11.5,
-        bold: false,
-        paint: &paint,
-    });
+    SettingsPainter::new(canvas).text(
+        &subtitle,
+        (card.left + 76.0, card.top + 51.0),
+        11.5,
+        false,
+        theme.text_sec,
+    );
 }
 
 fn draw_marketplace_action(
@@ -706,33 +659,23 @@ fn draw_marketplace_action(
     label: &str,
     action: MarketplaceAction,
 ) {
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    if action.is_available() {
-        paint.set_color(Color::from_argb(
-            32,
-            theme.accent.r(),
-            theme.accent.g(),
-            theme.accent.b(),
-        ));
+    let paint = settings_paint(if action.is_available() {
+        Color::from_argb(32, theme.accent.r(), theme.accent.g(), theme.accent.b())
     } else {
-        paint.set_color(theme.control_bg);
-    }
+        theme.control_bg
+    });
     canvas.draw_round_rect(rect, rect.height() / 2.0, rect.height() / 2.0, &paint);
-    paint.set_color(if action.is_available() {
+    let text_color = if action.is_available() {
         theme.accent
     } else {
         theme.text_sec
-    });
-    draw_centered_text(
-        canvas,
-        fm,
+    };
+    SettingsPainter::new(canvas).centered_text(
         label,
         (rect.center_x(), rect.top + 19.0),
         11.0,
         true,
-        &paint,
+        text_color,
     );
 }
 
@@ -760,60 +703,42 @@ fn draw_empty_state(
     title: &str,
     detail: Option<&str>,
 ) {
-    let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(theme.text_sec);
-    draw_centered_text(
-        canvas,
-        fm,
-        title,
-        (width / 2.0, baseline),
-        13.0,
-        false,
-        &paint,
-    );
+    let painter = SettingsPainter::new(canvas);
+    painter.centered_text(title, (width / 2.0, baseline), 13.0, false, theme.text_sec);
     if let Some(detail) = detail {
         let detail = ellipsize_text(
-            fm,
+            FontManager::global(),
             detail,
             10.5,
             FontStyle::normal(),
             width - CONTENT_PADDING * 4.0,
         );
-        paint.set_color(Color::from_argb(
+        let detail_color = Color::from_argb(
             150,
             theme.text_sec.r(),
             theme.text_sec.g(),
             theme.text_sec.b(),
-        ));
-        draw_centered_text(
-            canvas,
-            fm,
+        );
+        painter.centered_text(
             &detail,
             (width / 2.0, baseline + 21.0),
             10.5,
             false,
-            &paint,
+            detail_color,
         );
     }
 }
 
 fn draw_retry_button(canvas: &Canvas, theme: &SettingsTheme, width: f32, y: f32) {
     let rect = retry_button_rect(width, y);
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(theme.control_bg);
+    let paint = settings_paint(theme.control_bg);
     canvas.draw_round_rect(rect, rect.height() / 2.0, rect.height() / 2.0, &paint);
-    paint.set_color(theme.accent);
-    draw_centered_text(
-        canvas,
-        FontManager::global(),
+    SettingsPainter::new(canvas).centered_text(
         &tr("plugin_marketplace_retry"),
         (rect.center_x(), rect.top + 18.0),
         11.0,
         true,
-        &paint,
+        theme.accent,
     );
 }
 
@@ -822,9 +747,7 @@ fn retry_button_rect(width: f32, y: f32) -> Rect {
 }
 
 fn draw_toggle(canvas: &Canvas, theme: &SettingsTheme, enabled: bool, x: f32, y: f32) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(if enabled {
+    let mut paint = settings_paint(if enabled {
         theme.toggle_on
     } else {
         theme.toggle_off
@@ -883,75 +806,19 @@ pub(super) fn draw_plugin_icon_data(
         canvas.restore_to_count(save_count);
         return;
     }
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(Color::from_rgb(175, 82, 222));
+    let paint = settings_paint(Color::from_rgb(175, 82, 222));
     canvas.draw_round_rect(rect, rect.width() * 0.22, rect.height() * 0.22, &paint);
-    paint.set_color(Color::WHITE);
     let initial = name
         .chars()
         .next()
         .unwrap_or('P')
         .to_uppercase()
         .to_string();
-    draw_centered_text(
-        canvas,
-        FontManager::global(),
+    SettingsPainter::new(canvas).centered_text(
         &initial,
         (rect.center_x(), rect.center_y() + rect.height() * 0.16),
         rect.height() * 0.44,
         true,
-        &paint,
+        Color::WHITE,
     );
-}
-
-pub(super) fn ellipsize_text(
-    fm: &FontManager,
-    text: &str,
-    size: f32,
-    style: FontStyle,
-    max_width: f32,
-) -> String {
-    if fm.measure_text_cached(text, size, style) <= max_width {
-        return text.to_string();
-    }
-    let ellipsis = "…";
-    let ellipsis_width = fm.measure_text_cached(ellipsis, size, style);
-    let mut fitted = String::new();
-    for character in text.chars() {
-        fitted.push(character);
-        if fm.measure_text_cached(&fitted, size, style) + ellipsis_width > max_width {
-            fitted.pop();
-            break;
-        }
-    }
-    fitted.push_str(ellipsis);
-    fitted
-}
-
-pub(super) fn draw_centered_text(
-    canvas: &Canvas,
-    fm: &FontManager,
-    text: &str,
-    position: (f32, f32),
-    size: f32,
-    bold: bool,
-    paint: &Paint,
-) {
-    let (center_x, baseline) = position;
-    let style = if bold {
-        FontStyle::bold()
-    } else {
-        FontStyle::normal()
-    };
-    let width = fm.measure_text_cached(text, size, style);
-    fm.draw_text_cached(DrawTextCachedParams {
-        canvas,
-        text,
-        x: center_x - width / 2.0,
-        y: baseline,
-        size,
-        bold,
-        paint,
-    });
 }

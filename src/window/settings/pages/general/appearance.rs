@@ -172,11 +172,7 @@ impl SettingsApp {
             return;
         };
         let button_rect = input.popup_button_rect(&page, item_index, self.scroll_y);
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
+        let (win_w, win_h) = self.logical_window_size();
 
         let popup = match action {
             AppearanceAction::Monitor => {
@@ -190,8 +186,8 @@ impl SettingsApp {
                     monitors,
                     values,
                     selected,
-                    self.win_w / scale,
-                    self.win_h / scale,
+                    win_w,
+                    win_h,
                 )
             }
             _ => return,

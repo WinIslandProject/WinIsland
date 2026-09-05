@@ -6,7 +6,7 @@ use crate::utils::anim::AnimPool;
 use crate::utils::color::{SettingsTheme, dark_settings_theme, light_settings_theme};
 use crate::utils::icon::get_app_icon;
 use crate::utils::settings_ui::items::{POPUP_MENU_R, SIDEBAR_PAD, SettingsItem};
-use crate::utils::settings_ui::{SwitchAnimator, WidgetEditorMode, WidgetSource};
+use crate::utils::settings_ui::{SwitchAnimator, WidgetEditorMode, WidgetEditorSlot, WidgetSource};
 use crate::window::d3d::{D3DRenderer, D3DTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -193,13 +193,10 @@ pub struct SettingsApp {
     pub(crate) scroll_dragging: bool,
     scroll_drag_offset: f32,
     pub(crate) widget_dragging: Option<WidgetSource>,
-    pub(crate) widget_drag_hover_slot: Option<usize>,
-    pub(crate) widget_preview_hover_slot: Option<usize>,
+    pub(crate) widget_drag_hover_slot: Option<WidgetEditorSlot>,
+    pub(crate) widget_preview_hover_slot: Option<WidgetEditorSlot>,
     pub(crate) widget_editor_mode: WidgetEditorMode,
     pub(crate) compact_widget_dragging: Option<crate::core::config::CompactWidgetKind>,
-    pub(crate) compact_widget_drag_hover_slot: Option<crate::core::config::CompactWidgetPosition>,
-    pub(crate) compact_widget_preview_hover_slot:
-        Option<crate::core::config::CompactWidgetPosition>,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
     pub(crate) plugins: Vec<InstalledPlugin>,
     plugin_inventory_rx: Option<mpsc::Receiver<Vec<InstalledPlugin>>>,
@@ -217,6 +214,22 @@ pub struct SettingsApp {
 }
 
 impl SettingsApp {
+    pub(crate) fn window_scale(&self) -> f32 {
+        self.window
+            .as_ref()
+            .map(|window| window.scale_factor() as f32)
+            .unwrap_or(1.0)
+    }
+
+    pub(crate) fn logical_window_size(&self) -> (f32, f32) {
+        let scale = self.window_scale();
+        (self.win_w / scale, self.win_h / scale)
+    }
+
+    pub(crate) fn content_width(&self) -> f32 {
+        self.logical_window_size().0 - SIDEBAR_W
+    }
+
     pub fn new(
         config: AppConfig,
         plugins: Vec<InstalledPlugin>,
@@ -263,8 +276,6 @@ impl SettingsApp {
             widget_preview_hover_slot: None,
             widget_editor_mode: WidgetEditorMode::Expanded,
             compact_widget_dragging: None,
-            compact_widget_drag_hover_slot: None,
-            compact_widget_preview_hover_slot: None,
             plugin_widgets,
             plugins,
             plugin_inventory_rx: None,
@@ -409,9 +420,7 @@ impl SettingsApp {
                 }
                 if changed {
                     self.items_dirty = true;
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
-                    }
+                    self.request_redraw();
                 }
             }
             Err(mpsc::TryRecvError::Empty) => self.detected_apps_rx = Some(rx),
@@ -597,11 +606,7 @@ impl SettingsApp {
     }
 
     fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
+        let scale = self.window_scale();
         let new_position = (position.x as f32 / scale, position.y as f32 / scale);
         let mouse_moved = (new_position.0 - self.last_hover_mouse_pos.0).abs()
             > CURSOR_MOVE_THRESHOLD
@@ -847,9 +852,7 @@ impl SettingsApp {
         }
 
         if redraw {
-            if let Some(win) = &self.window {
-                win.request_redraw();
-            }
+            self.request_redraw();
             self.next_frame_deadline = now + Duration::from_millis(16);
             Some(self.next_frame_deadline)
         } else {
@@ -861,13 +864,7 @@ impl SettingsApp {
         if self.cached_max_scroll <= 0.0 {
             return None;
         }
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
-        let win_w = self.win_w / scale;
-        let win_h = self.win_h / scale;
+        let (win_w, win_h) = self.logical_window_size();
         let track_y = SETTINGS_HEADER_H + SCROLLBAR_TRACK_TOP_INSET;
         let track_height = win_h - track_y - SCROLLBAR_BOTTOM_INSET;
         let viewport_height = win_h - SETTINGS_HEADER_H;
@@ -920,9 +917,7 @@ impl SettingsApp {
         self.target_scroll_y = scroll;
         self.scroll_y = scroll;
         self.scroll_vel_y = 0.0;
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn window_id(&self) -> Option<WindowId> {
@@ -971,9 +966,7 @@ impl SettingsApp {
             self.anim.set_with_speed(PLUGIN_DETAIL_KEY, 0.0, 0.28);
         }
         self.mark_items_dirty();
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn set_plugin_inventory_receiver(
@@ -1000,17 +993,13 @@ impl SettingsApp {
         if layout_changed {
             crate::core::persistence::save_config(&self.config);
         }
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn set_plugin_status(&mut self, message: String, restart: bool) {
         self.plugin_status = Some((message, restart));
         self.mark_items_dirty();
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn set_marketplace_loading(&mut self) {
@@ -1018,33 +1007,25 @@ impl SettingsApp {
             self.marketplace_state = MarketplaceViewState::Loading;
         }
         self.mark_items_dirty();
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn set_marketplace_catalog(&mut self, catalog: MarketplaceCatalog) {
         pages::plugins::clear_plugin_icon_cache();
         self.marketplace_state = MarketplaceViewState::Loaded(catalog.plugins);
         self.mark_items_dirty();
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn set_marketplace_error(&mut self, error: String) {
         self.marketplace_state = MarketplaceViewState::Failed(error);
         self.mark_items_dirty();
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(crate) fn finish_marketplace_install(&mut self) {
         self.marketplace_installing_id = None;
         self.mark_items_dirty();
-        if let Some(win) = &self.window {
-            win.request_redraw();
-        }
+        self.request_redraw();
     }
 }

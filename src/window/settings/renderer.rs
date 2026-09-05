@@ -2,11 +2,11 @@ use crate::core::i18n::tr;
 use crate::ui::expanded::widget_view::draw_plugin_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextCachedParams, FontManager};
+use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
 use crate::utils::settings_ui::{
-    ActiveStepperValue, DrawItemsParams, WidgetSource, draw_items, widget_grid_geom,
-    widget_source_span,
+    ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, settings_paint,
+    widget_grid_geom, widget_source_span,
 };
 use crate::window::d3d::D3DRenderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
@@ -54,9 +54,7 @@ impl SettingsApp {
             canvas.save();
             canvas.clip_rrect(win_rrect, skia_safe::ClipOp::Intersect, true);
 
-            let mut bg_paint = Paint::default();
-            bg_paint.set_anti_alias(true);
-            bg_paint.set_color(theme.win_bg);
+            let bg_paint = settings_paint(theme.win_bg);
             canvas.draw_rect(win_rect, &bg_paint);
 
             self.draw_sidebar(direct_context, canvas, &theme);
@@ -120,8 +118,6 @@ impl SettingsApp {
                 widget_preview_hover_slot: self.widget_preview_hover_slot,
                 compact_widget_layout: &self.config.compact_widget_layout,
                 compact_widget_dragging: self.compact_widget_dragging,
-                compact_widget_drag_hover_slot: self.compact_widget_drag_hover_slot,
-                compact_widget_preview_hover_slot: self.compact_widget_preview_hover_slot,
                 active_source_button,
                 active_stepper_value,
                 hover_pos: Some((
@@ -132,9 +128,7 @@ impl SettingsApp {
             canvas.restore();
 
             if let Some(scrollbar) = self.scrollbar_geometry() {
-                let mut p = Paint::default();
-                p.set_anti_alias(true);
-                p.set_color(Color::from_argb(60, 255, 255, 255));
+                let p = settings_paint(Color::from_argb(60, 255, 255, 255));
                 canvas.draw_round_rect(
                     Rect::from_xywh(scrollbar.x, scrollbar.y, scrollbar.width, scrollbar.height),
                     scrollbar.width / 2.0,
@@ -156,11 +150,9 @@ impl SettingsApp {
             let border_radius = WINDOW_RADIUS - 0.5;
             let border_rrect =
                 skia_safe::RRect::new_rect_xy(border_rect, border_radius, border_radius);
-            let mut border_paint = Paint::default();
-            border_paint.set_anti_alias(true);
+            let mut border_paint = settings_paint(theme.separator);
             border_paint.set_style(skia_safe::paint::Style::Stroke);
             border_paint.set_stroke_width(1.0);
-            border_paint.set_color(theme.separator);
             canvas.draw_rrect(border_rrect, &border_paint);
         });
         if let Err(error) = render_result {
@@ -200,9 +192,7 @@ impl SettingsApp {
             let x = (mouse_x - width / 2.0).clamp(8.0, win_w - width - 8.0);
             let y = (mouse_y - height / 2.0).clamp(8.0, win_h - height - 8.0);
             let rect = Rect::from_xywh(x, y, width, height);
-            let mut paint = Paint::default();
-            paint.set_anti_alias(true);
-            paint.set_color(Color::from_argb(90, 0, 0, 0));
+            let mut paint = settings_paint(Color::from_argb(90, 0, 0, 0));
             canvas.draw_round_rect(
                 Rect::from_xywh(x, y + 4.0, width, height),
                 height / 2.0,
@@ -221,12 +211,7 @@ impl SettingsApp {
         let (w, h) = self
             .widget_preview_item_y_cached()
             .map(|item_y| {
-                let scale = self
-                    .window
-                    .as_ref()
-                    .map(|w| w.scale_factor() as f32)
-                    .unwrap_or(1.0);
-                let width = self.win_w / scale - SIDEBAR_W;
+                let width = self.content_width();
                 let geom = widget_grid_geom(
                     item_y,
                     width,
@@ -246,9 +231,7 @@ impl SettingsApp {
         let x = (mx - w / 2.0).clamp(8.0, win_w - w - 8.0);
         let y = (my - h / 2.0).clamp(8.0, win_h - h - 8.0);
 
-        let mut shadow = Paint::default();
-        shadow.set_anti_alias(true);
-        shadow.set_color(Color::from_argb(90, 0, 0, 0));
+        let shadow = settings_paint(Color::from_argb(90, 0, 0, 0));
         canvas.draw_round_rect(Rect::from_xywh(x, y + 4.0, w, h), 12.0, 12.0, &shadow);
 
         match source {
@@ -293,9 +276,7 @@ impl SettingsApp {
                 && Rect::from_xywh(x, PAGE_NAV_Y, PAGE_NAV_SIZE, PAGE_NAV_SIZE)
                     .contains(Point::new(mouse_x, mouse_y))
             {
-                let mut hover = Paint::default();
-                hover.set_anti_alias(true);
-                hover.set_color(theme.sidebar_hover);
+                let hover = settings_paint(theme.sidebar_hover);
                 canvas.draw_round_rect(
                     Rect::from_xywh(x, PAGE_NAV_Y, PAGE_NAV_SIZE, PAGE_NAV_SIZE),
                     7.0,
@@ -348,21 +329,15 @@ impl SettingsApp {
             3 => tr("tab_plugins"),
             _ => tr("tab_about"),
         };
-        let fm = FontManager::global();
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_color(theme.text_pri);
-        fm.draw_text_cached(DrawTextCachedParams {
-            canvas,
-            text: &title,
-            x: PAGE_NAV_X + PAGE_NAV_SIZE * 2.0 + PAGE_NAV_GAP + 14.0,
-            y: 39.0,
-            size: 17.0,
-            bold: true,
-            paint: &paint,
-        });
+        let mut paint = settings_paint(theme.separator);
+        SettingsPainter::new(canvas).text(
+            &title,
+            (PAGE_NAV_X + PAGE_NAV_SIZE * 2.0 + PAGE_NAV_GAP + 14.0, 39.0),
+            17.0,
+            true,
+            theme.text_pri,
+        );
 
-        paint.set_color(theme.separator);
         paint.set_stroke_width(0.5);
         canvas.draw_line(
             (SIDEBAR_W, SETTINGS_HEADER_H - 0.5),
@@ -376,9 +351,7 @@ impl SettingsApp {
             return;
         }
         let control = self.widget_mode_control_rect();
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_color(theme.control_bg);
+        let mut paint = settings_paint(theme.control_bg);
         canvas.draw_round_rect(control, 8.0, 8.0, &paint);
         paint.set_style(skia_safe::paint::Style::Stroke);
         paint.set_stroke_width(0.75);
@@ -422,15 +395,13 @@ impl SettingsApp {
                 size,
                 skia_safe::FontStyle::normal(),
             );
-            FontManager::global().draw_text_cached(DrawTextCachedParams {
-                canvas,
-                text: &label,
-                x: rect.center_x() - width / 2.0,
-                y: rect.center_y() + size * 0.35,
+            SettingsPainter::new(canvas).text(
+                &label,
+                (rect.center_x() - width / 2.0, rect.center_y() + size * 0.35),
                 size,
-                bold: mode == self.widget_editor_mode,
-                paint: &paint,
-            });
+                mode == self.widget_editor_mode,
+                color,
+            );
         }
     }
 
@@ -443,12 +414,9 @@ impl SettingsApp {
         if opacity < 0.005 {
             return;
         }
-        let fm = FontManager::global();
         let menu = popup.menu_rect();
 
-        let mut shadow = Paint::default();
-        shadow.set_anti_alias(true);
-        shadow.set_color(Color::from_argb((60.0 * opacity) as u8, 0, 0, 0));
+        let shadow = settings_paint(Color::from_argb((60.0 * opacity) as u8, 0, 0, 0));
         canvas.draw_round_rect(
             Rect::from_xywh(
                 menu.left - 1.0,
@@ -461,9 +429,7 @@ impl SettingsApp {
             &shadow,
         );
 
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_color(Color::from_argb(
+        let mut paint = settings_paint(Color::from_argb(
             (255.0 * opacity) as u8,
             theme.popup_bg.r(),
             theme.popup_bg.g(),
@@ -471,9 +437,7 @@ impl SettingsApp {
         ));
         canvas.draw_round_rect(menu, POPUP_MENU_R, POPUP_MENU_R, &paint);
 
-        let mut border = Paint::default();
-        border.set_anti_alias(true);
-        border.set_color(Color::from_argb(
+        let mut border = settings_paint(Color::from_argb(
             (40.0 * opacity) as u8,
             theme.popup_border.r(),
             theme.popup_border.g(),
@@ -499,22 +463,20 @@ impl SettingsApp {
                 canvas.draw_round_rect(item_rect, 4.0, 4.0, &paint);
             }
 
-            paint.set_color(Color::from_argb(
+            let text_color = Color::from_argb(
                 text_alpha,
                 theme.text_pri.r(),
                 theme.text_pri.g(),
                 theme.text_pri.b(),
-            ));
+            );
             paint.set_style(skia_safe::paint::Style::Fill);
-            fm.draw_text_cached(DrawTextCachedParams {
-                canvas,
-                text: opt_label,
-                x: item_rect.left + 8.0,
-                y: item_rect.top + 19.0,
-                size: 12.0,
-                bold: false,
-                paint: &paint,
-            });
+            SettingsPainter::new(canvas).text(
+                opt_label,
+                (item_rect.left + 8.0, item_rect.top + 19.0),
+                12.0,
+                false,
+                text_color,
+            );
 
             if i == popup.selected_idx {
                 let check_base = if popup.hover_idx == Some(i) {
@@ -548,9 +510,7 @@ impl SettingsApp {
             }
 
             if i < popup.options.len() - 1 {
-                let mut sep = Paint::default();
-                sep.set_anti_alias(true);
-                sep.set_color(Color::from_argb(
+                let mut sep = settings_paint(Color::from_argb(
                     (30.0 * opacity) as u8,
                     theme.separator.r(),
                     theme.separator.g(),

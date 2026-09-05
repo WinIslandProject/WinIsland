@@ -18,30 +18,16 @@ impl SettingsApp {
     fn build_about_page(&self) -> SettingsPage<AboutAction> {
         let theme = self.theme();
         let mut page = SettingsPage::new();
-        page.push(SettingsItem::Spacer { height: 20.0 });
-        page.push(SettingsItem::CenterText {
-            text: "WinIsland".to_string(),
-            size: 28.0,
-            color: theme.text_pri,
-        });
-        page.push(SettingsItem::CenterText {
-            text: format!("Version {APP_VERSION}"),
-            size: 14.0,
-            color: theme.text_sec,
-        });
-        page.push(SettingsItem::CenterText {
-            text: format!("{} {APP_AUTHOR}", tr("created_by")),
-            size: 14.0,
-            color: theme.text_sec,
-        });
-        page.push(SettingsItem::Spacer { height: 10.0 });
-        page.push_action(
-            SettingsItem::CenterLink {
-                label: tr("visit_homepage"),
-                color: theme.accent,
-            },
-            AboutAction::Homepage,
+        page.spacer(20.0);
+        page.center_text("WinIsland".to_string(), 28.0, theme.text_pri);
+        page.center_text(format!("Version {APP_VERSION}"), 14.0, theme.text_sec);
+        page.center_text(
+            format!("{} {APP_AUTHOR}", tr("created_by")),
+            14.0,
+            theme.text_sec,
         );
+        page.spacer(10.0);
+        page.center_link(tr("visit_homepage"), theme.accent, AboutAction::Homepage);
         page
     }
 

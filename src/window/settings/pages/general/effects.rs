@@ -1,7 +1,6 @@
 use crate::core::i18n::tr;
 use crate::utils::font::FontManager;
 use crate::utils::settings_ui::ClickResult;
-use crate::utils::settings_ui::items::SettingsItem;
 use crate::window::settings::PopupState;
 
 use super::super::{PageInput, SettingsPage};
@@ -18,58 +17,47 @@ pub(super) enum EffectsAction {
 impl SettingsApp {
     pub(super) fn build_effects_page(&self) -> SettingsPage<EffectsAction> {
         let mut page = SettingsPage::new();
-        page.push(SettingsItem::SectionHeader {
-            label: tr("section_effects"),
-        });
-        page.push(SettingsItem::GroupStart);
-        page.push_action(
-            SettingsItem::RowSourceSelect {
-                label: tr("settings_theme"),
-                options: vec![
-                    (tr("theme_system"), self.config.settings_theme == "system"),
-                    (tr("theme_light"), self.config.settings_theme == "light"),
-                    (tr("theme_dark"), self.config.settings_theme == "dark"),
-                ],
-                enabled: true,
-            },
+        page.section(tr("section_effects"));
+        page.group_start();
+        page.row_source(
+            tr("settings_theme"),
+            vec![
+                (tr("theme_system"), self.config.settings_theme == "system"),
+                (tr("theme_light"), self.config.settings_theme == "light"),
+                (tr("theme_dark"), self.config.settings_theme == "dark"),
+            ],
+            true,
             EffectsAction::SettingsTheme,
         );
-        page.push_action(
-            SettingsItem::RowSwitch {
-                label: tr("motion_blur"),
-                on: self.config.motion_blur,
-                enabled: true,
-            },
+        page.row_switch(
+            tr("motion_blur"),
+            self.config.motion_blur,
+            true,
             EffectsAction::MotionBlur,
         );
-        page.push(SettingsItem::GroupEnd);
-        page.push(SettingsItem::GroupStart);
-        page.push_action(
-            SettingsItem::RowSourceSelect {
-                label: tr("island_style"),
-                options: vec![
-                    (tr("style_default"), self.config.island_style == "default"),
-                    (tr("style_glass"), self.config.island_style == "glass"),
-                    (tr("style_mica"), self.config.island_style == "mica"),
-                    (tr("style_dynamic"), self.config.island_style == "dynamic"),
-                ],
-                enabled: true,
-            },
+        page.group_end();
+        page.group_start();
+        page.row_source(
+            tr("island_style"),
+            vec![
+                (tr("style_default"), self.config.island_style == "default"),
+                (tr("style_glass"), self.config.island_style == "glass"),
+                (tr("style_mica"), self.config.island_style == "mica"),
+                (tr("style_dynamic"), self.config.island_style == "dynamic"),
+            ],
+            true,
             EffectsAction::IslandStyle,
         );
-        page.push_action(
-            SettingsItem::RowFontPicker {
-                label: tr("custom_font"),
-                btn_label: tr("font_select"),
-                reset_label: self
-                    .config
-                    .custom_font_path
-                    .as_ref()
-                    .map(|_| tr("font_reset")),
-            },
+        page.row_font(
+            tr("custom_font"),
+            tr("font_select"),
+            self.config
+                .custom_font_path
+                .as_ref()
+                .map(|_| tr("font_reset")),
             EffectsAction::CustomFont,
         );
-        page.push(SettingsItem::GroupEnd);
+        page.group_end();
         page
     }
 
@@ -112,11 +100,7 @@ impl SettingsApp {
             return;
         };
         let button_rect = input.popup_button_rect(&page, item_index, self.scroll_y);
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
+        let (win_w, win_h) = self.logical_window_size();
         let popup = match action {
             EffectsAction::SettingsTheme => PopupState::new(
                 select_theme,
@@ -132,8 +116,8 @@ impl SettingsApp {
                     "dark" => 2,
                     _ => 0,
                 },
-                self.win_w / scale,
-                self.win_h / scale,
+                win_w,
+                win_h,
             ),
             EffectsAction::IslandStyle => PopupState::new(
                 select_island_style,
@@ -156,8 +140,8 @@ impl SettingsApp {
                     "dynamic" => 3,
                     _ => 0,
                 },
-                self.win_w / scale,
-                self.win_h / scale,
+                win_w,
+                win_h,
             ),
             _ => return,
         };

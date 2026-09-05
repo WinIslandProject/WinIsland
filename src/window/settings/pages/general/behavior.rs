@@ -2,7 +2,6 @@ use crate::core::config::{AppConfig, MAX_HIDDEN_WIDTH, MIN_HIDDEN_WIDTH};
 use crate::core::i18n::{available_langs, current_lang, init_i18n, set_lang, tr};
 use crate::utils::autostart::set_autostart;
 use crate::utils::font::FontManager;
-use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use crate::window::settings::{NumberInputHandler, PopupState};
 
@@ -123,7 +122,7 @@ impl SettingsApp {
             BehaviorAction::CheckUpdatesNow,
         );
         page.group_end();
-        page.push(SettingsItem::Spacer { height: 10.0 });
+        page.spacer(10.0);
         page.center_link(
             tr("reset_defaults"),
             self.theme().danger,
@@ -240,11 +239,7 @@ impl SettingsApp {
             return;
         };
         let button_rect = input.popup_button_rect(&page, item_index, self.scroll_y);
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
+        let (win_w, win_h) = self.logical_window_size();
         let popup = match action {
             BehaviorAction::Language => {
                 let languages = available_langs();
@@ -259,8 +254,8 @@ impl SettingsApp {
                     languages.iter().map(|entry| entry.name.clone()).collect(),
                     languages.iter().map(|entry| entry.code.clone()).collect(),
                     selected,
-                    self.win_w / scale,
-                    self.win_h / scale,
+                    win_w,
+                    win_h,
                 )
             }
             BehaviorAction::UpdateChannel => PopupState::new(
@@ -269,8 +264,8 @@ impl SettingsApp {
                 vec![tr("channel_stable"), tr("channel_beta")],
                 vec!["stable".to_string(), "beta".to_string()],
                 usize::from(self.config.update_channel == "beta"),
-                self.win_w / scale,
-                self.win_h / scale,
+                win_w,
+                win_h,
             ),
             _ => return,
         };

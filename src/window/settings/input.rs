@@ -27,8 +27,8 @@ impl SettingsApp {
             if let Some((on_select, value)) = selection {
                 on_select(self, &value);
                 self.persist_settings_change();
-            } else if let Some(window) = &self.window {
-                window.request_redraw();
+            } else {
+                self.request_redraw();
             }
             return;
         }
@@ -56,12 +56,7 @@ impl SettingsApp {
             return;
         }
 
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
-        let content_width = self.win_w / scale - SIDEBAR_W;
+        let content_width = self.content_width();
 
         let input = PageInput {
             x: mouse_x - SIDEBAR_W,
@@ -91,9 +86,7 @@ impl SettingsApp {
         self.target_scroll_y = 0.0;
         self.scroll_vel_y = 0.0;
         self.mark_items_dirty();
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(super) fn get_hover_state(&mut self) -> bool {
@@ -142,12 +135,7 @@ impl SettingsApp {
             return false;
         }
 
-        let scale = self
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor() as f32)
-            .unwrap_or(1.0);
-        let content_width = self.win_w / scale - SIDEBAR_W;
+        let content_width = self.content_width();
         if self.widget_drag_active() {
             return true;
         }
@@ -239,9 +227,7 @@ impl SettingsApp {
             text: value,
             on_commit,
         });
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.request_redraw();
     }
 
     pub(super) fn commit_number_input(&mut self) {
@@ -278,9 +264,7 @@ impl SettingsApp {
             _ => return false,
         }
 
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.request_redraw();
         true
     }
 }
