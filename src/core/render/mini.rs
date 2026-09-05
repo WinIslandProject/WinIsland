@@ -27,7 +27,8 @@ const MINI_VISUALIZER_SMOOTHING: (f32, f32) = (0.6, 0.08);
 const LYRIC_LEFT_INSET: f32 = 30.0;
 const LYRIC_RIGHT_INSET: f32 = 29.0;
 const LYRIC_EXPANSION_FADE_RATE: f32 = 2.5;
-const LYRIC_TRANSITION_BLUR_SIGMA: f32 = 12.0;
+const LYRIC_TRANSITION_BLUR_SIGMA: f32 = 6.0;
+const LYRIC_TRANSITION_BLUR_X_SCALE: f32 = 0.25;
 const LYRIC_TRANSITION_OFFSET: f32 = 10.0;
 const MIN_BLUR_SIGMA: f32 = 0.1;
 const PLUGIN_FONT_SCALE: f32 = 0.7;
@@ -221,12 +222,12 @@ struct LyricLayout {
 }
 
 fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
-    let transition = params.lyric_transition;
+    let transition = lyric_transition_progress(params.lyric_transition);
     if transition < 1.0 && !params.old_lyric.is_empty() {
         let paint = lyric_paint(
             params.text_color,
             scaled_alpha(alpha, 1.0 - transition),
-            transition * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
+            transition.powi(2) * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
         );
         draw_lyric_pair(LyricPairParams {
             canvas: params.canvas,
@@ -246,7 +247,7 @@ fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLa
     let paint = lyric_paint(
         params.text_color,
         scaled_alpha(alpha, transition),
-        (1.0 - transition) * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
+        (1.0 - transition).powi(2) * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
     );
     draw_lyric_pair(LyricPairParams {
         canvas: params.canvas,
@@ -263,37 +264,46 @@ fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLa
 }
 
 fn draw_crossfade_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
-    let transition = params.lyric_transition;
-    let (primary, secondary, fade, highlight) = if transition < 0.5 {
-        (
-            params.old_lyric,
-            params.old_secondary_lyric,
-            1.0 - transition * 2.0,
-            None,
-        )
-    } else {
-        (
-            params.current_lyric,
-            params.current_secondary_lyric,
-            (transition - 0.5) * 2.0,
-            params.lyric_highlight,
-        )
-    };
-    if primary.is_empty() {
+    let transition = lyric_transition_progress(params.lyric_transition);
+    if transition < 1.0 && !params.old_lyric.is_empty() {
+        let paint = lyric_paint(
+            params.text_color,
+            scaled_alpha(alpha, 1.0 - transition),
+            0.0,
+        );
+        draw_lyric_pair(LyricPairParams {
+            canvas: params.canvas,
+            primary: params.old_lyric,
+            secondary: params.old_secondary_lyric,
+            anchor_x: layout.anchor_x,
+            center_y: layout.center_y - LYRIC_TRANSITION_OFFSET * params.global_scale * transition,
+            size: layout.size,
+            centered: layout.centered,
+            paint: &paint,
+            highlight: None,
+        });
+    }
+    if params.current_lyric.is_empty() {
         return;
     }
-    let paint = lyric_paint(params.text_color, scaled_alpha(alpha, fade), 0.0);
+    let paint = lyric_paint(params.text_color, scaled_alpha(alpha, transition), 0.0);
     draw_lyric_pair(LyricPairParams {
         canvas: params.canvas,
-        primary,
-        secondary,
+        primary: params.current_lyric,
+        secondary: params.current_secondary_lyric,
         anchor_x: layout.anchor_x,
-        center_y: layout.center_y,
+        center_y: layout.center_y
+            + LYRIC_TRANSITION_OFFSET * params.global_scale * (1.0 - transition),
         size: layout.size,
         centered: layout.centered,
         paint: &paint,
-        highlight,
+        highlight: params.lyric_highlight,
     });
+}
+
+fn lyric_transition_progress(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    progress * progress * (3.0 - 2.0 * progress)
 }
 
 fn lyric_paint(color: Color, alpha: u8, blur_sigma: f32) -> Paint {
@@ -301,7 +311,12 @@ fn lyric_paint(color: Color, alpha: u8, blur_sigma: f32) -> Paint {
     paint.set_anti_alias(true);
     paint.set_color(Color::from_argb(alpha, color.r(), color.g(), color.b()));
     if blur_sigma > MIN_BLUR_SIGMA {
-        paint.set_image_filter(image_filters::blur((blur_sigma, 0.0), None, None, None));
+        paint.set_image_filter(image_filters::blur(
+            (blur_sigma * LYRIC_TRANSITION_BLUR_X_SCALE, blur_sigma),
+            None,
+            None,
+            None,
+        ));
     }
     paint
 }
