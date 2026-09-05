@@ -42,7 +42,7 @@ thiserror = "2.0"
 winres = "0.1"
 
 [profile.release]
-lto = true
-codegen-units = 1
+lto = false
+codegen-units = 16
 panic = "abort"
 strip = true
