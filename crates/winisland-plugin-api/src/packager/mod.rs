@@ -468,11 +468,6 @@ fn validate_dll_descriptor(dll_path: &Path, manifest: &PluginManifest) -> Result
             manifest.author.as_str(),
             fixed_text(&metadata.author)?,
         ),
-        (
-            "description",
-            manifest.description.as_str(),
-            fixed_text(&metadata.description)?,
-        ),
     ] {
         if manifest_value != descriptor_value {
             return Err(format!(

@@ -2356,11 +2356,6 @@ fn validate_manifest_metadata(
             metadata.version.as_str(),
         ),
         ("author", manifest.author.as_str(), metadata.author.as_str()),
-        (
-            "description",
-            manifest.description.as_str(),
-            metadata.description.as_str(),
-        ),
     ] {
         if packaged != declared {
             return Err(PluginError::InvalidPlugin(format!(
