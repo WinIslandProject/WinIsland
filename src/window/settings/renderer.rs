@@ -128,7 +128,7 @@ impl SettingsApp {
             canvas.restore();
 
             if let Some(scrollbar) = self.scrollbar_geometry() {
-                let p = settings_paint(Color::from_argb(60, 255, 255, 255));
+                let p = settings_paint(theme.scrollbar);
                 canvas.draw_round_rect(
                     Rect::from_xywh(scrollbar.x, scrollbar.y, scrollbar.width, scrollbar.height),
                     scrollbar.width / 2.0,
@@ -416,7 +416,12 @@ impl SettingsApp {
         }
         let menu = popup.menu_rect();
 
-        let shadow = settings_paint(Color::from_argb((60.0 * opacity) as u8, 0, 0, 0));
+        let shadow = settings_paint(Color::from_argb(
+            (theme.popup_shadow.a() as f32 * opacity) as u8,
+            theme.popup_shadow.r(),
+            theme.popup_shadow.g(),
+            theme.popup_shadow.b(),
+        ));
         canvas.draw_round_rect(
             Rect::from_xywh(
                 menu.left - 1.0,
@@ -438,7 +443,7 @@ impl SettingsApp {
         canvas.draw_round_rect(menu, POPUP_MENU_R, POPUP_MENU_R, &paint);
 
         let mut border = settings_paint(Color::from_argb(
-            (40.0 * opacity) as u8,
+            (theme.popup_border.a() as f32 * opacity) as u8,
             theme.popup_border.r(),
             theme.popup_border.g(),
             theme.popup_border.b(),
@@ -452,23 +457,24 @@ impl SettingsApp {
             let item_rect = popup.item_rect(i);
 
             if popup.hover_idx == Some(i) {
-                let a = theme.accent.a() as f32 * opacity;
+                let a = theme.selection_bg.a() as f32 * opacity;
                 paint.set_color(Color::from_argb(
                     a as u8,
-                    theme.accent.r(),
-                    theme.accent.g(),
-                    theme.accent.b(),
+                    theme.selection_bg.r(),
+                    theme.selection_bg.g(),
+                    theme.selection_bg.b(),
                 ));
                 paint.set_style(skia_safe::paint::Style::Fill);
                 canvas.draw_round_rect(item_rect, 4.0, 4.0, &paint);
             }
 
-            let text_color = Color::from_argb(
-                text_alpha,
-                theme.text_pri.r(),
-                theme.text_pri.g(),
-                theme.text_pri.b(),
-            );
+            let text_base = if popup.hover_idx == Some(i) {
+                theme.selection_text
+            } else {
+                theme.text_pri
+            };
+            let text_color =
+                Color::from_argb(text_alpha, text_base.r(), text_base.g(), text_base.b());
             paint.set_style(skia_safe::paint::Style::Fill);
             SettingsPainter::new(canvas).text(
                 opt_label,
@@ -480,7 +486,7 @@ impl SettingsApp {
 
             if i == popup.selected_idx {
                 let check_base = if popup.hover_idx == Some(i) {
-                    theme.text_pri
+                    theme.selection_text
                 } else {
                     theme.accent
                 };
@@ -511,10 +517,10 @@ impl SettingsApp {
 
             if i < popup.options.len() - 1 {
                 let mut sep = settings_paint(Color::from_argb(
-                    (30.0 * opacity) as u8,
-                    theme.separator.r(),
-                    theme.separator.g(),
-                    theme.separator.b(),
+                    (theme.popup_separator.a() as f32 * opacity) as u8,
+                    theme.popup_separator.r(),
+                    theme.popup_separator.g(),
+                    theme.popup_separator.b(),
                 ));
                 sep.set_stroke_width(0.5);
                 sep.set_style(skia_safe::paint::Style::Stroke);

@@ -170,7 +170,7 @@ impl SettingsApp {
 
             if self.active_page == i {
                 paint.set_color(if self.focused {
-                    theme.accent
+                    theme.selection_bg
                 } else {
                     theme.card_highlight
                 });
@@ -181,7 +181,11 @@ impl SettingsApp {
                     &paint,
                 );
                 paint.set_color(if self.focused {
-                    Color::WHITE
+                    if self.is_light {
+                        theme.selection_text
+                    } else {
+                        Color::WHITE
+                    }
                 } else {
                     theme.text_pri
                 });

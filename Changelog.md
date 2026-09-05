@@ -4,6 +4,7 @@
 - Added optional secondary lyrics in the compact island with adaptive two-line layout
 - Improved several animations
 - Fixed delayed or inconsistent playback progress after seeking
+- Improved the settings light theme
 - Fixed known issues
 
 ### v1.3.1
