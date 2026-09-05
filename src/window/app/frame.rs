@@ -485,12 +485,8 @@ impl App {
             let click_x = rel_x as f32 - page_shift;
             self.seek.preview_at(click_x);
             window.request_redraw();
-        } else if self.seek.active {
-            self.seek.active = false;
-            if self.seek.duration_ms > 0 {
-                self.dispatch_seek_command();
-                window.request_redraw();
-            }
+        } else if self.finish_seek() {
+            window.request_redraw();
         }
     }
 

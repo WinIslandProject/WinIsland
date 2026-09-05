@@ -425,18 +425,41 @@ impl App {
         }
     }
 
-    fn dispatch_seek_command(&self) {
+    fn dispatch_seek_command(&mut self) {
+        let position_ms = self.seek.preview_ms.min(self.seek.duration_ms);
         if let Some(resource_id) = self.seek.media_resource_id {
             if let Err(error) = crate::plugin::manager::dispatch_media_command(
                 resource_id,
                 crate::plugin::types::MEDIA_COMMAND_SEEK,
-                self.seek.preview_ms,
+                position_ms,
             ) {
                 log::warn!("Plugin media seek failed: {error}");
+            } else if let Some(source) = self
+                .plugin_media_source
+                .as_mut()
+                .filter(|source| source.resource_id == resource_id)
+            {
+                source.info.apply_seek(position_ms);
             }
         } else {
-            self.smtc.request_seek(self.seek.preview_ms);
+            self.smtc.request_seek(position_ms);
+            self.smtc_media_info.apply_seek(position_ms);
         }
+    }
+
+    fn finish_seek(&mut self) -> bool {
+        if !self.seek.active {
+            return false;
+        }
+        self.seek.active = false;
+        if self.seek.duration_ms > 0 {
+            self.seek.preview_ms = self.seek.preview_ms.min(self.seek.duration_ms);
+            crate::ui::expanded::music_view::snap_progress(
+                self.seek.preview_ms as f32 / self.seek.duration_ms as f32,
+            );
+            self.dispatch_seek_command();
+        }
+        true
     }
 
     fn is_hidden(&self) -> bool {

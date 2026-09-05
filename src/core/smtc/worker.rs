@@ -20,6 +20,7 @@ pub(super) struct WorkerChannels {
     pub(super) lyrics_source_rx: mpsc::UnboundedReceiver<String>,
     pub(super) lyrics_local_dir_rx: mpsc::UnboundedReceiver<Option<String>>,
     pub(super) allowed_apps_rx: mpsc::UnboundedReceiver<Vec<String>>,
+    pub(super) wake_rx: std::sync::mpsc::Receiver<()>,
     pub(super) known_apps: Vec<String>,
 }
 
@@ -33,6 +34,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         mut lyrics_source_rx,
         mut lyrics_local_dir_rx,
         mut allowed_apps_rx,
+        wake_rx,
         known_apps,
     } = channels;
     let _winrt_guard = match WinRtGuard::new() {
@@ -181,7 +183,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             while seek_rx.try_recv().is_ok() {}
             while playback_rx.try_recv().is_ok() {}
             while event_rx.try_recv().is_ok() {}
-            std::thread::sleep(Duration::from_millis(300));
+            let _ = wake_rx.recv_timeout(Duration::from_millis(300));
             continue;
         }
 
@@ -189,30 +191,10 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         while let Ok(v) = seek_rx.try_recv() {
             seek_pos = Some(v);
         }
-        if let Some(seek_pos) = seek_pos
-            && let Some(session) = get_target_session(&manager, &media_state.allowed_apps)
-        {
+        if let Some(seek_pos) = seek_pos {
             let seek_pos = seek_pos.min(i64::MAX as u64 / 10_000);
-            let source_app_id = session
-                .SourceAppUserModelId()
-                .map(|id| id.to_string())
-                .unwrap_or_default();
-            log::info!("SMTC: seek to {seek_pos}ms");
-            let ticks = seek_pos as i64 * 10_000;
-            match session.TryChangePlaybackPositionAsync(ticks) {
-                Ok(_) => {
-                    info_tx.send_if_modified(|info| {
-                        if info.source_app_id != source_app_id || info.title.is_empty() {
-                            return false;
-                        }
-                        info.position_ms = seek_pos;
-                        info.last_update = Instant::now();
-                        info.seek_target_ms = seek_pos;
-                        info.seek_guard_until = Some(Instant::now() + Duration::from_secs(4));
-                        true
-                    });
-                }
-                Err(error) => log::warn!("SMTC: failed to start seek: {error}"),
+            if !apply_seek_request(&manager, &media_state.allowed_apps, &info_tx, seek_pos) {
+                info_tx.send_if_modified(|info| info.reject_seek(seek_pos));
             }
         }
 
@@ -268,7 +250,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             last_regular_update = Instant::now();
         }
 
-        std::thread::sleep(Duration::from_millis(300));
+        let _ = wake_rx.recv_timeout(Duration::from_millis(300));
     }
 
     if let Some(token) = sessions_changed_token
@@ -276,6 +258,38 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
     {
         log::warn!("SMTC: failed to remove session change handler: {error}");
     }
+}
+
+fn apply_seek_request(
+    manager: &GlobalSystemMediaTransportControlsSessionManager,
+    allowed_apps: &[String],
+    info_tx: &watch::Sender<MediaInfo>,
+    position_ms: u64,
+) -> bool {
+    let Some(session) = get_target_session(manager, allowed_apps) else {
+        log::debug!("SMTC: ignored seek without an active session");
+        return false;
+    };
+    let source_app_id = session
+        .SourceAppUserModelId()
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+    log::info!("SMTC: seek to {position_ms}ms");
+    let ticks = position_ms as i64 * 10_000;
+    if let Err(error) = session.TryChangePlaybackPositionAsync(ticks) {
+        log::warn!("SMTC: failed to start seek: {error}");
+        return false;
+    }
+    info_tx.send_if_modified(|info| {
+        if info.source_app_id != source_app_id
+            || info.title.is_empty()
+            || (info.seek_guard_until.is_some() && info.seek_target_ms != position_ms)
+        {
+            return false;
+        }
+        info.apply_seek(position_ms);
+        true
+    })
 }
 
 struct MediaUpdateState {

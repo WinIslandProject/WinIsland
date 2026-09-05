@@ -12,6 +12,8 @@ mod properties;
 mod session;
 mod worker;
 
+const SEEK_GUARD_DURATION: Duration = Duration::from_secs(4);
+
 pub(super) struct WinRtGuard {
     _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
 }
@@ -141,6 +143,31 @@ impl MediaInfo {
         }
     }
 
+    pub(crate) fn apply_seek(&mut self, position_ms: u64) {
+        let duration_ms = self.effective_duration_ms();
+        let position_ms = if duration_ms > 0 {
+            position_ms.min(duration_ms)
+        } else {
+            position_ms
+        };
+        let now = Instant::now();
+        self.position_ms = position_ms;
+        self.last_update = now;
+        self.seek_target_ms = position_ms;
+        self.seek_guard_until = Some(now + SEEK_GUARD_DURATION);
+    }
+
+    pub(crate) fn reject_seek(&mut self, position_ms: u64) -> bool {
+        if self.seek_guard_until.is_none() || self.seek_target_ms != position_ms {
+            return false;
+        }
+        self.position_ms = self.last_smtc_pos;
+        self.last_update = Instant::now();
+        self.seek_target_ms = 0;
+        self.seek_guard_until = None;
+        true
+    }
+
     pub fn current_lyric(
         &self,
         delay_ms: i64,
@@ -201,6 +228,7 @@ pub(super) enum PlaybackCommand {
 }
 
 pub struct SmtcListener {
+    info_tx: watch::Sender<MediaInfo>,
     info_rx: watch::Receiver<MediaInfo>,
     enabled_tx: watch::Sender<bool>,
     seek_tx: mpsc::UnboundedSender<u64>,
@@ -209,6 +237,7 @@ pub struct SmtcListener {
     lyrics_source_tx: mpsc::UnboundedSender<String>,
     lyrics_local_dir_tx: mpsc::UnboundedSender<Option<String>>,
     allowed_apps_tx: mpsc::UnboundedSender<Vec<String>>,
+    wake_tx: std::sync::mpsc::SyncSender<()>,
     cancel_token: CancellationToken,
 }
 
@@ -229,6 +258,7 @@ impl SmtcListener {
         let (lyrics_source_tx, lyrics_source_rx) = mpsc::unbounded_channel();
         let (lyrics_local_dir_tx, lyrics_local_dir_rx) = mpsc::unbounded_channel();
         let (allowed_apps_tx, allowed_apps_rx) = mpsc::unbounded_channel();
+        let (wake_tx, wake_rx) = std::sync::mpsc::sync_channel(1);
         let cancel_token = CancellationToken::new();
 
         let _ = lyrics_mode_tx.send(mode.as_str().into());
@@ -237,10 +267,11 @@ impl SmtcListener {
         let _ = allowed_apps_tx.send(allowed);
 
         let cancel = cancel_token.clone();
+        let worker_info_tx = info_tx.clone();
         tokio::task::spawn_blocking(move || {
             worker::smtc_poll_loop(
                 worker::WorkerChannels {
-                    info_tx,
+                    info_tx: worker_info_tx,
                     enabled_rx,
                     seek_rx,
                     playback_rx,
@@ -248,6 +279,7 @@ impl SmtcListener {
                     lyrics_source_rx,
                     lyrics_local_dir_rx,
                     allowed_apps_rx,
+                    wake_rx,
                     known_apps,
                 },
                 cancel,
@@ -255,6 +287,7 @@ impl SmtcListener {
         });
 
         Self {
+            info_tx,
             info_rx,
             enabled_tx,
             seek_tx,
@@ -263,8 +296,13 @@ impl SmtcListener {
             lyrics_source_tx,
             lyrics_local_dir_tx,
             allowed_apps_tx,
+            wake_tx,
             cancel_token,
         }
+    }
+
+    fn wake_worker(&self) {
+        let _ = self.wake_tx.try_send(());
     }
 
     pub fn set_enabled(&self, enabled: bool) {
@@ -303,19 +341,41 @@ impl SmtcListener {
     }
 
     pub fn request_seek(&self, position_ms: u64) {
-        let _ = self.seek_tx.send(position_ms);
+        let duration_ms = self.info_rx.borrow().effective_duration_ms();
+        let position_ms = if duration_ms > 0 {
+            position_ms.min(duration_ms)
+        } else {
+            position_ms
+        };
+        if self.seek_tx.send(position_ms).is_err() {
+            return;
+        }
+        self.info_tx.send_if_modified(|info| {
+            if info.title.is_empty() {
+                return false;
+            }
+            info.apply_seek(position_ms);
+            true
+        });
+        self.wake_worker();
     }
 
     pub fn request_toggle_play(&self) {
-        let _ = self.playback_tx.send(PlaybackCommand::Toggle);
+        if self.playback_tx.send(PlaybackCommand::Toggle).is_ok() {
+            self.wake_worker();
+        }
     }
 
     pub fn request_next(&self) {
-        let _ = self.playback_tx.send(PlaybackCommand::Next);
+        if self.playback_tx.send(PlaybackCommand::Next).is_ok() {
+            self.wake_worker();
+        }
     }
 
     pub fn request_prev(&self) {
-        let _ = self.playback_tx.send(PlaybackCommand::Prev);
+        if self.playback_tx.send(PlaybackCommand::Prev).is_ok() {
+            self.wake_worker();
+        }
     }
 }
 
@@ -375,5 +435,6 @@ pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: Ly
 impl Drop for SmtcListener {
     fn drop(&mut self) {
         self.cancel_token.cancel();
+        self.wake_worker();
     }
 }

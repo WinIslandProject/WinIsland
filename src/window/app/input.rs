@@ -294,11 +294,7 @@ impl App {
     }
 
     pub(super) fn handle_release(&mut self, py: i32) {
-        if self.seek.active {
-            self.seek.active = false;
-            if self.seek.duration_ms > 0 {
-                self.dispatch_seek_command();
-            }
+        if self.finish_seek() {
             return;
         }
         if self.dismissing_notification {

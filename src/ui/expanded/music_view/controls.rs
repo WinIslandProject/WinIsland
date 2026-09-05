@@ -3,12 +3,18 @@ use crate::core::smtc::MediaInfo;
 use super::{
     CONTENT_PADDING, COVER_FLIP_ANIM, COVER_FLIP_OLD_IMG, IMG_CACHE, LOCAL_PLAY_STATE,
     NEXT_SKIP_ANIM, PAUSE_CONTROL_PRESS_VELOCITY, PAUSE_SPRING, PREV_SKIP_ANIM, PROGRESS_DRAGGING,
-    PROGRESS_HOVER,
+    PROGRESS_HOVER, PROGRESS_SMOOTH,
 };
 
 pub fn set_progress_dragging(active: bool) {
     PROGRESS_DRAGGING.with(|cell| {
         *cell.borrow_mut() = active;
+    });
+}
+
+pub fn snap_progress(progress: f32) {
+    PROGRESS_SMOOTH.with(|cell| {
+        *cell.borrow_mut() = progress.clamp(0.0, 1.0);
     });
 }
 
