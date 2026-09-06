@@ -14,8 +14,8 @@ use super::types::{
     INTERFACE_VERSION_1, INTERFACE_WIDGET, INVALID_ID, LYRICS_TEXT_FLAG_WORD_SYNCED, LyricsTextV1,
     LyricsTransformApiV1, LyricsTransformFnV1, LyricsTransformerDataV1, MediaApiV1, MediaCommandV1,
     MediaSourceDataV1, PluginError, PluginResultC, PluginToken, ResourceId, TranslationPairV1,
-    Utf8SliceV1, WidgetApiV1, WidgetDataV1, WidgetDrawContextV1, context_from_ffi, read_c_str,
-    widget_from_ffi,
+    Utf8SliceV1, WidgetApiV1, WidgetDataV1, WidgetDrawContextV1, WidgetDrawFnV1, context_from_ffi,
+    read_c_str, widget_from_ffi,
 };
 use super::zip_loader::{self, PluginManifest};
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
@@ -111,6 +111,12 @@ struct LyricsTransformerResource {
     in_flight: u32,
 }
 
+struct WidgetResource {
+    on_draw: WidgetDrawFnV1,
+    callback_data: usize,
+    in_flight: u32,
+}
+
 #[derive(Default)]
 struct RuntimeState {
     plugins: HashMap<PluginToken, PluginRegistration>,
@@ -122,6 +128,7 @@ struct RuntimeState {
     media_dirty: bool,
     widget_events: HashMap<ResourceId, WidgetEvent>,
     widget_keys: HashMap<(PluginToken, String), ResourceId>,
+    widgets: HashMap<ResourceId, WidgetResource>,
     lyrics_transformers: HashMap<ResourceId, LyricsTransformerResource>,
     lyrics_transformer_sequence: u64,
     host_state: HostState,
@@ -1183,6 +1190,9 @@ unsafe extern "C" fn widget_create(
     }
     let id = next_id(&NEXT_RESOURCE_ID);
     let widget = widget_from_ffi(&plugin_id, id, &data);
+    let Some(on_draw) = data.on_draw else {
+        return PluginResultC::err("widget render callback is required");
+    };
     let size_bytes = widget.title.len() + widget.body.len();
     state.resources.insert(
         id,
@@ -1195,6 +1205,14 @@ unsafe extern "C" fn widget_create(
     if let Some(key) = key {
         state.widget_keys.insert((token, key), id);
     }
+    state.widgets.insert(
+        id,
+        WidgetResource {
+            on_draw,
+            callback_data: data.callback_data as usize,
+            in_flight: 0,
+        },
+    );
     state.widget_events.insert(id, WidgetEvent::Upsert(widget));
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
@@ -1232,6 +1250,13 @@ unsafe extern "C" fn widget_update(
     if existing_key != key.as_deref() {
         return PluginResultC::err("widget key cannot change after creation");
     }
+    if state
+        .widgets
+        .get(&id)
+        .is_some_and(|widget| widget.in_flight != 0)
+    {
+        return PluginResultC::err("widget render callback is in progress");
+    }
     let plugin_id = match state.plugins.get(&token) {
         Some(plugin) => plugin.id.clone(),
         None => return PluginResultC::err("invalid plugin token"),
@@ -1241,6 +1266,17 @@ unsafe extern "C" fn widget_update(
     if let Some(owner) = state.resources.get_mut(&id) {
         owner.size_bytes = size_bytes;
     }
+    let Some(on_draw) = data.on_draw else {
+        return PluginResultC::err("widget render callback is required");
+    };
+    state.widgets.insert(
+        id,
+        WidgetResource {
+            on_draw,
+            callback_data: data.callback_data as usize,
+            in_flight: 0,
+        },
+    );
     state.widget_events.insert(id, WidgetEvent::Upsert(widget));
     release_runtime(state);
     PluginResultC::ok()
@@ -1251,7 +1287,15 @@ unsafe extern "C" fn widget_release(token: PluginToken, id: ResourceId) -> Plugi
     if let Err(error) = require_resource(&state, token, id, ResourceKind::Widget) {
         return PluginResultC::err(error);
     }
+    if state
+        .widgets
+        .get(&id)
+        .is_some_and(|widget| widget.in_flight != 0)
+    {
+        return PluginResultC::err("widget render callback is in progress");
+    }
     state.resources.remove(&id);
+    state.widgets.remove(&id);
     state
         .widget_keys
         .retain(|_, resource_id| *resource_id != id);
@@ -1265,6 +1309,50 @@ pub fn update_host_state(state: HostState) {
     if let Ok(mut runtime) = runtime().lock() {
         runtime.host_state = state;
     }
+}
+
+pub(crate) struct WidgetDrawLease {
+    resource_id: ResourceId,
+    on_draw: WidgetDrawFnV1,
+    callback_data: usize,
+}
+
+impl WidgetDrawLease {
+    pub(crate) fn draw(&self, context: &WidgetDrawContextV1) {
+        // SAFETY: The lease keeps the plugin registered and prevents its widget resource from
+        // being released or the DLL from being unloaded until this synchronous call returns.
+        unsafe { (self.on_draw)(self.callback_data as *mut c_void, context) };
+    }
+}
+
+impl Drop for WidgetDrawLease {
+    fn drop(&mut self) {
+        if let Ok(mut state) = runtime().lock()
+            && let Some(widget) = state.widgets.get_mut(&self.resource_id)
+        {
+            widget.in_flight = widget.in_flight.saturating_sub(1);
+        }
+    }
+}
+
+pub(crate) fn acquire_widget_draw(resource_id: ResourceId) -> Option<WidgetDrawLease> {
+    let mut state = runtime().lock().ok()?;
+    let owner = state.resources.get(&resource_id)?;
+    if owner.kind != ResourceKind::Widget
+        || state
+            .plugins
+            .get(&owner.plugin)
+            .is_none_or(|plugin| plugin.stopping)
+    {
+        return None;
+    }
+    let widget = state.widgets.get_mut(&resource_id)?;
+    widget.in_flight = widget.in_flight.saturating_add(1);
+    Some(WidgetDrawLease {
+        resource_id,
+        on_draw: widget.on_draw,
+        callback_data: widget.callback_data,
+    })
 }
 
 struct ActiveLyricsTransformer {
@@ -1609,6 +1697,10 @@ fn begin_plugin_shutdown(token: PluginToken) -> Result<bool, PluginError> {
                 .lyrics_transformers
                 .get(&id)
                 .is_some_and(|transformer| transformer.in_flight != 0),
+            ResourceKind::Widget => runtime
+                .widgets
+                .get(&id)
+                .is_some_and(|widget| widget.in_flight != 0),
             _ => false,
         }
     });
@@ -1660,6 +1752,7 @@ fn revoke_plugin(token: PluginToken) {
                 }
                 ResourceKind::I18n => i18n_resources.push(id),
                 ResourceKind::Widget => {
+                    runtime.widgets.remove(&id);
                     runtime.widget_events.remove(&id);
                     runtime.widget_events.insert(id, WidgetEvent::Remove(id));
                 }

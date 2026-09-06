@@ -98,7 +98,5 @@ pub fn widget_from_ffi(
         span_rows: value.span_rows,
         title: read_c_str(&value.title),
         body: read_c_str(&value.body),
-        on_draw: value.on_draw,
-        callback_data: value.callback_data as usize,
     }
 }

@@ -2,7 +2,8 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use base64::Engine;
@@ -10,6 +11,8 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::header::{CACHE_CONTROL, PRAGMA};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::core::config::APP_VERSION;
 use crate::plugin::zip_loader;
@@ -24,6 +27,7 @@ const MAX_CATALOG_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES: usize = 1024;
 const MAX_ICON_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TOTAL_ICON_BYTES: usize = 32 * 1024 * 1024;
+const MAX_CONCURRENT_ICON_DOWNLOADS: usize = 4;
 const MAX_PACKAGE_BYTES: u64 = 128 * 1024 * 1024;
 
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -178,7 +182,7 @@ async fn validate_catalog(document: CatalogDocument) -> Result<MarketplaceCatalo
     }
 
     let mut plugins = Vec::with_capacity(document.plugins.len());
-    let mut total_icon_bytes = 0_usize;
+    let mut icon_downloads = Vec::new();
     for entry in document.plugins {
         validate_plugin_entry(&entry)?;
         if !ids.insert(entry.id.to_ascii_lowercase()) {
@@ -190,31 +194,26 @@ async fn validate_catalog(document: CatalogDocument) -> Result<MarketplaceCatalo
                 revocation.id.eq_ignore_ascii_case(&entry.id) && revocation.version == entry.version
             })
             .map(|revocation| revocation.reason.clone());
-        let icon = match (&entry.icon_url, &entry.icon_sha256) {
+        match (&entry.icon_url, &entry.icon_sha256) {
             (Some(url), Some(expected)) => {
                 validate_marketplace_asset_url(url)?;
                 validate_sha256(expected)?;
-                let bytes = download_bytes(url, MAX_ICON_BYTES).await?;
-                if sha256_hex(&bytes) != *expected {
-                    return Err(format!("The icon for '{}' failed verification", entry.name));
-                }
-                total_icon_bytes = total_icon_bytes
-                    .checked_add(bytes.len())
-                    .ok_or_else(|| "The marketplace icons are too large".to_string())?;
-                if total_icon_bytes > MAX_TOTAL_ICON_BYTES {
-                    return Err("The marketplace icons are too large".into());
-                }
-                validate_icon(&entry.id, &bytes)?;
-                Some(bytes)
+                icon_downloads.push((
+                    plugins.len(),
+                    entry.id.clone(),
+                    entry.name.clone(),
+                    url.clone(),
+                    expected.clone(),
+                ));
             }
-            (None, None) => None,
+            (None, None) => {}
             _ => {
                 return Err(format!(
                     "The icon metadata for '{}' is incomplete",
                     entry.name
                 ));
             }
-        };
+        }
         plugins.push(MarketplacePlugin {
             id: entry.id,
             name: entry.name,
@@ -228,12 +227,84 @@ async fn validate_catalog(document: CatalogDocument) -> Result<MarketplaceCatalo
             min_winisland_version: entry.min_winisland_version,
             categories: entry.categories,
             readme: entry.readme,
-            icon,
+            icon: None,
             revoked_reason,
         });
     }
+    download_catalog_icons(&mut plugins, icon_downloads).await;
     plugins.sort_by_key(|plugin| plugin.name.to_lowercase());
     Ok(MarketplaceCatalog { plugins })
+}
+
+async fn download_catalog_icons(
+    plugins: &mut [MarketplacePlugin],
+    downloads: Vec<(usize, String, String, String, String)>,
+) {
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_ICON_DOWNLOADS));
+    let total_bytes = Arc::new(AtomicUsize::new(0));
+    let mut tasks = JoinSet::new();
+    for (index, plugin_id, plugin_name, url, expected_sha256) in downloads {
+        let semaphore = semaphore.clone();
+        let total_bytes = total_bytes.clone();
+        tasks.spawn(async move {
+            let permit = semaphore.acquire_owned().await;
+            let result = match permit {
+                Ok(_permit) => {
+                    download_catalog_icon(&plugin_id, &url, &expected_sha256, &total_bytes).await
+                }
+                Err(_) => Err("The icon download queue closed unexpectedly".to_string()),
+            };
+            (index, plugin_name, result)
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok((index, _, Ok(icon))) => plugins[index].icon = Some(icon),
+            Ok((_, plugin_name, Err(error))) => {
+                log::warn!("Plugin marketplace icon for '{plugin_name}' was skipped: {error}");
+            }
+            Err(error) => log::warn!("Plugin marketplace icon task failed: {error}"),
+        }
+    }
+}
+
+async fn download_catalog_icon(
+    plugin_id: &str,
+    url: &str,
+    expected_sha256: &str,
+    total_bytes: &AtomicUsize,
+) -> Result<Vec<u8>, String> {
+    let response = request(url).await?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_ICON_BYTES as u64)
+    {
+        return Err("The icon response is too large".into());
+    }
+    let mut response = response;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| format!("Could not download the icon: {error}"))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_ICON_BYTES {
+            return Err("The icon response is too large".into());
+        }
+        total_bytes
+            .fetch_update(AtomicOrdering::AcqRel, AtomicOrdering::Acquire, |current| {
+                current
+                    .checked_add(chunk.len())
+                    .filter(|total| *total <= MAX_TOTAL_ICON_BYTES)
+            })
+            .map_err(|_| "The marketplace icon download budget was exhausted")?;
+        bytes.extend_from_slice(&chunk);
+    }
+    if sha256_hex(&bytes) != expected_sha256 {
+        return Err("The icon failed SHA-256 verification".into());
+    }
+    validate_icon(plugin_id, &bytes)?;
+    Ok(bytes)
 }
 
 fn validate_plugin_entry(entry: &CatalogPlugin) -> Result<(), String> {

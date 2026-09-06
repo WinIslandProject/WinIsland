@@ -21,7 +21,7 @@ pub fn draw_plugin_widget(
     scale: f32,
     alpha: u8,
 ) {
-    let Some(on_draw) = widget.on_draw else {
+    let Some(callback) = crate::plugin::manager::acquire_widget_draw(widget.id) else {
         return;
     };
     let inv_scale = if scale > 0.0 { 1.0 / scale } else { 1.0 };
@@ -39,9 +39,7 @@ pub fn draw_plugin_widget(
     canvas.clip_rect(Rect::from_xywh(x, y, width, height), None, false);
     canvas.translate((x, y));
     crate::plugin::manager::reset_draw_transform();
-    // SAFETY: on_draw is invoked synchronously on the render thread; the context and borrowed
-    // canvas stay valid for this call.
-    unsafe { on_draw(widget.callback_data as *mut c_void, &ctx) };
+    callback.draw(&ctx);
     canvas.restore_to_count(save_count);
 }
 

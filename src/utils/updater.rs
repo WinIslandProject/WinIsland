@@ -8,6 +8,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows::Win32::UI::WindowsAndMessaging::{
     IDOK, IDYES, MB_ICONINFORMATION, MB_OKCANCEL, MB_SETFOREGROUND, MB_TOPMOST, MessageBoxW,
@@ -21,6 +22,25 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .build()
         .unwrap()
 });
+static UPDATE_CHECK_RUNNING: AtomicBool = AtomicBool::new(false);
+static NEXT_UPDATE_DOWNLOAD_ID: AtomicU64 = AtomicU64::new(1);
+
+struct UpdateCheckGuard;
+
+impl UpdateCheckGuard {
+    fn acquire() -> Option<Self> {
+        UPDATE_CHECK_RUNNING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+            .then_some(Self)
+    }
+}
+
+impl Drop for UpdateCheckGuard {
+    fn drop(&mut self) {
+        UPDATE_CHECK_RUNNING.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Deserialize)]
 struct NightlyVersionInfo {
@@ -206,6 +226,10 @@ pub fn check_updates_manually() {
 }
 
 async fn do_check(app_dir: &Path, manual: bool) {
+    let Some(_guard) = UpdateCheckGuard::acquire() else {
+        log::info!("Update check skipped because another check is already running");
+        return;
+    };
     let config = crate::core::persistence::load_config();
     let channel = config.update_channel.as_str();
 
@@ -382,11 +406,9 @@ async fn download_installer(package: &UpdatePackage, destination: &Path) -> Resu
         return Err("installer size is invalid".into());
     }
 
-    let temporary = destination.with_extension("download");
+    let (temporary, mut file) = create_installer_download(destination)?;
     let result = async {
         let mut response = response;
-        let mut file = fs::File::create(&temporary)
-            .map_err(|error| format!("failed to create installer file: {error}"))?;
         let mut hasher = Sha256::new();
         let mut total = 0u64;
         while let Some(chunk) = response
@@ -416,10 +438,6 @@ async fn download_installer(package: &UpdatePackage, destination: &Path) -> Resu
         }
         file.sync_all()
             .map_err(|error| format!("failed to flush installer: {error}"))?;
-        if destination.exists() {
-            fs::remove_file(destination)
-                .map_err(|error| format!("failed to replace installer: {error}"))?;
-        }
         fs::rename(&temporary, destination)
             .map_err(|error| format!("failed to activate installer: {error}"))?;
         Ok(total)
@@ -429,6 +447,27 @@ async fn download_installer(package: &UpdatePackage, destination: &Path) -> Resu
         let _ = fs::remove_file(temporary);
     }
     result
+}
+
+fn create_installer_download(destination: &Path) -> Result<(PathBuf, fs::File), String> {
+    for _ in 0..16 {
+        let id = NEXT_UPDATE_DOWNLOAD_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = destination.with_extension(format!(
+            "download-{}-{}-{id}",
+            std::process::id(),
+            cache_buster()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("failed to create installer file: {error}")),
+        }
+    }
+    Err("failed to reserve a unique installer download file".into())
 }
 
 async fn perform_update(package: UpdatePackage, app_dir: PathBuf) {

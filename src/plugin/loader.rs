@@ -2,6 +2,9 @@ use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 
 use libloading::Library;
+use libloading::os::windows::{
+    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, Library as WindowsLibrary,
+};
 
 use super::types::{
     ABI_VERSION_1, HostApiV1, KNOWN_CAPABILITIES, PLUGIN_ENTRY_SYMBOL_V1, PluginCreateInfoV1,
@@ -21,9 +24,18 @@ pub struct NativePlugin {
 
 impl NativePlugin {
     pub fn load(path: &Path) -> Result<Self, PluginError> {
-        // SAFETY: Native plugins are trusted DLLs selected by the user.
-        let library = unsafe { Library::new(path) }
+        let path = std::fs::canonicalize(path)
             .map_err(|error| PluginError::LoadFailed(format!("{}: {error}", path.display())))?;
+        // SAFETY: Loading a native plugin executes trusted plugin code. The canonical path and
+        // restricted flags ensure its dependencies come only from its directory or System32.
+        let library: Library = unsafe {
+            WindowsLibrary::load_with_flags(
+                &path,
+                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        }
+        .map(Into::into)
+        .map_err(|error| PluginError::LoadFailed(format!("{}: {error}", path.display())))?;
         // SAFETY: The symbol is validated against the documented ABI v1 signature.
         let entry =
             unsafe { library.get::<PluginEntryFnV1>(PLUGIN_ENTRY_SYMBOL_V1) }.map_err(|error| {

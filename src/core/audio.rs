@@ -19,6 +19,7 @@ use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFOR
 use windows::core::{Interface, PWSTR};
 
 const FFT_LEN: usize = 1024;
+const FFT_REFERENCE_SAMPLE_RATE: u32 = 48_000;
 const SPECTRUM_BAND_COUNT: usize = 6;
 const FFT_BIN_RANGES: [(usize, usize); SPECTRUM_BAND_COUNT] =
     [(2, 8), (8, 20), (20, 50), (50, 120), (120, 280), (280, 511)];
@@ -60,12 +61,13 @@ struct SpectrumAnalyzer {
     fft: Arc<dyn realfft::RealToComplex<f32>>,
     output: Vec<realfft::num_complex::Complex32>,
     input: Vec<f32>,
+    bin_ranges: [(usize, usize); SPECTRUM_BAND_COUNT],
     input_len: usize,
     adaptive_max: [f32; SPECTRUM_BAND_COUNT],
 }
 
 impl SpectrumAnalyzer {
-    fn new() -> Self {
+    fn new(sample_rate: u32) -> Self {
         let mut planner = RealFftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(FFT_LEN);
         let output = fft.make_output_vec();
@@ -73,6 +75,7 @@ impl SpectrumAnalyzer {
             fft,
             output,
             input: vec![0.0; FFT_LEN],
+            bin_ranges: spectrum_bin_ranges(sample_rate),
             input_len: 0,
             adaptive_max: [ADAPTIVE_LEVEL_INITIAL; SPECTRUM_BAND_COUNT],
         }
@@ -88,18 +91,65 @@ impl SpectrumAnalyzer {
         self.input[self.input_len] = sample;
         self.input_len += 1;
         if self.input_len == FFT_LEN {
-            update_spectrum(
-                &mut self.input,
-                &self.fft,
-                &mut self.output,
-                &mut self.adaptive_max,
-                spectrum,
-                gate,
-                gate_override,
-            );
+            self.update_spectrum(spectrum, gate, gate_override);
             self.input_len = 0;
         }
     }
+
+    fn update_spectrum(
+        &mut self,
+        spectrum: &Mutex<[f32; SPECTRUM_BAND_COUNT]>,
+        gate: &AtomicF32,
+        gate_override: &AtomicF32,
+    ) {
+        if !analysis_enabled(gate, gate_override) {
+            if let Ok(mut spectrum) = spectrum.try_lock() {
+                *spectrum = [0.0; SPECTRUM_BAND_COUNT];
+            }
+            return;
+        }
+        if let Err(error) = self.fft.process(&mut self.input, &mut self.output) {
+            log::warn!("FFT processing failed: {error:?}");
+            for value in &mut self.adaptive_max {
+                *value = *value * ADAPTIVE_LEVEL_DECAY
+                    + ADAPTIVE_LEVEL_FLOOR * ADAPTIVE_LEVEL_LEARNING_RATE;
+            }
+            return;
+        }
+        let effective_gate = gate.get() * gate_override.get();
+        let mut raw_bins = [0.0f32; SPECTRUM_BAND_COUNT];
+        for (band, (start, end)) in self.bin_ranges.iter().enumerate() {
+            let sum = self.output[*start..*end]
+                .iter()
+                .map(|value| value.norm())
+                .sum::<f32>();
+            let average = sum / (*end - *start) as f32;
+            self.adaptive_max[band] = self.adaptive_max[band] * ADAPTIVE_LEVEL_DECAY
+                + average.max(ADAPTIVE_LEVEL_FLOOR) * ADAPTIVE_LEVEL_LEARNING_RATE;
+            raw_bins[band] = (average / (self.adaptive_max[band] * SPECTRUM_NORMALIZATION_GAIN)
+                * effective_gate)
+                .clamp(0.0, 1.0);
+        }
+        let mut final_bins = [0.0f32; SPECTRUM_BAND_COUNT];
+        for (output_band, (input_band, gain)) in SPECTRUM_OUTPUT_MAPPING.iter().enumerate() {
+            final_bins[output_band] = raw_bins[*input_band] * gain;
+        }
+        if let Ok(mut spectrum) = spectrum.try_lock() {
+            *spectrum = final_bins;
+        }
+    }
+}
+
+fn spectrum_bin_ranges(sample_rate: u32) -> [(usize, usize); SPECTRUM_BAND_COUNT] {
+    let sample_rate = sample_rate.max(1) as f32;
+    let bin_count = FFT_LEN / 2 + 1;
+    std::array::from_fn(|band| {
+        let scale = FFT_REFERENCE_SAMPLE_RATE as f32 / sample_rate;
+        let start = (FFT_BIN_RANGES[band].0 as f32 * scale).round() as usize;
+        let end = (FFT_BIN_RANGES[band].1 as f32 * scale).round() as usize;
+        let start = start.clamp(1, bin_count - 1);
+        (start, end.clamp(start + 1, bin_count))
+    })
 }
 
 struct ProcessCaptureContext {
@@ -401,7 +451,7 @@ impl AudioProcessor {
             let mut active_process_id = 0;
             let mut unavailable_process_id = None;
             let mut retry_after = Instant::now();
-            let mut analyzer = SpectrumAnalyzer::new();
+            let mut analyzer = SpectrumAnalyzer::new(LOOPBACK_SAMPLE_RATE as u32);
 
             while !context.cancel.is_cancelled() && context.is_current() {
                 let process_id = context.target_process_id.load(Ordering::Relaxed);
@@ -641,9 +691,14 @@ fn capture_process_audio(
                     .is_some_and(|frame_count| frame_count > 0);
                 if !newer_packet_pending && analysis_enabled(&context.gate, &context.gate_override)
                 {
-                    for sample in bytes[..bytes_read].as_chunks::<4>().0 {
+                    for frame in bytes[..bytes_read]
+                        .as_chunks::<PROCESS_CAPTURE_BYTES_PER_FRAME>()
+                        .0
+                    {
+                        let left = f32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]);
+                        let right = f32::from_le_bytes([frame[4], frame[5], frame[6], frame[7]]);
                         analyzer.push_sample(
-                            f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]),
+                            (left + right) * 0.5,
                             &context.spectrum,
                             &context.gate,
                             &context.gate_override,
@@ -758,7 +813,8 @@ where
     T: cpal::SizedSample + Copy,
     f32: FromSample<T>,
 {
-    let mut analyzer = SpectrumAnalyzer::new();
+    let channels = usize::from(config.channels.max(1));
+    let mut analyzer = SpectrumAnalyzer::new(config.sample_rate);
 
     device.build_input_stream(
         *config,
@@ -773,9 +829,11 @@ where
                 reset_spectrum(&mut analyzer, &context.spectrum);
                 return;
             }
-            for &sample in data {
+            for frame in data.chunks_exact(channels) {
+                let sample =
+                    frame.iter().copied().map(f32::from_sample).sum::<f32>() / channels as f32;
                 analyzer.push_sample(
-                    f32::from_sample(sample),
+                    sample,
                     &context.spectrum,
                     &context.gate,
                     &context.gate_override,
@@ -802,53 +860,6 @@ where
         },
         None,
     )
-}
-
-fn update_spectrum(
-    input: &mut [f32],
-    fft: &Arc<dyn realfft::RealToComplex<f32>>,
-    output: &mut [realfft::num_complex::Complex32],
-    adaptive_max: &mut [f32; SPECTRUM_BAND_COUNT],
-    spectrum_arc: &Arc<Mutex<[f32; SPECTRUM_BAND_COUNT]>>,
-    gate_clone: &Arc<AtomicF32>,
-    gate_override_clone: &Arc<AtomicF32>,
-) {
-    if !analysis_enabled(gate_clone, gate_override_clone) {
-        if let Ok(mut spectrum) = spectrum_arc.try_lock() {
-            *spectrum = [0.0; SPECTRUM_BAND_COUNT];
-        }
-        return;
-    }
-    if let Err(e) = fft.process(input, output) {
-        log::warn!("FFT processing failed: {e:?}");
-        // Feed the floor value into adaptive_max to prevent slow baseline decay
-        // when FFT frames are intermittently dropped.
-        for v in adaptive_max.iter_mut() {
-            *v = *v * ADAPTIVE_LEVEL_DECAY + ADAPTIVE_LEVEL_FLOOR * ADAPTIVE_LEVEL_LEARNING_RATE;
-        }
-        return;
-    }
-    let effective_gate = gate_clone.get() * gate_override_clone.get();
-    let mut raw_bins = [0.0f32; SPECTRUM_BAND_COUNT];
-    for (band, (start, end)) in FFT_BIN_RANGES.iter().enumerate() {
-        let sum = output[*start..*end]
-            .iter()
-            .map(|value| value.norm())
-            .sum::<f32>();
-        let avg = sum / (*end - *start) as f32;
-        adaptive_max[band] = adaptive_max[band] * ADAPTIVE_LEVEL_DECAY
-            + avg.max(ADAPTIVE_LEVEL_FLOOR) * ADAPTIVE_LEVEL_LEARNING_RATE;
-        raw_bins[band] = (avg / (adaptive_max[band] * SPECTRUM_NORMALIZATION_GAIN)
-            * effective_gate)
-            .clamp(0.0, 1.0);
-    }
-    let mut final_bins = [0.0f32; SPECTRUM_BAND_COUNT];
-    for (output_band, (input_band, gain)) in SPECTRUM_OUTPUT_MAPPING.iter().enumerate() {
-        final_bins[output_band] = raw_bins[*input_band] * gain;
-    }
-    if let Ok(mut s) = spectrum_arc.try_lock() {
-        *s = final_bins;
-    }
 }
 
 fn analysis_enabled(gate: &AtomicF32, gate_override: &AtomicF32) -> bool {

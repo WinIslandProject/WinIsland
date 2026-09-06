@@ -1,9 +1,16 @@
+use std::fs;
+use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::core::config::{
     AppConfig, MAX_HIDDEN_WIDTH, MIN_HIDDEN_WIDTH, WIDGET_GRID_SLOTS, ensure_settings_widget,
     normalize_compact_widget_layout,
 };
-use std::fs;
-use std::path::PathBuf;
+
+static NEXT_CONFIG_WRITE_ID: AtomicU64 = AtomicU64::new(1);
+
 pub fn get_config_path() -> PathBuf {
     let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push(".winisland");
@@ -16,56 +23,83 @@ pub fn get_config_path() -> PathBuf {
 pub fn load_config() -> AppConfig {
     let path = get_config_path();
     let mut migrated = false;
-    let mut config: AppConfig = if let Ok(content) = fs::read_to_string(&path)
-        && let Ok(mut config) = toml::from_str::<AppConfig>(&content)
-    {
-        if let Ok(table) = toml::from_str::<toml::Table>(&content) {
-            if !table.contains_key("expanded_scale") {
-                config.expanded_scale = config.compact_scale;
-                migrated = true;
-            }
-            if let Some(fully_hide) = table.get("fully_hide").and_then(toml::Value::as_bool) {
-                if !table.contains_key("hidden_width") && fully_hide {
-                    config.hidden_width = MIN_HIDDEN_WIDTH;
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            log::info!("Config file not found, using defaults");
+            let default = AppConfig::default();
+            save_config(&default);
+            return default;
+        }
+        Err(error) => {
+            log::error!("Cannot read config '{}': {error}", path.display());
+            return AppConfig::default();
+        }
+    };
+    let mut config = match toml::from_str::<AppConfig>(&content) {
+        Ok(config) => config,
+        Err(error) => {
+            log::error!("Cannot parse config '{}': {error}", path.display());
+            match preserve_invalid_config(&path) {
+                Ok(backup) => {
+                    log::warn!(
+                        "Invalid config preserved at '{}'; using defaults",
+                        backup.display()
+                    );
+                    let default = AppConfig::default();
+                    save_config(&default);
+                    return default;
                 }
-                migrated = true;
-            }
-            if !table.contains_key("lyrics_mode") {
-                config.lyrics_mode = if config
-                    .lyrics_local_dir
-                    .as_deref()
-                    .is_some_and(|dir| !dir.trim().is_empty())
-                {
-                    "lrc"
-                } else {
-                    "online"
-                }
-                .to_string();
-                migrated = true;
-            }
-            if let Some(entries) = table
-                .get("compact_widget_layout")
-                .and_then(toml::Value::as_array)
-            {
-                for (entry, raw_entry) in config.compact_widget_layout.iter_mut().zip(entries) {
-                    if raw_entry
-                        .as_table()
-                        .is_some_and(|table| !table.contains_key("alignment"))
-                    {
-                        entry.alignment =
-                            crate::core::config::CompactWidgetAlignment::legacy_slot(entry.slot);
-                        migrated = true;
-                    }
+                Err(backup_error) => {
+                    log::error!(
+                        "Cannot preserve invalid config '{}': {backup_error}",
+                        path.display()
+                    );
+                    return AppConfig::default();
                 }
             }
         }
-        config
-    } else {
-        log::info!("Config file not found, using defaults");
-        let default = AppConfig::default();
-        save_config(&default);
-        return default;
     };
+    if let Ok(table) = toml::from_str::<toml::Table>(&content) {
+        if !table.contains_key("expanded_scale") {
+            config.expanded_scale = config.compact_scale;
+            migrated = true;
+        }
+        if let Some(fully_hide) = table.get("fully_hide").and_then(toml::Value::as_bool) {
+            if !table.contains_key("hidden_width") && fully_hide {
+                config.hidden_width = MIN_HIDDEN_WIDTH;
+            }
+            migrated = true;
+        }
+        if !table.contains_key("lyrics_mode") {
+            config.lyrics_mode = if config
+                .lyrics_local_dir
+                .as_deref()
+                .is_some_and(|dir| !dir.trim().is_empty())
+            {
+                "lrc"
+            } else {
+                "online"
+            }
+            .to_string();
+            migrated = true;
+        }
+        if let Some(entries) = table
+            .get("compact_widget_layout")
+            .and_then(toml::Value::as_array)
+        {
+            for (entry, raw_entry) in config.compact_widget_layout.iter_mut().zip(entries) {
+                if raw_entry
+                    .as_table()
+                    .is_some_and(|table| !table.contains_key("alignment"))
+                {
+                    entry.alignment =
+                        crate::core::config::CompactWidgetAlignment::legacy_slot(entry.slot);
+                    migrated = true;
+                }
+            }
+        }
+    }
     config.compact_scale = config.compact_scale.clamp(0.5, 5.0);
     config.expanded_scale = config.expanded_scale.clamp(0.5, 5.0);
     config.base_width = config.base_width.clamp(40.0, 400.0);
@@ -117,10 +151,67 @@ pub fn load_config() -> AppConfig {
     }
     config
 }
+
 pub fn save_config(config: &AppConfig) {
     let path = get_config_path();
-    if let Ok(content) = toml::to_string_pretty(config) {
-        let _ = fs::write(&path, content);
+    let content = match toml::to_string_pretty(config) {
+        Ok(content) => content,
+        Err(error) => {
+            log::error!("Cannot serialize config: {error}");
+            return;
+        }
+    };
+    if let Err(error) = write_config_atomically(&path, content.as_bytes()) {
+        log::error!("Cannot save config '{}': {error}", path.display());
+    } else {
         log::info!("Config saved to: {}", path.display());
     }
+}
+
+fn preserve_invalid_config(path: &Path) -> std::io::Result<PathBuf> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let id = NEXT_CONFIG_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+    let backup = path.with_file_name(format!(
+        "config.invalid-{timestamp}-{}-{id}.toml",
+        std::process::id()
+    ));
+    fs::copy(path, &backup)?;
+    Ok(backup)
+}
+
+fn write_config_atomically(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let (temporary, mut file) = create_config_temp_file(path)?;
+    let result = (|| {
+        file.write_all(content)?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn create_config_temp_file(path: &Path) -> std::io::Result<(PathBuf, fs::File)> {
+    for _ in 0..16 {
+        let id = NEXT_CONFIG_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary =
+            path.with_file_name(format!(".config.toml.tmp-{}-{id}", std::process::id()));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        ErrorKind::AlreadyExists,
+        "could not reserve a unique config temporary file",
+    ))
 }

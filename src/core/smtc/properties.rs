@@ -438,10 +438,12 @@ fn sync_timeline(
     };
     let timeline_changed = timeline.position_ms != info.last_smtc_pos;
     let drift_ms = timeline.position_ms.abs_diff(current_position);
-    let mut seek_guard_active = !track_changed
+    let had_seek_guard = !track_changed && info.seek_guard_until.is_some();
+    let mut seek_guard_active = had_seek_guard
         && info
             .seek_guard_until
             .is_some_and(|until| Instant::now() < until);
+    let mut seek_guard_expired = had_seek_guard && !seek_guard_active;
     if !seek_guard_active {
         info.seek_guard_until = None;
     } else if timeline.position_ms > 0
@@ -449,11 +451,13 @@ fn sync_timeline(
     {
         info.seek_guard_until = None;
         seek_guard_active = false;
+        seek_guard_expired = false;
     }
 
     let should_sync = track_changed
         || info.is_playing != update.is_playing
         || (timeline.position_ms > 0 && info.position_ms == 0)
+        || seek_guard_expired
         || (timeline_changed && (drift_ms > TIMELINE_DRIFT_THRESHOLD_MS || !update.is_playing));
     info.last_smtc_pos = timeline.position_ms;
     if !should_sync || seek_guard_active {

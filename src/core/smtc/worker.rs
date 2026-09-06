@@ -276,9 +276,23 @@ fn apply_seek_request(
         .unwrap_or_default();
     log::info!("SMTC: seek to {position_ms}ms");
     let ticks = position_ms as i64 * 10_000;
-    if let Err(error) = session.TryChangePlaybackPositionAsync(ticks) {
-        log::warn!("SMTC: failed to start seek: {error}");
-        return false;
+    let operation = match session.TryChangePlaybackPositionAsync(ticks) {
+        Ok(operation) => operation,
+        Err(error) => {
+            log::warn!("SMTC: failed to start seek: {error}");
+            return false;
+        }
+    };
+    match operation.join() {
+        Ok(true) => {}
+        Ok(false) => {
+            log::warn!("SMTC: media session rejected seek to {position_ms}ms");
+            return false;
+        }
+        Err(error) => {
+            log::warn!("SMTC: seek failed: {error}");
+            return false;
+        }
     }
     info_tx.send_if_modified(|info| {
         if info.source_app_id != source_app_id

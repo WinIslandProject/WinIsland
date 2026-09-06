@@ -1,6 +1,4 @@
 use crate::core::config::PluginWidgetId;
-use crate::plugin::types::WidgetDrawFnV1;
-
 #[derive(Clone)]
 pub struct PluginWidget {
     pub id: u64,
@@ -10,8 +8,6 @@ pub struct PluginWidget {
     pub span_rows: u32,
     pub title: String,
     pub body: String,
-    pub on_draw: Option<WidgetDrawFnV1>,
-    pub callback_data: usize,
 }
 
 impl PluginWidget {
