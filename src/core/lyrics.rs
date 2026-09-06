@@ -2,79 +2,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use base64::{Engine, engine::general_purpose::STANDARD};
 use encoding_rs::GBK;
 use fuzzengine::{PreprocessingOptions, partial_ratio, partial_token_set_ratio};
 use lrc::Lyrics;
-use serde_json::Value;
 
-use crate::core::config::{APP_HOMEPAGE, APP_VERSION};
-
-/// Check whether a search query is related to a song name.
-fn query_matches_song(query: &str, song_name: &str) -> bool {
-    let q = query.to_lowercase();
-    let n = song_name.to_lowercase();
-    if q.contains(&n) || n.contains(&q) {
-        return true;
-    }
-    let words: Vec<&str> = q
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() > 2)
-        .collect();
-    if words.is_empty() {
-        return false;
-    }
-    words.iter().any(|w| n.contains(w))
-}
-
-static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap()
-});
-
-const MOZILLA_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
-const MAX_LYRICS_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-
-fn winisland_ua() -> String {
-    format!("WinIsland/{APP_VERSION} ({APP_HOMEPAGE})")
-}
-
-async fn get_json(url: &str, user_agent: &str) -> Option<Value> {
-    get_json_request(HTTP_CLIENT.get(url).header("User-Agent", user_agent)).await
-}
-
-async fn get_json_with_referer(url: &str, user_agent: &str, referer: &str) -> Option<Value> {
-    get_json_request(
-        HTTP_CLIENT
-            .get(url)
-            .header("User-Agent", user_agent)
-            .header("Referer", referer),
-    )
-    .await
-}
-
-async fn get_json_request(request: reqwest::RequestBuilder) -> Option<Value> {
-    let mut response = request.send().await.ok()?;
-    if !response.status().is_success()
-        || response
-            .content_length()
-            .is_some_and(|length| length > MAX_LYRICS_RESPONSE_BYTES as u64)
-    {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.ok()? {
-        if bytes.len().saturating_add(chunk.len()) > MAX_LYRICS_RESPONSE_BYTES {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    serde_json::from_slice(&bytes).ok()
-}
+mod providers;
 
 #[derive(Clone, Default, Debug)]
 pub struct LyricLine {
@@ -87,6 +21,7 @@ pub struct LyricLine {
 #[derive(Clone, Debug)]
 struct LyricTiming {
     start_time_ms: u64,
+    end_time_ms: Option<u64>,
     end_byte: usize,
 }
 
@@ -155,10 +90,9 @@ impl LyricLine {
         let start_byte = index
             .checked_sub(1)
             .map_or(0, |previous| self.timings[previous].end_byte);
-        let end_time_ms = self
-            .timings
-            .get(index + 1)
-            .map(|next| next.start_time_ms)
+        let end_time_ms = timing
+            .end_time_ms
+            .or_else(|| self.timings.get(index + 1).map(|next| next.start_time_ms))
             .unwrap_or_else(|| {
                 let previous_duration = index
                     .checked_sub(1)
@@ -556,391 +490,33 @@ pub async fn fetch_lyrics(
             .flatten();
     }
 
-    if let Some(lyrics) = fetch_online_lyrics(source, title, artist, duration_secs).await {
+    log::info!("Lyrics: fetching '{title}' - '{artist}' from source '{source}'");
+    if let Some(lyrics) = providers::fetch(source, title, artist, duration_secs).await {
+        let word_synced = lyrics.iter().filter(|line| line.is_word_synced()).count();
+        log::info!(
+            "Lyrics: source '{source}' succeeded ({} lines, {word_synced} word-synced)",
+            lyrics.len()
+        );
+        log::logger().flush();
         return Some(lyrics);
     }
-    for fallback_source in fallback_sources(source) {
-        if let Some(lyrics) =
-            fetch_online_lyrics(fallback_source, title, artist, duration_secs).await
+    log::warn!(
+        "Lyrics: source '{source}' returned no lyrics for '{title}' - '{artist}', starting fallback"
+    );
+    for fallback_source in providers::fallback_sources(source) {
+        log::info!("Lyrics: trying fallback source '{fallback_source}'");
+        if let Some(lyrics) = providers::fetch(fallback_source, title, artist, duration_secs).await
         {
+            let word_synced = lyrics.iter().filter(|line| line.is_word_synced()).count();
+            log::warn!(
+                "Lyrics: fallback source '{fallback_source}' succeeded ({} lines, {word_synced} word-synced)",
+                lyrics.len()
+            );
+            log::logger().flush();
             return Some(lyrics);
         }
     }
     None
-}
-
-async fn fetch_online_lyrics(
-    source: &str,
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    match source {
-        "qq" => fetch_lyrics_qq(title, artist, duration_secs).await,
-        "kugou" => fetch_lyrics_kugou(title, artist, duration_secs).await,
-        "lrclib" => fetch_lyrics_lrclib(title, artist, duration_secs).await,
-        _ => fetch_lyrics_163(title, artist).await,
-    }
-}
-
-fn fallback_sources(source: &str) -> &'static [&'static str] {
-    match source {
-        "qq" => &["163", "kugou", "lrclib"],
-        "kugou" => &["163", "lrclib", "qq"],
-        "lrclib" => &["163", "kugou", "qq"],
-        _ => &["lrclib", "kugou", "qq"],
-    }
-}
-
-async fn fetch_lyrics_qq(
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    if let Some(lyrics) = fetch_lyrics_qq_inner(title, artist, duration_secs).await {
-        return Some(lyrics);
-    }
-    if artist.is_empty() {
-        None
-    } else {
-        fetch_lyrics_qq_inner(title, "", duration_secs).await
-    }
-}
-
-async fn fetch_lyrics_qq_inner(
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    let query = if artist.is_empty() {
-        title.to_string()
-    } else {
-        format!("{title} {artist}")
-    };
-    let search_url = format!(
-        "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&p=1&n=20&w={}",
-        url_encode(&query)
-    );
-    let search_json = get_json_with_referer(&search_url, MOZILLA_UA, "https://y.qq.com/").await?;
-    let songs = search_json
-        .get("data")?
-        .get("song")?
-        .get("list")?
-        .as_array()?;
-    let song = select_qq_song(songs, title, artist, duration_secs)?;
-    let song_mid = song.get("songmid")?.as_str()?;
-
-    let lyric_url = format!(
-        "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={song_mid}&format=json&nobase64=1&g_tk=5381"
-    );
-    let lyric_json = get_json_with_referer(&lyric_url, MOZILLA_UA, "https://y.qq.com/").await?;
-    if lyric_json.get("retcode").and_then(Value::as_i64) != Some(0) {
-        return None;
-    }
-    let lrc = lyric_json.get("lyric")?.as_str()?;
-    let translated_lrc = lyric_json
-        .get("trans")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let lines = parse_lyrics(lrc, translated_lrc);
-    (!lines.is_empty()).then(|| Arc::new(lines))
-}
-
-fn select_qq_song<'a>(
-    songs: &'a [Value],
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<&'a Value> {
-    let title_key = MatchKey::new(title);
-    let mut best = None;
-    let mut best_score = 0;
-    for song in songs {
-        let Some(song_name) = song.get("songname").and_then(Value::as_str) else {
-            continue;
-        };
-        if !query_matches_song(title, song_name) {
-            continue;
-        }
-        let exact_title = MatchKey::new(song_name).matches(&title_key);
-        let artist_match = song
-            .get("singer")
-            .and_then(Value::as_array)
-            .is_some_and(|singers| {
-                singers.iter().any(|singer| {
-                    singer
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .is_some_and(|singer| artist_matches(artist, singer))
-                })
-            });
-        let duration_match = duration_secs > 0
-            && song
-                .get("interval")
-                .and_then(Value::as_u64)
-                .is_some_and(|duration| duration.abs_diff(duration_secs) <= 5);
-        let score =
-            u8::from(exact_title) * 4 + u8::from(artist_match) * 2 + u8::from(duration_match);
-        if best.is_none() || score > best_score {
-            best = Some(song);
-            best_score = score;
-        }
-    }
-    best
-}
-
-async fn fetch_lyrics_163(title: &str, artist: &str) -> Option<Arc<Vec<LyricLine>>> {
-    if let Some(r) = fetch_lyrics_163_inner(title, artist).await {
-        return Some(r);
-    }
-    // Only retry without artist when one was originally given, otherwise the
-    // second call is identical to the first and we don't gain anything.
-    if !artist.is_empty() {
-        fetch_lyrics_163_inner(title, "").await
-    } else {
-        None
-    }
-}
-
-async fn fetch_lyrics_163_inner(title: &str, artist: &str) -> Option<Arc<Vec<LyricLine>>> {
-    let query = if artist.is_empty() {
-        title.to_string()
-    } else {
-        format!("{title} {artist}")
-    };
-    let url = format!(
-        "https://music.163.com/api/search/get/web?s={}&type=1&offset=0&total=true&limit=10",
-        url_encode(&query)
-    );
-
-    let json = get_json(
-        &url,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    )
-    .await?;
-
-    let songs = json.get("result")?.get("songs")?.as_array()?;
-    if songs.is_empty() {
-        return None;
-    }
-
-    let artist_lower = artist.to_lowercase();
-    let mut song_id: Option<i64> = None;
-
-    if !artist_lower.is_empty() {
-        for s in songs {
-            if let Some(artists) = s.get("artists").and_then(|a| a.as_array()) {
-                for a in artists {
-                    if let Some(name) = a.get("name").and_then(|n| n.as_str())
-                        && name.to_lowercase() == artist_lower
-                    {
-                        song_id = s.get("id").and_then(serde_json::Value::as_i64);
-                        break;
-                    }
-                }
-            }
-            if song_id.is_some() {
-                break;
-            }
-        }
-    }
-
-    if song_id.is_none() {
-        let first = songs.first()?;
-        // Before blindly accepting the first result, verify it has at least
-        // some relation to the original search query. Browser video titles
-        // (e.g. "How to build a PC") would otherwise match a random unrelated
-        // song on the platform.
-        if let Some(name) = first.get("name").and_then(|n| n.as_str())
-            && !query_matches_song(&query, name)
-        {
-            return None;
-        }
-        song_id = first.get("id")?.as_i64();
-    }
-
-    let id = song_id?;
-
-    let lyric_url = format!("https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=-1");
-
-    let lyric_json = get_json(&lyric_url, MOZILLA_UA).await?;
-
-    let lrc_str = lyric_json.get("lrc")?.get("lyric")?.as_str().unwrap_or("");
-    let tlrc_str = lyric_json
-        .get("tlyric")?
-        .get("lyric")?
-        .as_str()
-        .unwrap_or("");
-
-    Some(Arc::new(parse_lyrics(lrc_str, tlrc_str)))
-}
-
-async fn fetch_lyrics_lrclib(
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    if let Some(r) = fetch_lyrics_lrclib_inner(title, artist, duration_secs).await {
-        return Some(r);
-    }
-    fetch_lyrics_lrclib_search(title, artist).await
-}
-
-async fn fetch_lyrics_lrclib_inner(
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    let url = format!(
-        "https://lrclib.net/api/get?track_name={}&artist_name={}&duration={}",
-        url_encode(title),
-        url_encode(artist),
-        duration_secs
-    );
-
-    let json = get_json(&url, &winisland_ua()).await?;
-    let synced = json.get("syncedLyrics")?.as_str()?;
-
-    let lines = parse_lyrics(synced, "");
-    if lines.is_empty() {
-        None
-    } else {
-        Some(Arc::new(lines))
-    }
-}
-
-async fn fetch_lyrics_lrclib_search(title: &str, artist: &str) -> Option<Arc<Vec<LyricLine>>> {
-    let query = if artist.is_empty() {
-        title.to_string()
-    } else {
-        format!("{title} {artist}")
-    };
-    let url = format!("https://lrclib.net/api/search?q={}", url_encode(&query));
-
-    let json = get_json(&url, &winisland_ua()).await?;
-    let arr = json.as_array()?;
-
-    for item in arr {
-        if let Some(synced) = item.get("syncedLyrics").and_then(|s| s.as_str()) {
-            // Skip if the result seems unrelated to the original query
-            if let Some(name) = item.get("trackName").and_then(|n| n.as_str())
-                && !query_matches_song(&query, name)
-            {
-                continue;
-            }
-            let lines = parse_lyrics(synced, "");
-            if !lines.is_empty() {
-                return Some(Arc::new(lines));
-            }
-        }
-    }
-    None
-}
-
-async fn fetch_lyrics_kugou(
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    if let Some(lyrics) = fetch_kugou_lyrics_by_keyword(title, artist, duration_secs).await {
-        return Some(lyrics);
-    }
-    fetch_kugou_lyrics_by_song_hash(title, artist).await
-}
-
-async fn fetch_kugou_lyrics_by_keyword(
-    title: &str,
-    artist: &str,
-    duration_secs: u64,
-) -> Option<Arc<Vec<LyricLine>>> {
-    let search_url = format!(
-        "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword={}&duration={}",
-        url_encode(title),
-        duration_secs.saturating_mul(1000)
-    );
-    let search_json = get_json(&search_url, MOZILLA_UA).await?;
-    let candidates = search_json.get("candidates")?.as_array()?;
-    let candidate = select_kugou_lyric_candidate(candidates, title, artist)?;
-    download_kugou_lyrics(candidate).await
-}
-
-async fn fetch_kugou_lyrics_by_song_hash(title: &str, artist: &str) -> Option<Arc<Vec<LyricLine>>> {
-    let song_search_url = format!(
-        "https://songsearch.kugou.com/song_search_v2?keyword={}&page=1&pagesize=20&platform=WebFilter&filter=2&iscorrection=1&privilege_filter=0",
-        url_encode(title)
-    );
-    let song_search_json = get_json(&song_search_url, MOZILLA_UA).await?;
-    let songs = song_search_json.get("data")?.get("lists")?.as_array()?;
-    let song = select_kugou_song(songs, title, artist)?;
-    let hash = song.get("FileHash")?.as_str()?;
-
-    let lyrics_search_url =
-        format!("https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&hash={hash}");
-    let lyrics_search_json = get_json(&lyrics_search_url, MOZILLA_UA).await?;
-    let candidates = lyrics_search_json.get("candidates")?.as_array()?;
-    let candidate = select_kugou_lyric_candidate(candidates, title, artist)?;
-    download_kugou_lyrics(candidate).await
-}
-
-fn select_kugou_lyric_candidate<'a>(
-    candidates: &'a [Value],
-    title: &str,
-    artist: &str,
-) -> Option<&'a Value> {
-    let matches_title = |candidate: &&Value| {
-        candidate
-            .get("song")
-            .and_then(Value::as_str)
-            .is_some_and(|song| query_matches_song(title, song))
-    };
-    candidates
-        .iter()
-        .filter(matches_title)
-        .find(|candidate| {
-            candidate
-                .get("singer")
-                .and_then(Value::as_str)
-                .is_some_and(|singer| artist_matches(artist, singer))
-        })
-        .or_else(|| candidates.iter().find(matches_title))
-}
-
-fn select_kugou_song<'a>(songs: &'a [Value], title: &str, artist: &str) -> Option<&'a Value> {
-    let matches_title = |song: &&Value| {
-        song.get("SongName")
-            .and_then(Value::as_str)
-            .is_some_and(|song_name| query_matches_song(title, song_name))
-    };
-    songs
-        .iter()
-        .filter(matches_title)
-        .find(|song| {
-            song.get("SingerName")
-                .and_then(Value::as_str)
-                .is_some_and(|singer| artist_matches(artist, singer))
-        })
-        .or_else(|| songs.iter().find(matches_title))
-}
-
-async fn download_kugou_lyrics(candidate: &Value) -> Option<Arc<Vec<LyricLine>>> {
-    let id = candidate.get("id")?.as_str()?;
-    let access_key = candidate.get("accesskey")?.as_str()?;
-
-    let download_url = format!(
-        "https://lyrics.kugou.com/download?ver=1&client=pc&id={id}&accesskey={access_key}&fmt=lrc&charset=utf8"
-    );
-    let download_json = get_json(&download_url, MOZILLA_UA).await?;
-    let content = download_json.get("content")?.as_str()?;
-    let decoded = STANDARD.decode(content).ok()?;
-    let lrc = std::str::from_utf8(&decoded).ok()?;
-    let lines = parse_lyrics(lrc, "");
-    (!lines.is_empty()).then(|| Arc::new(lines))
-}
-
-fn artist_matches(artist: &str, singer: &str) -> bool {
-    let artist = artist.trim().to_lowercase();
-    let singer = singer.trim().to_lowercase();
-    !artist.is_empty() && (artist.contains(&singer) || singer.contains(&artist))
 }
 
 fn parse_lyrics(lrc: &str, tlrc: &str) -> Vec<LyricLine> {
@@ -1039,6 +615,7 @@ fn parse_word_synced_line(line: &str) -> Option<LyricLine> {
         text.push_str(segment);
         timings.push(LyricTiming {
             start_time_ms,
+            end_time_ms: None,
             end_byte: text.len(),
         });
     }
@@ -1133,22 +710,4 @@ fn normalize_lrc_timestamps(content: &str) -> String {
         output.push_str(&content[copied_until..]);
         output
     }
-}
-
-fn url_encode(input: &str) -> String {
-    let mut output = String::new();
-    for b in input.bytes() {
-        match b {
-            b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'-' | b'_' | b'.' | b'~' => {
-                output.push(b as char);
-            }
-            b' ' => {
-                output.push_str("%20");
-            }
-            _ => {
-                output.push_str(&format!("%{b:02X}"));
-            }
-        }
-    }
-    output
 }

@@ -17,6 +17,7 @@ dependencies = [
  "log",
  "lrc",
  "pulldown-cmark",
+ "quick-xml",
  "realfft",
  "reqwest",
  "rfd",

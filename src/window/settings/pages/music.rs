@@ -94,6 +94,7 @@ impl SettingsApp {
                         tr("lyrics_source_lrclib"),
                         self.config.lyrics_source == "lrclib",
                     ),
+                    ("AMLL".to_string(), self.config.lyrics_source == "amll"),
                 ],
                 show_lyrics,
                 MusicAction::LyricsSource,
@@ -260,14 +261,16 @@ impl SettingsApp {
                     tr("lyrics_source_qq"),
                     tr("lyrics_source_kugou"),
                     tr("lyrics_source_lrclib"),
+                    "AMLL".to_string(),
                 ],
                 vec![
                     "163".to_string(),
                     "qq".to_string(),
                     "kugou".to_string(),
                     "lrclib".to_string(),
+                    "amll".to_string(),
                 ],
-                ["163", "qq", "kugou", "lrclib"]
+                ["163", "qq", "kugou", "lrclib", "amll"]
                     .iter()
                     .position(|source| *source == self.config.lyrics_source)
                     .unwrap_or_default(),
