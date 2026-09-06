@@ -510,9 +510,13 @@ fn draw_highlighted_lyric(
 
     let font_manager = FontManager::global();
     let style = skia_safe::FontStyle::normal();
-    let completed_width =
-        font_manager.measure_text_cached(&text[..highlight.start_byte], size, style);
-    let active_width = font_manager.measure_text_cached(&text[..highlight.end_byte], size, style);
+    let (completed_width, active_width) = font_manager.measure_text_prefixes_cached(
+        text,
+        highlight.start_byte,
+        highlight.end_byte,
+        size,
+        style,
+    );
     let draw_layer = |paint: &Paint, clip_left: f32, clip_right: f32| {
         if clip_right <= clip_left {
             return;

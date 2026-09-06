@@ -392,6 +392,7 @@ impl App {
             self.audio.set_gate_override(false);
             if !self.last_media_title.is_empty() {
                 self.last_media_title.clear();
+                crate::utils::font::FontManager::global().clear_text_caches();
                 crate::ui::expanded::music_view::clear_cover_cache();
                 crate::utils::backdrop::clear_blurred_cover_cache();
             }
@@ -399,6 +400,7 @@ impl App {
         let track_changed = music_active && title != self.last_media_title;
         if track_changed {
             log::info!("Track changed: {title} - {artist} / {album}");
+            crate::utils::font::FontManager::global().clear_text_caches();
             self.last_media_title = title;
             crate::ui::expanded::music_view::trigger_cover_flip();
             window.request_redraw();
@@ -749,7 +751,6 @@ impl App {
             || self.right_press_cursor.is_some();
 
         if !animation_active
-            && !playback_active
             && !interactive_active
             && self.settings.is_none()
             && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL

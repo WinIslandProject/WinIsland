@@ -11,6 +11,7 @@ type TextGroups = Vec<TextGroup>;
 type TextCacheValue = (f32, TextGroups);
 type TextCacheMap = HashMap<u64, TextCacheValue>;
 type TextPathCacheMap = HashMap<u64, Vec<Path>>;
+type TextPrefixCacheMap = HashMap<u64, Vec<(usize, f32)>>;
 
 pub struct DrawTextInRectParams<'a> {
     pub canvas: &'a Canvas,
@@ -48,6 +49,7 @@ thread_local! {
     static FALLBACK_CACHE: RefCell<HashMap<(char, u32), Typeface>> = RefCell::new(HashMap::new());
     static TEXT_CACHE: RefCell<TextCacheMap> = RefCell::new(HashMap::new());
     static TEXT_PATH_CACHE: RefCell<TextPathCacheMap> = RefCell::new(HashMap::new());
+    static TEXT_PREFIX_CACHE: RefCell<TextPrefixCacheMap> = RefCell::new(HashMap::new());
     static CUSTOM_TYPEFACE: RefCell<CustomTypefaceState> = const { RefCell::new(CustomTypefaceState {
         path: None,
         typeface: None,
@@ -58,6 +60,8 @@ thread_local! {
 const FALLBACK_CACHE_LIMIT: usize = 2000;
 const TEXT_CACHE_LIMIT: usize = 500;
 const TEXT_PATH_CACHE_LIMIT: usize = 100;
+const TEXT_PREFIX_CACHE_LIMIT: usize = 100;
+const TEXT_PREFIX_WIDTH_LIMIT: usize = 256;
 
 fn evict_one_if_full<K, V>(cache: &mut HashMap<K, V>, limit: usize)
 where
@@ -273,9 +277,14 @@ impl FontManager {
             state.typeface = None;
             state.load_attempted = false;
         });
+        self.clear_text_caches();
+        FALLBACK_CACHE.with(|cache| cache.borrow_mut().clear());
+    }
+
+    pub fn clear_text_caches(&self) {
         TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
         TEXT_PATH_CACHE.with(|cache| cache.borrow_mut().clear());
-        FALLBACK_CACHE.with(|cache| cache.borrow_mut().clear());
+        TEXT_PREFIX_CACHE.with(|cache| cache.borrow_mut().clear());
     }
 
     pub fn get_font(&self, size: f32, bold: bool) -> Font {
@@ -337,6 +346,39 @@ impl FontManager {
                 (width, groups)
             });
             entry.0
+        })
+    }
+
+    pub fn measure_text_prefixes_cached(
+        &self,
+        text: &str,
+        first_end: usize,
+        second_end: usize,
+        size: f32,
+        style: FontStyle,
+    ) -> (f32, f32) {
+        let cache_key = hash_cache_key(text, style, size);
+        TEXT_PREFIX_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if !cache.contains_key(&cache_key) {
+                evict_one_if_full(&mut cache, TEXT_PREFIX_CACHE_LIMIT);
+            }
+            let widths = cache.entry(cache_key).or_default();
+            let mut width_at = |end: usize| {
+                if end == 0 {
+                    return 0.0;
+                }
+                if let Some((_, width)) = widths.iter().find(|(cached_end, _)| *cached_end == end) {
+                    return *width;
+                }
+                let width = compute_text_groups(&text[..end], size, style).0;
+                if widths.len() >= TEXT_PREFIX_WIDTH_LIMIT {
+                    widths.remove(0);
+                }
+                widths.push((end, width));
+                width
+            };
+            (width_at(first_end), width_at(second_end))
         })
     }
 
