@@ -537,15 +537,10 @@ fn draw_highlighted_lyric(
     draw_layer(active_paint, x, x + completed_width);
 
     let progress = highlight.progress.clamp(0.0, 1.0);
-    let interpolate = |pending: u8, active: u8| {
-        (pending as f32 + (active as f32 - pending as f32) * progress).round() as u8
-    };
-    let mut current_paint = active_paint.clone();
-    current_paint.set_color(Color::from_argb(
-        active_color.a(),
-        interpolate(PENDING_LYRIC_CHANNEL, active_color.r()),
-        interpolate(PENDING_LYRIC_CHANNEL, active_color.g()),
-        interpolate(PENDING_LYRIC_CHANNEL, active_color.b()),
-    ));
-    draw_layer(&current_paint, x + completed_width, x + active_width);
+    let current_width = (active_width - completed_width) * progress;
+    draw_layer(
+        active_paint,
+        x + completed_width,
+        x + completed_width + current_width,
+    );
 }

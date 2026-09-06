@@ -93,7 +93,10 @@ fn select_candidate<'a>(items: &'a [Value], title: &str, artist: &str) -> Option
                             .is_some_and(|name| artist_matches(artist, name))
                     })
                 });
-        let score = u8::from(artist_match) * 4 + u8::from(exact_title) * 2;
+        if !artist_match {
+            continue;
+        }
+        let score = u8::from(exact_title);
         if best.is_none_or(|(best_score, _)| score > best_score) {
             best = Some((score, item));
         }
