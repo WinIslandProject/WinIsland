@@ -122,7 +122,7 @@ impl App {
             let w = self.springs.w.value as f64;
             let h = self.springs.h.value as f64;
             let page_shift = view_val * w;
-            let scale = self.config.global_scale as f64;
+            let scale = self.config.expanded_scale as f64;
 
             if view_val < 0.5 {
                 let media = self.current_media_info().clone();
@@ -134,7 +134,7 @@ impl App {
                     island_y as f32,
                     w as f32,
                     h as f32,
-                    self.config.global_scale,
+                    self.config.expanded_scale,
                     &self.config.expanded_cover_shape,
                 );
                 let cx = rel_x as f32 - (page_shift as f32);
@@ -156,7 +156,7 @@ impl App {
                     island_y as f32,
                     w as f32,
                     h as f32,
-                    self.config.global_scale,
+                    self.config.expanded_scale,
                     &self.config.expanded_cover_shape,
                 );
                 if music_on
@@ -177,7 +177,7 @@ impl App {
                     island_y as f32,
                     w as f32,
                     h as f32,
-                    self.config.global_scale,
+                    self.config.expanded_scale,
                     &self.config.expanded_cover_shape,
                 );
                 if music_on
@@ -199,7 +199,7 @@ impl App {
                     w as f32,
                     &media,
                     music_on,
-                    self.config.global_scale,
+                    self.config.expanded_scale,
                     &self.config.expanded_cover_shape,
                 ) && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_SEEK)
                     && cx >= bar_left
@@ -235,7 +235,7 @@ impl App {
                             island_y as f32,
                             w as f32,
                             h as f32,
-                            self.config.global_scale,
+                            self.config.expanded_scale,
                         );
                         let (x, y, width, height) =
                             layout.footprint_rect(WidgetKind::Settings, entry.slot);
@@ -334,7 +334,7 @@ impl App {
         let widget_view = should_show_widget_view(self.music_page_available);
         let compact_height = self.compact_content_height();
         let interrupts_collapse = self.springs.h.value - compact_height
-            > 0.5 * self.config.global_scale
+            > 0.5 * self.config.compact_scale
             || self.springs.h.velocity.abs() > 0.001;
         self.widget_view = widget_view;
         if !interrupts_collapse {

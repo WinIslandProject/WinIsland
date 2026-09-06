@@ -25,7 +25,8 @@ pub struct LayoutParams {
     pub sigmas: (f32, f32),
     pub expansion_progress: f32,
     pub view_offset: f32,
-    pub global_scale: f32,
+    pub compact_scale: f32,
+    pub expanded_scale: f32,
     pub hide_progress: f32,
     pub island_x: f32,
     pub island_y: f32,
@@ -147,7 +148,7 @@ pub fn draw_island(
         params.compact_overlay.draw(
             canvas,
             rect,
-            layout.global_scale,
+            layout.compact_scale,
             1.0 - layout.hide_progress,
         );
     } else {
@@ -173,6 +174,8 @@ fn draw_background_layer(
 ) {
     let layout = &params.layout;
     let window = &params.window;
+    let effect_scale = layout.compact_scale
+        + (layout.expanded_scale - layout.compact_scale) * layout.expansion_progress;
     draw_background(BackgroundParams {
         canvas,
         direct_context,
@@ -186,7 +189,7 @@ fn draw_background_layer(
         offset_y: layout.island_y,
         current_w: layout.current_w,
         current_h: layout.current_h,
-        global_scale: layout.global_scale,
+        global_scale: effect_scale,
         monitor_x: window.monitor_x,
         monitor_y: window.monitor_y,
         monitor_w: window.monitor_w,
@@ -217,7 +220,7 @@ fn draw_expanded_layer(
         media: media.media,
         music_active: media.music_active,
         available_controls: media.available_controls,
-        global_scale: layout.global_scale,
+        global_scale: layout.expanded_scale,
         expansion_progress: layout.expansion_progress,
         viz_h_scale: visualizer_height_scale,
         use_blur: style.use_blur,
@@ -258,14 +261,14 @@ fn draw_compact_layer(
         center_occupied || has_mini_content,
         has_mini_content,
     );
-    let left_extension = left_extension * layout.global_scale;
-    let right_extension = right_extension * layout.global_scale;
+    let left_extension = left_extension * layout.compact_scale;
+    let right_extension = right_extension * layout.compact_scale;
     draw_mini_content(MiniContentParams {
         canvas,
         content: visible_mini_content,
         mini_alpha: alpha,
         current_w: (layout.current_w - left_extension - right_extension).max(0.0),
-        global_scale: layout.global_scale,
+        global_scale: layout.compact_scale,
         media: params.media.media,
         offset_x: layout.island_x + left_extension,
         stable_offset_y: layout.stable_island_y,
@@ -293,7 +296,7 @@ fn draw_compact_layer(
             layout.current_w,
             layout.base_h,
         ),
-        layout.global_scale,
+        layout.compact_scale,
         (alpha * f32::from(u8::MAX)) as u8,
         has_mini_content,
     );

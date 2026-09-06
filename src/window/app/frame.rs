@@ -506,13 +506,13 @@ impl App {
                 self.springs.w.value,
                 self.current_media_info(),
                 music_active,
-                self.config.global_scale,
+                self.config.expanded_scale,
                 &self.config.expanded_cover_shape,
             ) {
                 let page_shift = self.springs.view.value * self.springs.w.value;
                 let cx = rel_x as f32 - page_shift;
                 let cy = rel_y as f32;
-                let margin = 4.0 * self.config.global_scale;
+                let margin = 4.0 * self.config.expanded_scale;
                 cx >= bar_left - margin
                     && cx <= bar_right + margin
                     && cy >= bar_top - margin
@@ -638,7 +638,7 @@ impl App {
         let lyric_target_w = self.compute_lyric_target_width(window, music_active, is_paused, dt);
         let compact_widget_target_w =
             if !self.expanded && !self.compact_overlay.is_visible() && !self.is_width_hiding() {
-                let scale = self.config.global_scale.max(f32::EPSILON);
+                let scale = self.config.compact_scale.max(f32::EPSILON);
                 let has_mini_content = self.ctx_mgr.current_mini().is_some();
                 let center_content_width = has_mini_content.then_some(lyric_target_w / scale);
                 crate::ui::widget::compact::target_width(
@@ -651,19 +651,19 @@ impl App {
             };
         let compact_content_h = self.compact_content_height();
         let default_target_h = if self.expanded {
-            self.config.expanded_height * self.config.global_scale
+            self.config.expanded_height * self.config.expanded_scale
         } else {
             compact_content_h
         };
         let default_target_r = if self.expanded {
-            32.0 * self.config.global_scale
+            32.0 * self.config.expanded_scale
         } else {
             compact_content_h / 2.0
         };
         let (target_w, target_h, target_r) = if let Some(size) = self.compact_overlay.target_size(
             self.config.base_width,
             self.config.base_height,
-            self.config.global_scale,
+            self.config.compact_scale,
         ) {
             (size.width, size.height, size.height / 2.0)
         } else {
@@ -688,7 +688,7 @@ impl App {
             let progress = 1.0 - 0.78_f32.powf(dt);
             self.springs.w.value += (target_w - self.springs.w.value) * progress;
             self.springs.w.velocity = 0.0;
-            if (target_w - self.springs.w.value).abs() <= 0.25 * self.config.global_scale {
+            if (target_w - self.springs.w.value).abs() <= 0.25 * self.config.compact_scale {
                 self.springs.w.value = target_w;
                 self.restoring_hide_width = false;
             }

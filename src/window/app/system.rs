@@ -10,7 +10,6 @@ use winit::event_loop::ActiveEventLoop;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::core::config::{MAX_LYRIC_WIDTH, PADDING};
 use crate::core::persistence::{get_config_path, load_config};
 use crate::plugin::marketplace::{self, MarketplacePlugin};
 use crate::plugin::zip_loader;
@@ -376,7 +375,10 @@ impl App {
                 self.last_config_modified = modified;
                 let current_config = load_config();
                 if current_config != self.config {
-                    let old_scale = self.config.global_scale;
+                    let old_compact_scale = self.config.compact_scale;
+                    let old_expanded_scale = self.config.expanded_scale;
+                    let old_base_w = self.config.base_width;
+                    let old_base_h = self.config.base_height;
                     let old_max_w = self.config.expanded_width;
                     let old_max_h = self.config.expanded_height;
                     let old_style = self.config.island_style.clone();
@@ -441,28 +443,23 @@ impl App {
                             .set_custom_font_path(self.config.custom_font_path.as_deref());
                     }
 
-                    let compact_max_w = crate::ui::widget::compact::target_width(
-                        &self.config.compact_widget_layout,
-                        self.config.base_width,
-                        Some(MAX_LYRIC_WIDTH),
-                    );
-                    let max_w = self.config.expanded_width.max(compact_max_w);
-                    let new_os_w = (max_w * self.config.global_scale + PADDING) as u32;
-                    let new_os_h =
-                        (self.config.expanded_height * self.config.global_scale + PADDING) as u32;
-
-                    let size_changed = new_os_w != self.geom.os_w
-                        || new_os_h != self.geom.os_h
-                        || (old_scale - self.config.global_scale).abs() > 0.001
+                    let window_size = self.required_window_size();
+                    let surface_size_changed =
+                        window_size.width != self.geom.os_w || window_size.height != self.geom.os_h;
+                    let layout_size_changed = (old_compact_scale - self.config.compact_scale).abs()
+                        > 0.001
+                        || (old_expanded_scale - self.config.expanded_scale).abs() > 0.001
+                        || (old_base_w - self.config.base_width).abs() > 0.1
+                        || (old_base_h - self.config.base_height).abs() > 0.1
                         || (old_max_w - self.config.expanded_width).abs() > 0.1
                         || (old_max_h - self.config.expanded_height).abs() > 0.1;
                     let position_changed = old_position_x_offset != self.config.position_x_offset
                         || old_position_y_offset != self.config.position_y_offset
                         || old_monitor_index != self.config.monitor_index;
 
-                    if size_changed {
-                        self.geom.os_w = new_os_w;
-                        self.geom.os_h = new_os_h;
+                    if surface_size_changed {
+                        self.geom.os_w = window_size.width;
+                        self.geom.os_h = window_size.height;
                         let _ = window
                             .request_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h));
                         if let Some(renderer) = self.renderer.as_mut() {
@@ -477,7 +474,7 @@ impl App {
                         }
                     }
 
-                    if (size_changed || position_changed)
+                    if (layout_size_changed || surface_size_changed || position_changed)
                         && let Some(monitor) =
                             Self::get_target_monitor(window, self.config.monitor_index)
                     {

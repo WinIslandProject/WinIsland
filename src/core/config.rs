@@ -220,7 +220,10 @@ where
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AppConfig {
-    pub global_scale: f32,
+    #[serde(alias = "global_scale")]
+    pub compact_scale: f32,
+    #[serde(default = "default_expanded_scale")]
+    pub expanded_scale: f32,
     pub base_width: f32,
     pub base_height: f32,
     pub expanded_width: f32,
@@ -309,6 +312,7 @@ macro_rules! defaults {
 }
 
 defaults! {
+    default_expanded_scale: f32 = 1.0,
     default_replace_native_volume_flyout: bool = true,
     default_island_style: String = "default".to_string(),
     default_show_lyrics: bool = true,
@@ -711,7 +715,8 @@ pub fn place_builtin_widget(
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            global_scale: 1.0,
+            compact_scale: 1.0,
+            expanded_scale: default_expanded_scale(),
             base_width: 120.0,
             base_height: 27.0,
             expanded_width: 360.0,

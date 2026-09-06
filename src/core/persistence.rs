@@ -20,6 +20,10 @@ pub fn load_config() -> AppConfig {
         && let Ok(mut config) = toml::from_str::<AppConfig>(&content)
     {
         if let Ok(table) = toml::from_str::<toml::Table>(&content) {
+            if !table.contains_key("expanded_scale") {
+                config.expanded_scale = config.compact_scale;
+                migrated = true;
+            }
             if let Some(fully_hide) = table.get("fully_hide").and_then(toml::Value::as_bool) {
                 if !table.contains_key("hidden_width") && fully_hide {
                     config.hidden_width = MIN_HIDDEN_WIDTH;
@@ -62,7 +66,8 @@ pub fn load_config() -> AppConfig {
         save_config(&default);
         return default;
     };
-    config.global_scale = config.global_scale.clamp(0.5, 5.0);
+    config.compact_scale = config.compact_scale.clamp(0.5, 5.0);
+    config.expanded_scale = config.expanded_scale.clamp(0.5, 5.0);
     config.base_width = config.base_width.clamp(40.0, 400.0);
     config.base_height = config.base_height.clamp(15.0, 200.0);
     config.expanded_width = config.expanded_width.clamp(200.0, 2000.0);

@@ -325,9 +325,9 @@ struct IslandSprings {
 impl IslandSprings {
     fn new(config: &AppConfig) -> Self {
         Self {
-            w: Spring::new(config.base_width * config.global_scale),
-            h: Spring::new(config.base_height * config.global_scale),
-            r: Spring::new((config.base_height * config.global_scale) / 2.0),
+            w: Spring::new(config.base_width * config.compact_scale),
+            h: Spring::new(config.base_height * config.compact_scale),
+            r: Spring::new((config.base_height * config.compact_scale) / 2.0),
             view: Spring::new(0.0),
             hide: Spring::new(0.0),
             expanded_target: false,

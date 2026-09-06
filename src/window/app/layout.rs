@@ -6,12 +6,39 @@ use winit::platform::windows::WindowExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::core::config::{DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, TOP_OFFSET};
+use crate::core::config::{DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, PADDING, TOP_OFFSET};
 use crate::utils::font::FontManager;
 
 use super::{App, DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ, HideEdge, IslandLayout};
 
 impl App {
+    pub(super) fn required_window_size(&self) -> PhysicalSize<u32> {
+        let compact_scale = self.config.compact_scale;
+        let expanded_scale = self.config.expanded_scale;
+        let compact_width = crate::ui::widget::compact::target_width(
+            &self.config.compact_widget_layout,
+            self.config.base_width,
+            Some(MAX_LYRIC_WIDTH),
+        ) * compact_scale;
+        let compact_overlay = crate::ui::compact::CompactOverlay::maximum_size(
+            self.config.base_width,
+            self.config.base_height,
+            compact_scale,
+        );
+        let compact_lyric_height = if self.config.show_secondary_lyrics {
+            crate::core::render::mini_lyric_pair_height(self.config.font_size, compact_scale)
+        } else {
+            self.config.base_height * compact_scale
+        };
+        let width = compact_width
+            .max(compact_overlay.width)
+            .max(self.config.expanded_width * expanded_scale);
+        let height = compact_lyric_height
+            .max(compact_overlay.height)
+            .max(self.config.expanded_height * expanded_scale);
+        PhysicalSize::new((width + PADDING) as u32, (height + PADDING) as u32)
+    }
+
     pub(super) fn get_target_monitor(
         window: &Window,
         monitor_index: i32,
@@ -116,9 +143,9 @@ impl App {
         let dock_position = self.automatic_dock_position(mon_pos, mon_size);
         let (collapsed_center_x, collapsed_center_y) =
             self.collapsed_island_center(mon_pos, mon_size);
-        let scale = self.config.global_scale as f64;
-        let base_half_w = self.config.base_width as f64 * scale / 2.0;
-        let base_half_h = self.config.base_height as f64 * scale / 2.0;
+        let compact_scale = self.config.compact_scale as f64;
+        let base_half_w = self.config.base_width as f64 * compact_scale / 2.0;
+        let base_half_h = self.config.base_height as f64 * compact_scale / 2.0;
 
         let (anchor_x, local_anchor_x) = if dock_position.is_left() {
             (collapsed_center_x - base_half_w, TOP_OFFSET as f64)
@@ -150,7 +177,7 @@ impl App {
         mon_pos: PhysicalPosition<i32>,
         mon_size: PhysicalSize<u32>,
     ) -> (f64, f64) {
-        let scale = self.config.global_scale as f64;
+        let scale = self.config.compact_scale as f64;
         (
             mon_pos.x as f64 + mon_size.width as f64 / 2.0 + self.config.position_x_offset as f64,
             mon_pos.y as f64
@@ -166,10 +193,11 @@ impl App {
         mon_size: PhysicalSize<u32>,
     ) -> DockPosition {
         let (center_x, center_y) = self.collapsed_island_center(mon_pos, mon_size);
-        let scale = self.config.global_scale as f64;
-        let base_half_h = self.config.base_height as f64 * scale / 2.0;
-        let expanded_half_w = self.config.expanded_width as f64 * scale / 2.0;
-        let expanded_h = self.config.expanded_height as f64 * scale;
+        let compact_scale = self.config.compact_scale as f64;
+        let expanded_scale = self.config.expanded_scale as f64;
+        let base_half_h = self.config.base_height as f64 * compact_scale / 2.0;
+        let expanded_half_w = self.config.expanded_width as f64 * expanded_scale / 2.0;
+        let expanded_h = self.config.expanded_height as f64 * expanded_scale;
         let horizontal = if center_x - expanded_half_w <= mon_pos.x as f64 {
             -1
         } else if center_x + expanded_half_w >= (mon_pos.x as f64 + f64::from(mon_size.width)) {
@@ -198,7 +226,7 @@ impl App {
         let Some(dock_position) = self.config.legacy_dock_position.take() else {
             return false;
         };
-        let scale = self.config.global_scale as f64;
+        let scale = self.config.compact_scale as f64;
         let base_half_w = self.config.base_width as f64 * scale / 2.0;
         let base_half_h = self.config.base_height as f64 * scale / 2.0;
         let center_x = if dock_position.is_left() {
@@ -305,7 +333,7 @@ impl App {
         if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
             edge_size
         } else {
-            let configured = self.config.hidden_width as f64 * self.config.global_scale as f64;
+            let configured = self.config.hidden_width as f64 * self.config.compact_scale as f64;
             if configured <= f64::EPSILON {
                 1.0_f64.min(edge_size)
             } else {
@@ -439,7 +467,7 @@ impl App {
     }
 
     pub(super) fn compact_content_height(&self) -> f32 {
-        let scale = self.config.global_scale.max(f32::EPSILON);
+        let scale = self.config.compact_scale.max(f32::EPSILON);
         let base_height = self.config.base_height * scale;
         let has_secondary_lyric = !self.lyrics.current_secondary_text.is_empty()
             || (!self.lyrics.old_secondary_text.is_empty() && self.lyrics.transition < 1.0);
@@ -481,7 +509,7 @@ impl App {
     }
 
     pub(super) fn measure_lyric_text_width(&self, text: &str) -> f32 {
-        let scale = self.config.global_scale.max(f32::EPSILON);
+        let scale = self.config.compact_scale.max(f32::EPSILON);
         let font_size = crate::core::render::mini_lyric_font_size(self.config.font_size, scale);
         FontManager::global().measure_text_cached(text, font_size, skia_safe::FontStyle::normal())
             / scale
@@ -512,8 +540,8 @@ impl App {
                     let max_w = self.config.lyrics_scroll_max_width;
                     if natural_w > max_w {
                         let fixed_w = max_w;
-                        let available_text_w = (fixed_w - 59.0) * self.config.global_scale;
-                        let full_text_w = text_w * self.config.global_scale;
+                        let available_text_w = (fixed_w - 59.0) * self.config.compact_scale;
+                        let full_text_w = text_w * self.config.compact_scale;
                         let overflow = full_text_w - available_text_w;
                         if overflow > 0.0 && self.lyrics.transition >= 1.0 && !is_paused {
                             if self.lyrics.scroll_offset < overflow {
@@ -551,10 +579,10 @@ impl App {
             self.lyrics.scroll_offset = 0.0;
             self.config.base_width
         };
-        (if self.expanded {
-            self.config.expanded_width
+        if self.expanded {
+            self.config.expanded_width * self.config.expanded_scale
         } else {
-            target_base_w
-        }) * self.config.global_scale
+            target_base_w * self.config.compact_scale
+        }
     }
 }

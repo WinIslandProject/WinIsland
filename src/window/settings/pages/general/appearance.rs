@@ -7,7 +7,8 @@ use super::SettingsApp;
 
 #[derive(Clone, Copy)]
 pub(super) enum AppearanceAction {
-    GlobalScale,
+    CompactScale,
+    ExpandedScale,
     BaseWidth,
     BaseHeight,
     ExpandedWidth,
@@ -24,10 +25,16 @@ impl SettingsApp {
         page.section(tr("section_appearance"));
         page.group_start();
         page.row_stepper(
-            tr("global_scale"),
-            format!("{:.2}", self.config.global_scale),
+            tr("compact_scale"),
+            format!("{:.2}", self.config.compact_scale),
             true,
-            AppearanceAction::GlobalScale,
+            AppearanceAction::CompactScale,
+        );
+        page.row_stepper(
+            tr("expanded_scale"),
+            format!("{:.2}", self.config.expanded_scale),
+            true,
+            AppearanceAction::ExpandedScale,
         );
         page.row_stepper(
             tr("base_width"),
@@ -98,9 +105,14 @@ impl SettingsApp {
 
         if let ClickResult::StepperValue(item_index) = &result {
             let (value, on_commit): (String, NumberInputHandler) = match action {
-                AppearanceAction::GlobalScale => {
-                    (format!("{:.2}", self.config.global_scale), set_global_scale)
-                }
+                AppearanceAction::CompactScale => (
+                    format!("{:.2}", self.config.compact_scale),
+                    set_compact_scale,
+                ),
+                AppearanceAction::ExpandedScale => (
+                    format!("{:.2}", self.config.expanded_scale),
+                    set_expanded_scale,
+                ),
                 AppearanceAction::BaseWidth => (self.config.base_width.to_string(), set_base_width),
                 AppearanceAction::BaseHeight => {
                     (self.config.base_height.to_string(), set_base_height)
@@ -132,9 +144,16 @@ impl SettingsApp {
 
         if let Some(direction) = result.step_direction() {
             match action {
-                AppearanceAction::GlobalScale => {
-                    self.config.global_scale =
-                        (step(self.config.global_scale, direction, 0.05, 0.5, 5.0) * 100.0).round()
+                AppearanceAction::CompactScale => {
+                    self.config.compact_scale =
+                        (step(self.config.compact_scale, direction, 0.05, 0.5, 5.0) * 100.0)
+                            .round()
+                            / 100.0;
+                }
+                AppearanceAction::ExpandedScale => {
+                    self.config.expanded_scale =
+                        (step(self.config.expanded_scale, direction, 0.05, 0.5, 5.0) * 100.0)
+                            .round()
                             / 100.0;
                 }
                 AppearanceAction::BaseWidth => {
@@ -215,9 +234,15 @@ fn select_monitor(app: &mut SettingsApp, value: &str) {
     app.config.monitor_index = value.parse().unwrap_or(0);
 }
 
-fn set_global_scale(app: &mut SettingsApp, value: &str) {
+fn set_compact_scale(app: &mut SettingsApp, value: &str) {
     if let Ok(value) = value.parse::<f32>() {
-        app.config.global_scale = value.clamp(0.5, 5.0);
+        app.config.compact_scale = value.clamp(0.5, 5.0);
+    }
+}
+
+fn set_expanded_scale(app: &mut SettingsApp, value: &str) {
+    if let Ok(value) = value.parse::<f32>() {
+        app.config.expanded_scale = value.clamp(0.5, 5.0);
     }
 }
 

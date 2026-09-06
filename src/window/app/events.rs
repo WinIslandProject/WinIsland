@@ -107,7 +107,7 @@ impl App {
                         };
                         let compact_target_h = self.compact_content_height();
                         let compact_content_h = compact_target_h.min(self.springs.h.value).max(0.0);
-                        let total_h = (self.config.expanded_height * self.config.global_scale
+                        let total_h = (self.config.expanded_height * self.config.expanded_scale
                             - compact_target_h)
                             .abs()
                             .max(1.0);
@@ -242,7 +242,8 @@ impl App {
                                             sigmas,
                                             expansion_progress: progress,
                                             view_offset: self.springs.view.value,
-                                            global_scale: self.config.global_scale,
+                                            compact_scale: self.config.compact_scale,
+                                            expanded_scale: self.config.expanded_scale,
                                             hide_progress: self.springs.hide.value
                                                 * island_layout.content_hide_ratio,
                                             island_x: island_layout.current_island_x as f32,

@@ -6,7 +6,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Window, WindowButtons, WindowLevel};
 
-use crate::core::config::{MAX_LYRIC_WIDTH, PADDING, WINDOW_TITLE};
+use crate::core::config::WINDOW_TITLE;
 use crate::utils::icon::get_app_icon;
 use crate::window::tray::TrayManager;
 
@@ -17,15 +17,9 @@ impl App {
         event_loop.set_control_flow(ControlFlow::Wait);
         if self.window.is_none() {
             Self::set_aumid();
-            let compact_max_w = crate::ui::widget::compact::target_width(
-                &self.config.compact_widget_layout,
-                self.config.base_width,
-                Some(MAX_LYRIC_WIDTH),
-            );
-            let max_w = self.config.expanded_width.max(compact_max_w);
-            self.geom.os_w = (max_w * self.config.global_scale + PADDING) as u32;
-            self.geom.os_h =
-                (self.config.expanded_height * self.config.global_scale + PADDING) as u32;
+            let window_size = self.required_window_size();
+            self.geom.os_w = window_size.width;
+            self.geom.os_h = window_size.height;
             let attrs = Window::default_attributes()
                 .with_title(WINDOW_TITLE)
                 .with_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h))

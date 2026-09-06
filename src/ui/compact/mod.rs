@@ -117,6 +117,15 @@ impl CompactOverlay {
             .map(|overlay| overlay.target_size(base_width, base_height, scale))
     }
 
+    pub(crate) fn maximum_size(base_width: f32, base_height: f32, scale: f32) -> CompactSize {
+        let notification = NotificationIndicator::target_size(base_width, base_height, scale);
+        let volume = VolumeIndicator::target_size(base_width, base_height, scale);
+        CompactSize {
+            width: notification.width.max(volume.width),
+            height: notification.height.max(volume.height),
+        }
+    }
+
     pub fn draw(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
         if let Some(overlay) = self.active() {
             overlay.draw(canvas, rect, scale, alpha);

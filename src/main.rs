@@ -35,9 +35,10 @@ fn main() {
     let restart_requested = args.iter().any(|arg| arg == RESTART_ARG);
     log::info!("Args: {args:?}");
     log::info!(
-        "Config: style={:?}, scale={}, lang={}",
+        "Config: style={:?}, compact_scale={}, expanded_scale={}, lang={}",
         config.island_style,
-        config.global_scale,
+        config.compact_scale,
+        config.expanded_scale,
         config.language
     );
 
