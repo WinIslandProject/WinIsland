@@ -3,6 +3,7 @@
 ### v1.3.3
 - Added independent size controls for compact and expanded states
 - Added AMLL as a lyrics source
+- Improved the word-synced lyrics animation
 
 ### v1.3.2
 - Added optional secondary lyrics in the compact island with adaptive two-line layout

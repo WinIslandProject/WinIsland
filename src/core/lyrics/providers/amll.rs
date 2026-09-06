@@ -129,8 +129,8 @@ struct LineBuilder {
     time_ms: u64,
     key: Option<String>,
     text: String,
-    translation: String,
-    romanization: String,
+    translation: Option<String>,
+    romanization: Option<String>,
     timings: Vec<LyricTiming>,
 }
 
@@ -174,10 +174,13 @@ impl LineBuilder {
     }
 
     fn append_auxiliary(&mut self, kind: SpanKind, text: &str) {
-        match kind {
-            SpanKind::Translation => self.translation.push_str(text),
-            SpanKind::Romanization => self.romanization.push_str(text),
-            SpanKind::Main | SpanKind::Skip => {}
+        let target = match kind {
+            SpanKind::Translation => &mut self.translation,
+            SpanKind::Romanization => &mut self.romanization,
+            SpanKind::Main | SpanKind::Skip => return,
+        };
+        if target.is_none() && !text.trim().is_empty() {
+            *target = Some(text.to_string());
         }
     }
 
@@ -189,8 +192,8 @@ impl LineBuilder {
         if self.text.is_empty() || self.timings.is_empty() {
             return None;
         }
-        let inline_translation = normalize_auxiliary(&self.translation);
-        let inline_romanization = normalize_auxiliary(&self.romanization);
+        let inline_translation = self.translation.as_deref().and_then(normalize_auxiliary);
+        let inline_romanization = self.romanization.as_deref().and_then(normalize_auxiliary);
         let secondary_text = inline_translation
             .or_else(|| {
                 self.key
@@ -240,8 +243,8 @@ fn parse_ttml(ttml: &str) -> Option<Vec<LyricLine>> {
                         time_ms,
                         key: attribute_value(&start, b"key", decoder),
                         text: String::new(),
-                        translation: String::new(),
-                        romanization: String::new(),
+                        translation: None,
+                        romanization: None,
                         timings: Vec::new(),
                     });
                     spans.clear();
