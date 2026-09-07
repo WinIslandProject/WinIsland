@@ -8,7 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, GetWindowThreadProcessId, IsIconic,
 };
 
-use crate::utils::shape::g3_corner_contains;
+use crate::utils::shape::continuous_rounded_rect_path;
 
 pub fn get_global_cursor_pos() -> (i32, i32) {
     let mut point = POINT::default();
@@ -24,7 +24,7 @@ pub fn is_point_in_rect(px: f64, py: f64, rx: f64, ry: f64, rw: f64, rh: f64) ->
     px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
 }
 
-pub fn is_point_in_g3_rounded_rect(
+pub fn is_point_in_continuous_rounded_rect(
     px: f64,
     py: f64,
     rx: f64,
@@ -47,15 +47,11 @@ pub fn is_point_in_g3_rounded_rect(
         return false;
     }
 
-    let half_w = rw / 2.0;
-    let half_h = rh / 2.0;
-    let radius = radius.max(0.0).min(half_w.min(half_h));
-    if radius == 0.0 {
-        return true;
-    }
-    let dx = ((px - (rx + half_w)).abs() - (half_w - radius)).max(0.0);
-    let dy = ((py - (ry + half_h)).abs() - (half_h - radius)).max(0.0);
-    g3_corner_contains(dx / radius, dy / radius)
+    continuous_rounded_rect_path(
+        skia_safe::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32),
+        radius as f32,
+    )
+    .contains(skia_safe::Point::new(px as f32, py as f32))
 }
 
 pub fn is_left_button_pressed() -> bool {

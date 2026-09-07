@@ -19,6 +19,7 @@ use crate::utils::cover::decode_cover_image;
 use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::physics::Spring;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
+use crate::utils::shape::continuous_rounded_rect_path;
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
     Canvas, Color, FilterMode, FontStyle, Image, MipmapMode, Paint, Point, RRect, Rect,
@@ -31,25 +32,25 @@ use std::sync::{Arc, OnceLock};
 const CONTENT_PADDING: f32 = 24.0;
 const PAGE_ARROW_RIGHT_INSET: f32 = 7.5;
 const PAGE_ARROW_FADE_RATE: f32 = 5.0;
-const COVER_SIZE: f32 = 72.0;
-const TRACK_TEXT_GAP: f32 = 16.0;
+const COVER_SIZE: f32 = 64.0;
+const TRACK_TEXT_GAP: f32 = 18.0;
 const TRACK_TEXT_RIGHT_INSET: f32 = 70.0;
 const TRACK_TITLE_BASELINE_OFFSET: f32 = 26.0;
-const PROGRESS_TOP_GAP: f32 = 18.0;
+const PROGRESS_TOP_GAP: f32 = 24.0;
 const PROGRESS_TIME_FONT_SCALE: f32 = 0.67;
 const DEFAULT_PROGRESS_TIME_FONT_SIZE: f32 = 10.0;
-const PROGRESS_TIME_WIDTH: f32 = 36.0;
+const PROGRESS_TIME_WIDTH: f32 = 28.0;
 const PROGRESS_TIME_GAP: f32 = 4.0;
 const PROGRESS_START_THRESHOLD: f32 = 0.02;
 const PROGRESS_JUMP_THRESHOLD: f32 = 0.3;
 const PROGRESS_SMOOTHING: f32 = 0.15;
 const PROGRESS_HOVER_SMOOTHING: f32 = 0.18;
 const PROGRESS_HOVER_SNAP_THRESHOLD: f32 = 0.005;
-const PROGRESS_BAR_HEIGHT: f32 = 5.5;
+const PROGRESS_BAR_HEIGHT: f32 = 6.5;
 const PROGRESS_BAR_HOVER_GROWTH: f32 = 3.5;
 const PROGRESS_TIME_BASELINE_SCALE: f32 = 0.35;
 const PROGRESS_TIME_IDLE_ALPHA: f32 = 0.5;
-const PROGRESS_TRACK_ALPHA: f32 = 0.25;
+const PROGRESS_TRACK_ALPHA: f32 = 0.15;
 const PLAYBACK_CONTROLS_TOP_GAP: f32 = 42.0;
 const SKIP_BUTTON_GAP: f32 = 75.0;
 const SKIP_ANIMATION_DURATION_SECS: f32 = 0.5;
@@ -653,11 +654,10 @@ fn draw_cover(params: CoverParams) -> f32 {
         canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&blur_paint));
     }
 
-    canvas.clip_rrect(
-        RRect::new_rect_xy(
+    canvas.clip_path(
+        &continuous_rounded_rect_path(
             Rect::from_xywh(img_x, img_y, img_size, img_size),
-            14.0 * scale,
-            14.0 * scale,
+            16.0 * scale,
         ),
         skia_safe::ClipOp::Intersect,
         true,

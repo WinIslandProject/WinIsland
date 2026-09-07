@@ -5,6 +5,7 @@ pub mod time;
 
 use crate::core::config::{WIDGET_GRID_COLS, WIDGET_GRID_ROWS, WidgetKind, widget_footprint};
 use crate::utils::font::FontManager;
+use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
 use skia_safe::{Canvas, Color, Paint, Rect};
 
 #[derive(Debug, Clone, Copy)]
@@ -68,7 +69,9 @@ impl WidgetGridLayout {
 }
 
 pub fn widget_grid_layout(x: f32, y: f32, w: f32, h: f32, scale: f32) -> WidgetGridLayout {
-    let inset = 12.0 * scale;
+    let radius = expanded_island_radius(w, h, scale);
+    let corner_inset = radius * (1.0 - std::f32::consts::FRAC_1_SQRT_2);
+    let inset = (corner_inset + 8.0 * scale).max(24.0 * scale);
     let gap = 7.0 * scale;
     let inner_w = (w - inset * 2.0).max(0.0);
     let inner_h = (h - inset * 2.0).max(0.0);
@@ -98,14 +101,15 @@ pub(crate) fn draw_widget_rounded_background(
     background.set_color(Color::from_argb((alpha as f32 * 0.05) as u8, 28, 28, 30));
     let rect = Rect::from_xywh(x, y, w, h);
     let radius = widget_corner_radius(w, h, scale);
-    canvas.draw_round_rect(rect, radius, radius, &background);
+    let path = continuous_rounded_rect_path(rect, radius);
+    canvas.draw_path(&path, &background);
 
     let mut border = Paint::default();
     border.set_anti_alias(true);
     border.set_style(skia_safe::paint::Style::Stroke);
     border.set_stroke_width(1.0 * scale);
     border.set_color(Color::from_argb((alpha as f32 * 0.16) as u8, 255, 255, 255));
-    canvas.draw_round_rect(rect, radius, radius, &border);
+    canvas.draw_path(&path, &border);
 }
 
 pub(crate) fn widget_corner_radius(w: f32, h: f32, scale: f32) -> f32 {
