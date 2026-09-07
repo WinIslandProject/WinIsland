@@ -12,7 +12,7 @@ use crate::ui::widget::expanded::{
 };
 use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::{SettingsPainter, settings_paint};
-use crate::utils::shape::g3_rounded_rect_path;
+use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
 
 use super::super::input::{
     COMPACT_WIDGET_ISLAND_PANEL_H, COMPACT_WIDGET_PREVIEW_H, CompactWidgetGridGeom,
@@ -99,7 +99,7 @@ fn draw_island_background(
     let mut shadow = Paint::default();
     shadow.set_anti_alias(true);
     shadow.set_color(Color::from_argb(72, 0, 0, 0));
-    let shadow_path = g3_rounded_rect_path(
+    let shadow_path = continuous_rounded_rect_path(
         Rect::from_xywh(rect.left, rect.top + 4.0, rect.width(), rect.height()),
         corner_radius,
     );
@@ -138,7 +138,7 @@ fn draw_island_background(
     } else {
         paint.set_color(Color::from_rgb(10, 10, 10));
     }
-    let island_path = g3_rounded_rect_path(rect, corner_radius);
+    let island_path = continuous_rounded_rect_path(rect, corner_radius);
     canvas.draw_path(&island_path, &paint);
 
     paint.set_shader(None);
@@ -175,12 +175,8 @@ fn draw_grid(
         ));
         paint.set_style(skia_safe::paint::Style::Stroke);
         paint.set_stroke_width(if dragging { 1.0 } else { 0.75 });
-        canvas.draw_round_rect(
-            Rect::from_xywh(x, y, width, height),
-            slot_radius,
-            slot_radius,
-            &paint,
-        );
+        let path = continuous_rounded_rect_path(Rect::from_xywh(x, y, width, height), slot_radius);
+        canvas.draw_path(&path, &paint);
     }
 
     for slot in drop_cells {
@@ -192,11 +188,11 @@ fn draw_grid(
             theme.accent.g(),
             theme.accent.b(),
         ));
-        canvas.draw_round_rect(rect, slot_radius, slot_radius, &paint);
+        canvas.draw_path(&continuous_rounded_rect_path(rect, slot_radius), &paint);
         paint.set_style(skia_safe::paint::Style::Stroke);
         paint.set_stroke_width(2.0);
         paint.set_color(theme.accent);
-        canvas.draw_round_rect(rect, slot_radius, slot_radius, &paint);
+        canvas.draw_path(&continuous_rounded_rect_path(rect, slot_radius), &paint);
     }
 }
 
@@ -445,7 +441,13 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         geometry.cap_w,
         geometry.cap_h,
     );
-    draw_island_background(canvas, island_rect, island_style, theme, 28.0);
+    draw_island_background(
+        canvas,
+        island_rect,
+        island_style,
+        theme,
+        expanded_island_radius(geometry.cap_w, geometry.cap_h, geometry.cap_scale),
+    );
 
     let dragging = widget_dragging.is_some();
     let drop_cells = match (widget_dragging, widget_drag_hover_slot) {
@@ -542,7 +544,7 @@ fn draw_compact_grid(
         return;
     }
     canvas.save();
-    let island_path = g3_rounded_rect_path(
+    let island_path = continuous_rounded_rect_path(
         Rect::from_xywh(
             geometry.cap_x,
             geometry.cap_y,

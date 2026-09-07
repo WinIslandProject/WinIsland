@@ -12,7 +12,7 @@ use crate::ui::expanded::music_view::{
 };
 use crate::utils::mouse::{
     get_global_cursor_pos, is_cursor_hidden, is_foreground_fullscreen, is_left_button_pressed,
-    is_point_in_g3_rounded_rect, is_point_in_rect,
+    is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
 
 use super::{App, HideEdge, RIGHT_DRAG_THRESHOLD};
@@ -104,7 +104,7 @@ impl App {
         let offset_x = layout.offset_x;
         let current_island_x = layout.current_island_x;
         let current_island_y = layout.current_island_y;
-        let is_hovering_visible = is_point_in_g3_rounded_rect(
+        let is_hovering_visible = is_point_in_continuous_rounded_rect(
             rel_x as f64,
             rel_y as f64,
             current_island_x,
@@ -658,7 +658,11 @@ impl App {
             compact_content_h
         };
         let default_target_r = if self.expanded {
-            32.0 * self.config.expanded_scale
+            crate::utils::shape::expanded_island_radius(
+                self.config.expanded_width * self.config.expanded_scale,
+                default_target_h,
+                self.config.expanded_scale,
+            )
         } else {
             compact_content_h / 2.0
         };

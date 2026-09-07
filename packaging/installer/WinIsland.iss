@@ -51,6 +51,7 @@ RestartApplications=no
 Source: "{#SourceDirectory}\WinIsland.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace
 Source: "{#SourceDirectory}\resources\icon-dark.png"; DestDir: "{app}\resources"; Flags: ignoreversion
 Source: "{#SourceDirectory}\resources\icon-dark.ico"; DestDir: "{app}\resources"; Flags: ignoreversion
+Source: "{#SourceDirectory}\resources\licenses\*"; DestDir: "{app}\resources\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDirectory}\identity\{#IdentityPackageFile}"; DestDir: "{app}\identity"; Flags: ignoreversion
 Source: "{#SourceDirectory}\identity\{#IdentityCertificateFile}"; DestDir: "{app}\identity"; Flags: ignoreversion
 Source: "{#SourceDirectory}\identity\Install-Identity.ps1"; DestDir: "{app}\identity"; Flags: ignoreversion

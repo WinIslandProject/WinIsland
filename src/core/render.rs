@@ -15,7 +15,7 @@ use crate::core::lyrics::LyricHighlight;
 use crate::core::smtc::MediaInfo;
 use crate::ui::compact::CompactOverlay;
 use crate::ui::expanded::music_view::{default_media_palette, get_media_palette};
-use crate::utils::shape::g3_rounded_rect_path;
+use crate::utils::shape::continuous_rounded_rect_path;
 use skia_safe::{ClipOp, Color, Paint, Rect, Surface, gpu::DirectContext, image_filters};
 
 pub struct LayoutParams {
@@ -107,12 +107,13 @@ pub fn draw_island(
         layout.current_w,
         layout.current_h,
     );
-    let island_path = g3_rounded_rect_path(rect, layout.current_r);
+    let island_path = continuous_rounded_rect_path(rect, layout.current_r);
     let blur_filter = if layout.sigmas.0 > MIN_BLUR_SIGMA || layout.sigmas.1 > MIN_BLUR_SIGMA {
         image_filters::blur(layout.sigmas, None, None, None)
     } else {
         None
     };
+    draw_expanded_shadow(canvas, &params, &island_path);
     draw_background_layer(canvas, direct_context, &params, rect, &island_path);
     canvas.save();
     canvas.clip_path(&island_path, ClipOp::Intersect, true);
@@ -163,6 +164,39 @@ pub fn draw_island(
     canvas.restore();
     draw_island_border(canvas, &params);
     widget_animating
+}
+
+fn draw_expanded_shadow(
+    canvas: &skia_safe::Canvas,
+    params: &DrawIslandParams<'_>,
+    island_path: &skia_safe::Path,
+) {
+    let layout = &params.layout;
+    let opacity = layout.expansion_progress.clamp(0.0, 1.0).powi(2)
+        * (1.0 - layout.hide_progress).clamp(0.0, 1.0);
+    if opacity <= MIN_VISIBLE_OPACITY {
+        return;
+    }
+    let scale = layout.expanded_scale;
+    let offset_y = 2.0 * scale;
+    let bounds = island_path.bounds();
+    let surface = canvas.image_info();
+    let margin = bounds
+        .left()
+        .min(surface.width() as f32 - bounds.right())
+        .min(bounds.top() + offset_y)
+        .min(surface.height() as f32 - bounds.bottom() - offset_y)
+        .max(0.0);
+    let sigma = (3.0 * scale).min(margin / 3.0);
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(Color::from_argb((28.0 * opacity) as u8, 0, 0, 0));
+    paint.set_image_filter(image_filters::blur((sigma, sigma), None, None, None));
+    canvas.save();
+    canvas.clip_path(island_path, ClipOp::Difference, true);
+    canvas.translate((0.0, offset_y));
+    canvas.draw_path(island_path, &paint);
+    canvas.restore();
 }
 
 fn draw_background_layer(
@@ -313,8 +347,18 @@ fn draw_island_border(canvas: &skia_safe::Canvas, params: &DrawIslandParams<'_>)
     } else {
         EFFECT_BORDER_ALPHA
     };
-    paint.set_color(Color::from_argb(alpha, u8::MAX, u8::MAX, u8::MAX));
-    let border_path = g3_rounded_rect_path(
+    let opacity = if params.style.island_style == SOLID_STYLE {
+        1.0 - layout.expansion_progress.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    paint.set_color(Color::from_argb(
+        (alpha as f32 * opacity) as u8,
+        u8::MAX,
+        u8::MAX,
+        u8::MAX,
+    ));
+    let border_path = continuous_rounded_rect_path(
         Rect::from_xywh(
             layout.island_x + BORDER_INSET,
             layout.island_y + BORDER_INSET,

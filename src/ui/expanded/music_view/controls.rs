@@ -1,9 +1,10 @@
 use crate::core::smtc::MediaInfo;
 
 use super::{
-    CONTENT_PADDING, COVER_FLIP_ANIM, COVER_FLIP_OLD_IMG, IMG_CACHE, LOCAL_PLAY_STATE,
-    NEXT_SKIP_ANIM, PAUSE_CONTROL_PRESS_VELOCITY, PAUSE_SPRING, PREV_SKIP_ANIM, PROGRESS_DRAGGING,
-    PROGRESS_HOVER, PROGRESS_SMOOTH,
+    CONTENT_PADDING, COVER_FLIP_ANIM, COVER_FLIP_OLD_IMG, COVER_SIZE, IMG_CACHE, LOCAL_PLAY_STATE,
+    NEXT_SKIP_ANIM, PAUSE_CONTROL_PRESS_VELOCITY, PAUSE_SPRING, PLAYBACK_CONTROLS_TOP_GAP,
+    PREV_SKIP_ANIM, PROGRESS_DRAGGING, PROGRESS_HOVER, PROGRESS_SMOOTH, PROGRESS_TIME_GAP,
+    PROGRESS_TIME_WIDTH, PROGRESS_TOP_GAP, SKIP_BUTTON_GAP,
 };
 
 pub fn set_progress_dragging(active: bool) {
@@ -72,9 +73,9 @@ pub fn get_pause_btn_rect(
     scale: f32,
     _cover_shape: &str,
 ) -> (f32, f32, f32, f32) {
-    let (img_size, img_y) = (72.0 * scale, oy + 24.0 * scale);
-    let bar_y = img_y + img_size + 18.0 * scale;
-    let btn_cy = bar_y + 42.0 * scale;
+    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
+    let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
     let hit = 40.0 * scale;
     let btn_cx = ox + w / 2.0;
     (btn_cx - hit / 2.0, btn_cy - hit / 2.0, hit, hit)
@@ -88,11 +89,11 @@ pub fn get_prev_btn_rect(
     scale: f32,
     _cover_shape: &str,
 ) -> (f32, f32, f32, f32) {
-    let (img_size, img_y) = (72.0 * scale, oy + 24.0 * scale);
-    let bar_y = img_y + img_size + 18.0 * scale;
-    let btn_cy = bar_y + 42.0 * scale;
+    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
+    let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
     let hit = 36.0 * scale;
-    let btn_cx = ox + w / 2.0 - 75.0 * scale;
+    let btn_cx = ox + w / 2.0 - SKIP_BUTTON_GAP * scale;
     (btn_cx - hit / 2.0, btn_cy - hit / 2.0, hit, hit)
 }
 
@@ -104,11 +105,11 @@ pub fn get_next_btn_rect(
     scale: f32,
     _cover_shape: &str,
 ) -> (f32, f32, f32, f32) {
-    let (img_size, img_y) = (72.0 * scale, oy + 24.0 * scale);
-    let bar_y = img_y + img_size + 18.0 * scale;
-    let btn_cy = bar_y + 42.0 * scale;
+    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
+    let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
     let hit = 36.0 * scale;
-    let btn_cx = ox + w / 2.0 + 75.0 * scale;
+    let btn_cx = ox + w / 2.0 + SKIP_BUTTON_GAP * scale;
     (btn_cx - hit / 2.0, btn_cy - hit / 2.0, hit, hit)
 }
 
@@ -124,13 +125,13 @@ pub fn get_progress_bar_rect(
     if !music_active {
         return None;
     }
-    let (img_size, img_y) = (72.0 * scale, oy + 24.0 * scale);
-    let bar_y = img_y + img_size + 18.0 * scale;
-    let time_w = 36.0 * scale;
+    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
+    let time_w = PROGRESS_TIME_WIDTH * scale;
     let bar_full_left = ox + CONTENT_PADDING * scale;
     let bar_full_right = ox + w - CONTENT_PADDING * scale;
-    let bar_left = bar_full_left + time_w + 4.0 * scale;
-    let bar_right = bar_full_right - time_w - 4.0 * scale;
+    let bar_left = bar_full_left + time_w + PROGRESS_TIME_GAP * scale;
+    let bar_right = bar_full_right - time_w - PROGRESS_TIME_GAP * scale;
     let hit_h = 16.0 * scale;
     Some((bar_left, bar_right, bar_y - hit_h / 2.0, hit_h))
 }

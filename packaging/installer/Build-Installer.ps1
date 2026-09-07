@@ -72,6 +72,7 @@ New-Item -ItemType Directory -Force -Path $identityDirectory, $resourceDirectory
 Copy-Item -Path $executablePath -Destination (Join-Path $stageDirectory 'WinIsland.exe') -Force
 Copy-Item -Path (Join-Path $repositoryRoot 'resources\icon-dark.png') -Destination (Join-Path $resourceDirectory 'icon-dark.png') -Force
 Copy-Item -Path (Join-Path $repositoryRoot 'resources\icon-dark.ico') -Destination (Join-Path $resourceDirectory 'icon-dark.ico') -Force
+Copy-Item -Path (Join-Path $repositoryRoot 'resources\licenses') -Destination $resourceDirectory -Recurse -Force
 Copy-Item -Path (Join-Path $repositoryRoot 'packaging\identity\Install-Identity.ps1') -Destination (Join-Path $identityDirectory 'Install-Identity.ps1') -Force
 Copy-Item -Path (Join-Path $repositoryRoot 'packaging\identity\Remove-Identity.ps1') -Destination (Join-Path $identityDirectory 'Remove-Identity.ps1') -Force
 
