@@ -426,7 +426,9 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         let track_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, bar_total_w, bar_h);
         canvas.draw_round_rect(track_rect, bar_radius, bar_radius, &track_paint);
 
-        let filled_w = (bar_total_w * progress).max(bar_h);
+        let filled_w = (bar_total_w * progress.clamp(0.0, 1.0))
+            .max(bar_h)
+            .min(bar_total_w);
         let mut fill_paint = Paint::default();
         fill_paint.set_anti_alias(true);
         fill_paint.set_color(Color::from_argb(
@@ -445,7 +447,14 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
                 Point::new(bar_radius, bar_radius),
             ],
         );
+        canvas.save();
+        canvas.clip_rrect(
+            RRect::new_rect_xy(track_rect, bar_radius, bar_radius),
+            skia_safe::ClipOp::Intersect,
+            true,
+        );
         canvas.draw_rrect(fill_rrect, &fill_paint);
+        canvas.restore();
 
         let btn_cx = ox + w / 2.0;
         let btn_cy = bar_center_y + bar_h / 2.0 + PLAYBACK_CONTROLS_TOP_GAP * scale;

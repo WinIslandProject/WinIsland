@@ -547,7 +547,14 @@ impl VolumeIndicator {
         let icon_size = 20.0 * scale;
         let icon_center = skia_safe::Point::new(rect.left() + 21.0 * scale, center_y);
         let muted = self.snapshot.muted || self.snapshot.level <= VOLUME_CHANGE_THRESHOLD;
-        draw_volume_icon(canvas, icon_center, icon_size, alpha, muted, Color::WHITE);
+        draw_volume_icon(
+            canvas,
+            icon_center,
+            icon_size,
+            alpha,
+            if muted { 0.0 } else { self.snapshot.level },
+            Color::WHITE,
+        );
 
         let label_size = 12.0 * scale;
         let label_x = rect.left() + 37.0 * scale;
