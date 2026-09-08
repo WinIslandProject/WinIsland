@@ -1,4 +1,9 @@
-use skia_safe::{Canvas, Color, Paint, Point, Rect};
+use std::cell::RefCell;
+use std::collections::VecDeque;
+
+use skia_safe::{
+    Canvas, Color, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
+};
 
 use crate::core::config::{
     CompactWidgetAlignment, CompactWidgetKind, CompactWidgetPosition, CompactWidgetSlot,
@@ -89,7 +94,85 @@ fn draw_centered_label(canvas: &Canvas, text: &str, rect: Rect, size: f32, color
     );
 }
 
+#[derive(PartialEq)]
+struct PreviewBackgroundKey {
+    dimensions: [u32; 4],
+    style: String,
+    border_color: Color,
+}
+
+thread_local! {
+    static PREVIEW_BACKGROUNDS: RefCell<VecDeque<(PreviewBackgroundKey, Image)>> = const { RefCell::new(VecDeque::new()) };
+}
+
 fn draw_island_background(
+    canvas: &Canvas,
+    rect: Rect,
+    island_style: &str,
+    theme: &SettingsTheme,
+    corner_radius: f32,
+) {
+    let matrix = canvas.local_to_device_as_3x3();
+    let scale = matrix.scale_x().abs().max(matrix.scale_y().abs()).max(1.0) * 2.0;
+    let key = PreviewBackgroundKey {
+        dimensions: [
+            rect.width().to_bits(),
+            rect.height().to_bits(),
+            corner_radius.to_bits(),
+            scale.to_bits(),
+        ],
+        style: island_style.to_owned(),
+        border_color: theme.text_pri,
+    };
+    let padding = 6.0;
+    let bounds = Rect::from_xywh(
+        rect.left - padding,
+        rect.top - padding,
+        rect.width() + padding * 2.0,
+        rect.height() + padding * 2.0,
+    );
+    let image = PREVIEW_BACKGROUNDS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((_, image)) = cache.iter().find(|(cached_key, _)| *cached_key == key) {
+            return Some(image.clone());
+        }
+        let size = (
+            (bounds.width() * scale).ceil() as i32,
+            (bounds.height() * scale).ceil() as i32,
+        );
+        let mut surface = skia_safe::surfaces::raster_n32_premul(size)?;
+        let raster = surface.canvas();
+        raster.clear(Color::TRANSPARENT);
+        raster.scale((
+            size.0 as f32 / bounds.width(),
+            size.1 as f32 / bounds.height(),
+        ));
+        draw_island_background_path(
+            raster,
+            Rect::from_xywh(padding, padding, rect.width(), rect.height()),
+            island_style,
+            theme,
+            corner_radius,
+        );
+        let image = surface.image_snapshot();
+        cache.push_front((key, image.clone()));
+        cache.truncate(4);
+        Some(image)
+    });
+    if let Some(image) = image {
+        canvas.draw_image_rect_with_sampling_options(
+            &image,
+            None,
+            bounds,
+            SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
+            &Paint::default(),
+        );
+    } else {
+        draw_island_background_path(canvas, rect, island_style, theme, corner_radius);
+    }
+}
+
+fn draw_island_background_path(
     canvas: &Canvas,
     rect: Rect,
     island_style: &str,
