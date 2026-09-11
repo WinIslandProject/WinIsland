@@ -375,6 +375,9 @@ struct IslandSprings {
 }
 
 impl IslandSprings {
+    const EQUAL_WIDTH_THRESHOLD_RATIO: f32 = 0.02;
+    const EQUAL_WIDTH_EXPANSION_IMPULSE_RATIO: f32 = 0.012;
+
     fn new(config: &AppConfig) -> Self {
         Self {
             w: Spring::new(config.base_width * config.compact_scale),
@@ -398,7 +401,13 @@ impl IslandSprings {
             return;
         }
         self.expanded_target = expanded;
-        self.w.redirect_velocity_towards(target_w);
+        if expanded
+            && (target_w - self.w.value).abs() <= target_w * Self::EQUAL_WIDTH_THRESHOLD_RATIO
+        {
+            self.w.velocity = target_w * Self::EQUAL_WIDTH_EXPANSION_IMPULSE_RATIO;
+        } else {
+            self.w.redirect_velocity_towards(target_w);
+        }
         self.h.redirect_velocity_towards(target_h);
         self.r.redirect_velocity_towards(target_r);
         self.view.redirect_velocity_towards(target_view);
