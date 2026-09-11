@@ -7,7 +7,7 @@ use winit::window::WindowId;
 use crate::core::render::draw_island;
 use crate::utils::blur::calculate_blur_sigmas;
 use crate::utils::mouse::get_global_cursor_pos;
-use crate::window::d3d::MAIN_D3D_TARGET;
+use crate::window::d3d::{HostBackdropParams, MAIN_D3D_TARGET};
 
 use super::App;
 
@@ -234,6 +234,20 @@ impl App {
                                 ("", "")
                             };
 
+                        let host_backdrop = renderer.update_host_backdrop(
+                            MAIN_D3D_TARGET,
+                            HostBackdropParams {
+                                enabled: matches!(
+                                    self.config.island_style.as_str(),
+                                    "glass" | "mica" | "dynamic"
+                                ),
+                                x: island_layout.current_island_x as f32,
+                                y: island_layout.current_island_y as f32,
+                                width: self.springs.w.value,
+                                height: self.springs.h.value,
+                                radius: self.springs.r.value,
+                            },
+                        );
                         let render_result =
                             renderer.draw(MAIN_D3D_TARGET, |direct_context, surface| {
                                 draw_island(
@@ -270,16 +284,9 @@ impl App {
                                             lyric_transition: self.lyrics.transition,
                                             lyric_scroll_offset: self.lyrics.scroll_offset,
                                         },
-                                        window: crate::core::render::WindowParams {
-                                            win_x: self.geom.win_x,
-                                            win_y: self.geom.win_y,
-                                            monitor_x: self.geom.monitor_pos.0,
-                                            monitor_y: self.geom.monitor_pos.1,
-                                            monitor_w: self.geom.monitor_size.0,
-                                            monitor_h: self.geom.monitor_size.1,
-                                        },
                                         style: crate::core::render::StyleParams {
                                             island_style: &self.config.island_style,
+                                            host_backdrop,
                                             use_blur: self.config.motion_blur,
                                             font_size: self.config.font_size,
                                             dt,

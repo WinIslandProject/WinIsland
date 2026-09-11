@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -11,6 +12,12 @@ use skia_safe::{
     },
 };
 use windows::{
+    System::DispatcherQueueController,
+    UI::Composition::Desktop::DesktopWindowTarget,
+    UI::Composition::{
+        CompositionGeometricClip, CompositionRoundedRectangleGeometry, Compositor, ContainerVisual,
+        SpriteVisual,
+    },
     Win32::{
         Foundation::HWND,
         Graphics::{
@@ -31,9 +38,14 @@ use windows::{
                 DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIAdapter1, IDXGIFactory4, IDXGISwapChain3,
             },
         },
+        System::WinRT::{
+            Composition::ICompositorDesktopInterop, CreateDispatcherQueueController,
+            DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
+        },
     },
     core::Interface,
 };
+use windows_numerics::{Vector2, Vector3};
 use winit::{
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::Window,
@@ -46,6 +58,7 @@ const INITIALIZATION_ATTEMPTS: usize = 3;
 const INITIALIZATION_RETRY_DELAY: Duration = Duration::from_millis(500);
 const RESOURCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
 const RESOURCE_MAX_IDLE_AGE: Duration = Duration::from_secs(10);
+const HOST_BACKDROP_INSET: f32 = 1.0;
 
 static DWM_COMPOSITION_CHANGED: AtomicBool = AtomicBool::new(false);
 
@@ -67,6 +80,33 @@ struct D3DTarget {
     composition_visual: IDCompositionVisual,
     composition_target: IDCompositionTarget,
     swap_chain: IDXGISwapChain3,
+    host_backdrop: Option<HostBackdropTarget>,
+}
+
+struct BackdropCompositionContext {
+    _dispatcher_queue: DispatcherQueueController,
+    compositor: Compositor,
+}
+
+struct HostBackdropTarget {
+    target: DesktopWindowTarget,
+    _root: ContainerVisual,
+    visual: SpriteVisual,
+    _clip: CompositionGeometricClip,
+    geometry: CompositionRoundedRectangleGeometry,
+}
+
+pub(crate) struct HostBackdropParams {
+    pub(crate) enabled: bool,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) radius: f32,
+}
+
+thread_local! {
+    static BACKDROP_COMPOSITION: OnceCell<Option<BackdropCompositionContext>> = const { OnceCell::new() };
 }
 
 pub(crate) struct D3DRenderer {
@@ -75,6 +115,7 @@ pub(crate) struct D3DRenderer {
     composition_device: IDCompositionDevice,
     factory: IDXGIFactory4,
     backend_context: BackendContext,
+    backdrop_compositor: Option<Compositor>,
     next_target_id: u64,
     last_resource_cleanup: Instant,
     failure: Option<String>,
@@ -145,12 +186,14 @@ impl D3DRenderer {
             DCompositionCreateDevice2(None)
         }
         .map_err(|error| format!("DCompositionCreateDevice2 failed: {error}"))?;
+        let backdrop_compositor = backdrop_compositor();
         let mut renderer = Self {
             targets: HashMap::new(),
             direct_context,
             composition_device,
             factory,
             backend_context,
+            backdrop_compositor,
             next_target_id: 0,
             last_resource_cleanup: Instant::now(),
             failure: None,
@@ -167,10 +210,13 @@ impl D3DRenderer {
         height: u32,
     ) -> Result<D3DTargetId, String> {
         let hwnd = window_hwnd(window)?;
+        let target_id = D3DTargetId(self.next_target_id);
         let swap_chain = create_swap_chain(&self.factory, &self.backend_context, width, height)?;
+        let use_host_backdrop = target_id == MAIN_D3D_TARGET && self.backdrop_compositor.is_some();
         let composition_target = unsafe {
             // SAFETY: hwnd belongs to the live winit window retained by the caller.
-            self.composition_device.CreateTargetForHwnd(hwnd, false)
+            self.composition_device
+                .CreateTargetForHwnd(hwnd, use_host_backdrop)
         }
         .map_err(|error| format!("CreateTargetForHwnd failed: {error}"))?;
         let composition_visual = unsafe {
@@ -190,8 +236,20 @@ impl D3DRenderer {
                 .Commit()
                 .map_err(|error| format!("IDCompositionDevice::Commit failed: {error}"))?;
         }
+        let host_backdrop = self
+            .backdrop_compositor
+            .as_ref()
+            .filter(|_| target_id == MAIN_D3D_TARGET)
+            .and_then(
+                |compositor| match create_host_backdrop_target(compositor, hwnd) {
+                    Ok(target) => Some(target),
+                    Err(error) => {
+                        log::warn!("Host backdrop is unavailable: {error}");
+                        None
+                    }
+                },
+            );
         let surfaces = create_surfaces(&swap_chain, &mut self.direct_context, width, height)?;
-        let target_id = D3DTargetId(self.next_target_id);
         self.next_target_id += 1;
         self.targets.insert(
             target_id,
@@ -200,6 +258,7 @@ impl D3DRenderer {
                 composition_visual,
                 composition_target,
                 swap_chain,
+                host_backdrop,
             },
         );
         Ok(target_id)
@@ -318,6 +377,25 @@ impl D3DRenderer {
         self.failure.take()
     }
 
+    pub(crate) fn update_host_backdrop(
+        &mut self,
+        target_id: D3DTargetId,
+        params: HostBackdropParams,
+    ) -> bool {
+        let Some(target) = self.targets.get_mut(&target_id) else {
+            return false;
+        };
+        let Some(host_backdrop) = target.host_backdrop.as_ref() else {
+            return false;
+        };
+        if let Err(error) = host_backdrop.update(params) {
+            log::warn!("Host backdrop update failed: {error}");
+            target.host_backdrop = None;
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn abandon(&mut self) {
         self.direct_context.abandon();
     }
@@ -373,6 +451,129 @@ impl D3DRenderer {
         let device = self.backend_context.device.clone();
         check_context(&mut self.direct_context, &device, stage)
     }
+}
+
+impl HostBackdropTarget {
+    fn update(&self, params: HostBackdropParams) -> windows::core::Result<()> {
+        let enabled = params.enabled && params.width > 0.0 && params.height > 0.0;
+        if enabled {
+            let width = (params.width - HOST_BACKDROP_INSET * 2.0).max(0.0);
+            let height = (params.height - HOST_BACKDROP_INSET * 2.0).max(0.0);
+            let radius = (params.radius - HOST_BACKDROP_INSET).max(0.0);
+            self.visual.SetOffset(Vector3 {
+                X: params.x + HOST_BACKDROP_INSET,
+                Y: params.y + HOST_BACKDROP_INSET,
+                Z: 0.0,
+            })?;
+            self.visual.SetSize(Vector2 {
+                X: width,
+                Y: height,
+            })?;
+            self.geometry.SetSize(Vector2 {
+                X: width,
+                Y: height,
+            })?;
+            self.geometry.SetCornerRadius(Vector2 {
+                X: radius,
+                Y: radius,
+            })?;
+        }
+        self.visual.SetIsVisible(enabled)
+    }
+}
+
+impl Drop for HostBackdropTarget {
+    fn drop(&mut self) {
+        let _ = self.target.Close();
+    }
+}
+
+fn backdrop_compositor() -> Option<Compositor> {
+    BACKDROP_COMPOSITION.with(|cell| {
+        cell.get_or_init(|| match create_backdrop_composition_context() {
+            Ok(context) => Some(context),
+            Err(error) => {
+                log::warn!("Windows host backdrop initialization failed: {error}");
+                None
+            }
+        })
+        .as_ref()
+        .map(|context| context.compositor.clone())
+    })
+}
+
+fn create_backdrop_composition_context() -> Result<BackdropCompositionContext, String> {
+    let options = DispatcherQueueOptions {
+        dwSize: size_of::<DispatcherQueueOptions>() as u32,
+        threadType: DQTYPE_THREAD_CURRENT,
+        apartmentType: DQTAT_COM_NONE,
+    };
+    let dispatcher_queue = unsafe {
+        // SAFETY: winit initializes the main thread's STA before renderer creation. The options
+        // attach a dispatcher queue to that current thread without changing its COM apartment.
+        CreateDispatcherQueueController(options)
+    }
+    .map_err(|error| format!("CreateDispatcherQueueController failed: {error}"))?;
+    let compositor = Compositor::new().map_err(|error| format!("Compositor failed: {error}"))?;
+    Ok(BackdropCompositionContext {
+        _dispatcher_queue: dispatcher_queue,
+        compositor,
+    })
+}
+
+fn create_host_backdrop_target(
+    compositor: &Compositor,
+    hwnd: HWND,
+) -> Result<HostBackdropTarget, String> {
+    if !crate::utils::win32::enable_host_backdrop(hwnd) {
+        return Err("DWM host backdrop support could not be enabled".to_string());
+    }
+    let interop: ICompositorDesktopInterop = compositor
+        .cast()
+        .map_err(|error| format!("ICompositorDesktopInterop is unavailable: {error}"))?;
+    let target = unsafe {
+        // SAFETY: hwnd belongs to the current process and the lower composition target is free;
+        // the existing D3D swap-chain tree is attached to the separate topmost target.
+        interop.CreateDesktopWindowTarget(hwnd, false)
+    }
+    .map_err(|error| format!("CreateDesktopWindowTarget failed: {error}"))?;
+    let root = compositor
+        .CreateContainerVisual()
+        .map_err(|error| format!("CreateContainerVisual failed: {error}"))?;
+    let visual = compositor
+        .CreateSpriteVisual()
+        .map_err(|error| format!("CreateSpriteVisual failed: {error}"))?;
+    let geometry = compositor
+        .CreateRoundedRectangleGeometry()
+        .map_err(|error| format!("CreateRoundedRectangleGeometry failed: {error}"))?;
+    let clip = compositor
+        .CreateGeometricClipWithGeometry(&geometry)
+        .map_err(|error| format!("CreateGeometricClipWithGeometry failed: {error}"))?;
+    let brush = compositor
+        .CreateHostBackdropBrush()
+        .map_err(|error| format!("CreateHostBackdropBrush failed: {error}"))?;
+    visual
+        .SetBrush(&brush)
+        .map_err(|error| format!("Host backdrop brush assignment failed: {error}"))?;
+    visual
+        .SetClip(&clip)
+        .map_err(|error| format!("Host backdrop clip assignment failed: {error}"))?;
+    visual
+        .SetIsVisible(false)
+        .map_err(|error| format!("Host backdrop visibility setup failed: {error}"))?;
+    root.Children()
+        .and_then(|children| children.InsertAtTop(&visual))
+        .map_err(|error| format!("Host backdrop visual insertion failed: {error}"))?;
+    target
+        .SetRoot(&root)
+        .map_err(|error| format!("Host backdrop root assignment failed: {error}"))?;
+    Ok(HostBackdropTarget {
+        target,
+        _root: root,
+        visual,
+        _clip: clip,
+        geometry,
+    })
 }
 
 fn check_context(

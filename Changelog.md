@@ -5,6 +5,7 @@
 - Kept secondary lyrics stationary while the primary lyric scrolls
 - Prevented the hidden island from capturing the mouse in fullscreen apps while retaining edge double-click reveal (#163)
 - Allowed notifications to temporarily reveal the island while hidden
+- Replaced simulated Glass and Mica captures with the actual blurred content beneath the WinIsland window
 
 ### v1.3.3
 - Added independent size controls for compact and expanded states

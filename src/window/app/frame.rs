@@ -772,15 +772,14 @@ impl App {
         }
     }
 
-    fn periodic_glass_redraw_due(&mut self) -> bool {
-        let is_glass_or_mica = self.config.island_style == "glass"
-            || self.config.island_style == "dynamic"
-            || self.config.island_style == "mica";
+    fn periodic_effect_redraw_due(&mut self) -> bool {
+        let is_dynamic_or_mica =
+            self.config.island_style == "dynamic" || self.config.island_style == "mica";
         let due = !self.is_hidden()
-            && self.last_glass_refresh.elapsed().as_millis() >= 1000
-            && (is_glass_or_mica || self.expanded);
+            && self.last_effect_refresh.elapsed().as_millis() >= 1000
+            && (is_dynamic_or_mica || self.expanded);
         if due {
-            self.last_glass_refresh = Instant::now();
+            self.last_effect_refresh = Instant::now();
         }
         due
     }
@@ -792,7 +791,7 @@ impl App {
         now: Instant,
         pacing: FramePacing,
     ) {
-        let should_periodic_redraw = self.periodic_glass_redraw_due();
+        let should_periodic_redraw = self.periodic_effect_redraw_due();
         let animation_active = self.springs.any_animating()
             || self.lyrics.transition < 1.0
             || self.is_dragging

@@ -1,9 +1,5 @@
 use std::sync::OnceLock;
 
-use skia_safe::{
-    ImageInfo, Surface,
-    gpu::{self, Budgeted, DirectContext, SurfaceOrigin},
-};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_ADAPTER_FLAG, DXGI_ADAPTER_FLAG_NONE, DXGI_ADAPTER_FLAG_SOFTWARE,
     DXGI_CREATE_FACTORY_FLAGS, IDXGIFactory4,
@@ -61,17 +57,4 @@ fn profile_from_env() -> Option<GpuProfile> {
         Ok(value) if value.eq_ignore_ascii_case("discrete") => Some(GpuProfile::Discrete),
         _ => None,
     }
-}
-
-pub(crate) fn render_surface(context: &mut DirectContext, info: &ImageInfo) -> Option<Surface> {
-    gpu::surfaces::render_target(
-        context,
-        Budgeted::Yes,
-        info,
-        None,
-        SurfaceOrigin::TopLeft,
-        None,
-        Some(false),
-        Some(false),
-    )
 }

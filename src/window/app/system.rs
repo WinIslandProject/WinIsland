@@ -7,7 +7,6 @@ use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 use windows::core::PCWSTR;
 use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use crate::core::persistence::{get_config_path, load_config};
@@ -103,9 +102,7 @@ impl App {
         if let Some(settings) = self.settings.as_mut() {
             settings.invalidate_renderer_target();
         }
-        crate::utils::backdrop::clear_mica_cache();
         crate::utils::backdrop::clear_blurred_cover_cache();
-        crate::utils::glass::clear_glass_cache();
         crate::ui::expanded::music_view::clear_cover_cache();
         if let Some(renderer) = renderer.as_mut() {
             renderer.abandon();
@@ -425,19 +422,7 @@ impl App {
                     }
 
                     if old_style != self.config.island_style {
-                        crate::utils::backdrop::clear_mica_cache();
-                        crate::utils::glass::clear_glass_cache();
                         crate::utils::backdrop::clear_blurred_cover_cache();
-                        if let Ok(handle) = window.window_handle() {
-                            let raw = handle.as_raw();
-                            if let RawWindowHandle::Win32(win32_handle) = raw {
-                                let hwnd =
-                                    windows::Win32::Foundation::HWND(win32_handle.hwnd.get() as _);
-                                if old_style == "mica" {
-                                    crate::utils::backdrop::disable_mica(hwnd);
-                                }
-                            }
-                        }
                     }
 
                     if old_mini_shape != self.config.mini_cover_shape
@@ -470,15 +455,11 @@ impl App {
                         self.geom.os_h = window_size.height;
                         let _ = window
                             .request_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h));
-                        if let Some(renderer) = self.renderer.as_mut() {
-                            if let Err(error) =
+                        if let Some(renderer) = self.renderer.as_mut()
+                            && let Err(error) =
                                 renderer.resize(MAIN_D3D_TARGET, self.geom.os_w, self.geom.os_h)
-                            {
-                                log::error!("D3D12 renderer resize failed: {error}");
-                            } else {
-                                crate::utils::backdrop::clear_mica_cache();
-                                crate::utils::glass::clear_glass_cache();
-                            }
+                        {
+                            log::error!("D3D12 renderer resize failed: {error}");
                         }
                     }
 

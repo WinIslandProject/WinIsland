@@ -34,6 +34,7 @@ dependencies = [
  "wasapi",
  "windows",
  "windows-core",
+ "windows-numerics",
  "winisland-plugin-api",
  "winit",
  "winres",

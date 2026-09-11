@@ -1,7 +1,12 @@
+use std::ffi::c_void;
+use std::sync::OnceLock;
+
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
 use windows::Win32::System::Com::{
     CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
 use windows::Win32::UI::Shell::{
     ACTIVATEOPTIONS, ApplicationActivationManager, IApplicationActivationManager,
@@ -12,7 +17,77 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_THICKFRAME,
 };
-use windows::core::PCWSTR;
+use windows::core::{BOOL, PCWSTR, s, w};
+
+type SetWindowCompositionAttribute =
+    unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> BOOL;
+
+#[repr(C)]
+struct AccentPolicy {
+    state: u32,
+    flags: u32,
+    gradient_color: u32,
+    animation_id: u32,
+}
+
+#[repr(C)]
+struct WindowCompositionAttributeData {
+    attribute: u32,
+    data: *mut c_void,
+    size: usize,
+}
+
+fn set_window_composition_attribute() -> Option<SetWindowCompositionAttribute> {
+    static FUNCTION: OnceLock<Option<SetWindowCompositionAttribute>> = OnceLock::new();
+    *FUNCTION.get_or_init(|| {
+        // SAFETY: user32.dll is loaded for every GUI process. The export address remains valid for
+        // the process lifetime and is cast to its native SetWindowCompositionAttribute signature.
+        unsafe {
+            let module = GetModuleHandleW(w!("user32.dll")).ok()?;
+            let function = GetProcAddress(module, s!("SetWindowCompositionAttribute"))?;
+            Some(std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                SetWindowCompositionAttribute,
+            >(function))
+        }
+    })
+}
+
+pub fn enable_host_backdrop(hwnd: HWND) -> bool {
+    let enabled: i32 = 1;
+    // SAFETY: hwnd belongs to the live WinIsland window and enabled points to an initialized BOOL-
+    // compatible value for the duration of the synchronous DWM call.
+    if unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_HOSTBACKDROPBRUSH,
+            &enabled as *const _ as *const _,
+            size_of::<i32>() as u32,
+        )
+    }
+    .is_ok()
+    {
+        return true;
+    }
+
+    let Some(set_attribute) = set_window_composition_attribute() else {
+        return false;
+    };
+    let mut policy = AccentPolicy {
+        state: 5,
+        flags: 0,
+        gradient_color: 0,
+        animation_id: 0,
+    };
+    let mut data = WindowCompositionAttributeData {
+        attribute: 19,
+        data: (&mut policy as *mut AccentPolicy).cast(),
+        size: size_of::<AccentPolicy>(),
+    };
+    // SAFETY: the dynamically resolved function uses the native ABI verified above. hwnd is live,
+    // and data points to an initialized accent policy for the duration of the synchronous call.
+    unsafe { set_attribute(hwnd, &mut data).as_bool() }
+}
 
 // SAFETY: FindWindowW is called with a null-terminated wide string derived
 // from the title parameter. The function returns an HWND that may be invalid

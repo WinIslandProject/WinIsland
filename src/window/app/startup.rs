@@ -74,12 +74,6 @@ impl App {
                     self.geom.win_x,
                     self.geom.win_y
                 );
-                if self.config.island_style == "mica" {
-                    crate::utils::backdrop::clear_mica_cache();
-                }
-                if self.config.island_style == "glass" || self.config.island_style == "dynamic" {
-                    crate::utils::glass::clear_glass_cache();
-                }
             }
             self.renderer =
                 match crate::window::d3d::D3DRenderer::new(&window, self.geom.os_w, self.geom.os_h)

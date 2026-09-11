@@ -50,17 +50,9 @@ pub struct LyricsParams<'a> {
     pub lyric_scroll_offset: f32,
 }
 
-pub struct WindowParams {
-    pub win_x: i32,
-    pub win_y: i32,
-    pub monitor_x: i32,
-    pub monitor_y: i32,
-    pub monitor_w: u32,
-    pub monitor_h: u32,
-}
-
 pub struct StyleParams<'a> {
     pub island_style: &'a str,
+    pub host_backdrop: bool,
     pub use_blur: bool,
     pub font_size: f32,
     pub dt: f32,
@@ -88,7 +80,6 @@ pub struct DrawIslandParams<'a> {
     pub lyrics: LyricsParams<'a>,
     pub mini_content: Option<MiniContent<'a>>,
     pub compact_overlay: &'a CompactOverlay,
-    pub window: WindowParams,
     pub style: StyleParams<'a>,
 }
 
@@ -205,28 +196,14 @@ fn draw_background_layer(
     rect: Rect,
     island_path: &skia_safe::Path,
 ) {
-    let layout = &params.layout;
-    let window = &params.window;
-    let effect_scale = layout.compact_scale
-        + (layout.expanded_scale - layout.compact_scale) * layout.expansion_progress;
     draw_background(BackgroundParams {
         canvas,
         direct_context,
         rect,
         island_path,
         island_style: params.style.island_style,
+        host_backdrop: params.style.host_backdrop,
         media: params.media.media,
-        win_x: window.win_x,
-        win_y: window.win_y,
-        offset_x: layout.island_x,
-        offset_y: layout.island_y,
-        current_w: layout.current_w,
-        current_h: layout.current_h,
-        global_scale: effect_scale,
-        monitor_x: window.monitor_x,
-        monitor_y: window.monitor_y,
-        monitor_w: window.monitor_w,
-        monitor_h: window.monitor_h,
     });
 }
 

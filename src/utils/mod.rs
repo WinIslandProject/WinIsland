@@ -6,7 +6,6 @@ pub mod color;
 pub(crate) mod cover;
 pub(crate) mod event_loop;
 pub mod font;
-pub mod glass;
 pub mod gpu;
 pub mod icon;
 pub mod logger;
