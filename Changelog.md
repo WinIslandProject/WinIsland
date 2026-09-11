@@ -3,6 +3,8 @@
 ### v1.3.4
 - Fixed the installer leaving WinIsland running in the background during updates
 - Kept secondary lyrics stationary while the primary lyric scrolls
+- Prevented the hidden island from capturing the mouse in fullscreen apps while retaining edge double-click reveal (#163)
+- Allowed notifications to temporarily reveal the island while hidden
 
 ### v1.3.3
 - Added independent size controls for compact and expanded states

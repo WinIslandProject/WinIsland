@@ -1,8 +1,12 @@
+use std::time::Duration;
+
 use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetDoubleClickTime, VK_LBUTTON,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CURSOR_SHOWING, CURSORINFO, GetClassNameW, GetCursorInfo, GetCursorPos, GetForegroundWindow,
     GetWindowRect, GetWindowThreadProcessId, IsIconic,
@@ -58,6 +62,11 @@ pub fn is_left_button_pressed() -> bool {
     // SAFETY: GetAsyncKeyState queries virtual key state. VK_LBUTTON is a constant.
     // No pointers or handles are involved. Thread-safe (per-thread key state).
     unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
+}
+
+pub fn double_click_interval() -> Duration {
+    // SAFETY: GetDoubleClickTime reads the current system setting and has no parameters.
+    Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }))
 }
 
 pub fn is_cursor_hidden() -> bool {

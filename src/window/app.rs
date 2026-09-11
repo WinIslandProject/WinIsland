@@ -32,6 +32,7 @@ type InstallResult = Result<(PluginManifest, PathBuf), String>;
 type MarketplaceCatalogResult = Result<MarketplaceCatalog, String>;
 type MarketplaceDownloadResult = Result<PathBuf, String>;
 const RIGHT_DRAG_THRESHOLD: i32 = 4;
+const HIDDEN_REVEAL_DOUBLE_CLICK_DISTANCE: i32 = 8;
 pub(super) const DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ: u32 = 144_000;
 pub(super) const DEFAULT_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_micros(6_944);
 
@@ -97,6 +98,7 @@ pub struct App {
     seek: SeekDrag,
     is_fullscreen_suppressed: bool,
     is_cursor_suppressed: bool,
+    hidden_reveal_click: HiddenRevealClick,
     touch_id: Option<u64>,
     touch_pos: PhysicalPosition<f64>,
     ctx_mgr: ContextManager,
@@ -172,6 +174,7 @@ impl Default for App {
             seek: SeekDrag::default(),
             is_fullscreen_suppressed: false,
             is_cursor_suppressed: false,
+            hidden_reveal_click: HiddenRevealClick::default(),
             touch_id: None,
             touch_pos: PhysicalPosition::new(0.0, 0.0),
             ctx_mgr: ContextManager::new(),
@@ -187,6 +190,49 @@ impl Default for App {
             is_right_dragging: false,
             right_drag_start_offset: None,
         }
+    }
+}
+
+#[derive(Default)]
+struct HiddenRevealClick {
+    left_pressed: bool,
+    first_click: Option<(Instant, i32, i32)>,
+}
+
+impl HiddenRevealClick {
+    fn update(
+        &mut self,
+        active: bool,
+        left_pressed: bool,
+        position: (i32, i32),
+        now: Instant,
+        interval: Duration,
+    ) -> bool {
+        let pressed = left_pressed && !self.left_pressed;
+        self.left_pressed = left_pressed;
+        if !active {
+            self.first_click = None;
+            return false;
+        }
+        if self
+            .first_click
+            .is_some_and(|(first, _, _)| now.saturating_duration_since(first) > interval)
+        {
+            self.first_click = None;
+        }
+        if !pressed {
+            return false;
+        }
+        let (x, y) = position;
+        if let Some((first, first_x, first_y)) = self.first_click.take()
+            && now.saturating_duration_since(first) <= interval
+            && (x - first_x).abs() <= HIDDEN_REVEAL_DOUBLE_CLICK_DISTANCE
+            && (y - first_y).abs() <= HIDDEN_REVEAL_DOUBLE_CLICK_DISTANCE
+        {
+            return true;
+        }
+        self.first_click = Some((now, x, y));
+        false
     }
 }
 
@@ -290,6 +336,7 @@ struct HideState {
     manual: bool,
     fullscreen: bool,
     fullscreen_reveal_override: bool,
+    notification_reveal: bool,
     origin: Option<(i32, i32)>,
     edge: HideEdge,
 }
@@ -301,6 +348,7 @@ impl Default for HideState {
             manual: false,
             fullscreen: false,
             fullscreen_reveal_override: false,
+            notification_reveal: false,
             origin: None,
             edge: HideEdge::Top,
         }
@@ -309,6 +357,10 @@ impl Default for HideState {
 
 impl HideState {
     fn is_hidden(&self) -> bool {
+        self.has_hidden_reason() && !self.notification_reveal
+    }
+
+    fn has_hidden_reason(&self) -> bool {
         self.auto || self.fullscreen || self.manual
     }
 }
@@ -474,6 +526,7 @@ impl App {
         self.hide.auto = false;
         self.hide.fullscreen = false;
         self.hide.manual = false;
+        self.hide.notification_reveal = false;
         if self.is_fullscreen_suppressed {
             self.hide.fullscreen_reveal_override = true;
         }

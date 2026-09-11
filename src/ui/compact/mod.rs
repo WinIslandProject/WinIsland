@@ -20,6 +20,11 @@ pub enum CompactOverlayState {
     Discard,
 }
 
+pub struct CompactOverlayUpdate {
+    pub volume_changed: bool,
+    pub notification_received: bool,
+}
+
 pub struct CompactOverlay {
     volume_monitor: VolumeMonitor,
     volume_indicator: VolumeIndicator,
@@ -65,19 +70,28 @@ impl CompactOverlay {
             .set_native_flyout_replacement_enabled(enabled);
     }
 
-    pub fn update(&mut self, state: CompactOverlayState, notification_display: bool) -> bool {
+    pub fn update(
+        &mut self,
+        volume_state: CompactOverlayState,
+        notification_state: CompactOverlayState,
+        notification_display: bool,
+    ) -> CompactOverlayUpdate {
         self.volume_monitor
-            .set_key_handling_enabled(!matches!(state, CompactOverlayState::Discard));
+            .set_key_handling_enabled(!matches!(volume_state, CompactOverlayState::Discard));
         let volume_changed = self
             .volume_indicator
-            .update(self.volume_monitor.snapshot(), state);
+            .update(self.volume_monitor.snapshot(), volume_state);
         let notification = self.notification_monitor.update(notification_display);
-        if notification_display {
-            let notification_received = self.notification_indicator.update(notification, state);
-            volume_changed || notification_received
+        let notification_received = if notification_display {
+            self.notification_indicator
+                .update(notification, notification_state)
         } else {
             self.notification_indicator.clear();
-            volume_changed
+            false
+        };
+        CompactOverlayUpdate {
+            volume_changed,
+            notification_received,
         }
     }
 

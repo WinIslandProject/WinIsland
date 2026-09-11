@@ -11,8 +11,8 @@ use crate::ui::expanded::music_view::{
     get_progress_bar_rect, set_progress_dragging, set_progress_hover,
 };
 use crate::utils::mouse::{
-    get_global_cursor_pos, is_cursor_hidden, is_foreground_fullscreen, is_left_button_pressed,
-    is_point_in_continuous_rounded_rect, is_point_in_rect,
+    double_click_interval, get_global_cursor_pos, is_cursor_hidden, is_foreground_fullscreen,
+    is_left_button_pressed, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
 
 use super::{App, HideEdge, RIGHT_DRAG_THRESHOLD};
@@ -104,7 +104,7 @@ impl App {
         let offset_x = layout.offset_x;
         let current_island_x = layout.current_island_x;
         let current_island_y = layout.current_island_y;
-        let is_hovering_visible = is_point_in_continuous_rounded_rect(
+        let is_hovering_island = is_point_in_continuous_rounded_rect(
             rel_x as f64,
             rel_y as f64,
             current_island_x,
@@ -113,19 +113,38 @@ impl App {
             self.springs.h.value as f64,
             self.springs.r.value as f64,
         );
-        let is_on_hidden_reveal = self.is_hidden()
+        let is_over_hidden_reveal = self.is_hidden()
+            && (is_hovering_island
+                || (self.config.hidden_width <= MIN_HIDDEN_WIDTH
+                    && self.springs.hide.value >= 0.999
+                    && is_point_in_rect(
+                        rel_x as f64,
+                        rel_y as f64,
+                        layout.hidden_reveal_x,
+                        layout.hidden_reveal_y,
+                        layout.hidden_reveal_w,
+                        layout.hidden_reveal_h,
+                    )));
+        let is_hovering_visible = !self.is_fullscreen_suppressed && is_hovering_island;
+        let is_on_hidden_reveal = !self.is_fullscreen_suppressed
+            && is_over_hidden_reveal
             && self.config.hidden_width <= MIN_HIDDEN_WIDTH
-            && self.springs.hide.value >= 0.999
-            && is_point_in_rect(
-                rel_x as f64,
-                rel_y as f64,
-                layout.hidden_reveal_x,
-                layout.hidden_reveal_y,
-                layout.hidden_reveal_w,
-                layout.hidden_reveal_h,
-            );
+            && self.springs.hide.value >= 0.999;
 
-        if self.is_cursor_suppressed {
+        let passive_reveal_active = self.is_fullscreen_suppressed && is_over_hidden_reveal;
+        if self.hidden_reveal_click.update(
+            passive_reveal_active,
+            is_left_button_pressed(),
+            (px, py),
+            now,
+            double_click_interval(),
+        ) {
+            self.reveal_island();
+            window.request_redraw();
+            log::info!("Island revealed by fullscreen edge double-click");
+        }
+
+        if self.is_cursor_suppressed || self.is_fullscreen_suppressed {
             let _ = window.set_cursor_hittest(false);
         } else {
             let _ = window.set_cursor_hittest(is_hovering_visible || is_on_hidden_reveal);
@@ -158,6 +177,7 @@ impl App {
                 media_is_playing,
                 is_hovering_visible,
                 compact_overlay_visible,
+                passive_reveal_active,
             },
         );
     }
@@ -420,25 +440,56 @@ impl App {
         media_is_playing: bool,
     ) -> bool {
         let is_paused_idle = music_active && !media_is_playing;
-        let compact_state = if !self.expanded && !self.is_hidden() {
+        let overlay_present = !self.expanded && !self.is_hidden();
+        let volume_state = if overlay_present {
             CompactOverlayState::Present
         } else if self.hide.auto && !self.hide.manual && !self.hide.fullscreen {
             CompactOverlayState::Defer
         } else {
             CompactOverlayState::Discard
         };
-        let compact_event = self
-            .compact_overlay
-            .update(compact_state, self.config.notification_display);
-        if compact_event && self.hide.auto && !self.hide.manual {
+        let notification_state = if overlay_present {
+            CompactOverlayState::Present
+        } else if !self.expanded && self.hide.has_hidden_reason() {
+            CompactOverlayState::Defer
+        } else {
+            CompactOverlayState::Discard
+        };
+        let compact_update = self.compact_overlay.update(
+            volume_state,
+            notification_state,
+            self.config.notification_display,
+        );
+        if compact_update.notification_received
+            && self.hide.has_hidden_reason()
+            && !self.hide.notification_reveal
+        {
+            self.hide.notification_reveal = true;
+            self.idle_timer = Instant::now();
+            self.springs.hide.velocity = -0.65;
+            self.compact_overlay.update(
+                CompactOverlayState::Present,
+                CompactOverlayState::Present,
+                self.config.notification_display,
+            );
+            log::info!("Island temporarily revealed for notification");
+        } else if compact_update.volume_changed && self.hide.auto && !self.hide.manual {
             self.hide.auto = false;
             self.idle_timer = Instant::now();
             self.springs.hide.velocity = -0.65;
             self.compact_overlay.update(
                 CompactOverlayState::Present,
+                CompactOverlayState::Present,
                 self.config.notification_display,
             );
             log::info!("Island un-hidden (compact overlay event)");
+        }
+        if self.hide.notification_reveal && !self.compact_overlay.is_notification_visible() {
+            self.hide.notification_reveal = false;
+            if self.hide.has_hidden_reason() {
+                self.prepare_hide(window, self.hide.edge);
+            }
+            window.request_redraw();
         }
         let compact_overlay_visible = self.compact_overlay.is_visible();
         let is_idle = !is_hovering_visible
@@ -750,6 +801,7 @@ impl App {
         let playback_active = !self.is_hidden() && pacing.media_is_playing;
         let interactive_active = pacing.is_hovering_visible
             || pacing.compact_overlay_visible
+            || pacing.passive_reveal_active
             || self.right_press_cursor.is_some();
 
         if !animation_active
@@ -784,4 +836,5 @@ struct FramePacing {
     media_is_playing: bool,
     is_hovering_visible: bool,
     compact_overlay_visible: bool,
+    passive_reveal_active: bool,
 }

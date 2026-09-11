@@ -19,7 +19,7 @@ impl App {
         px: i32,
         py: i32,
     ) {
-        if self.is_cursor_suppressed {
+        if self.is_cursor_suppressed || self.is_fullscreen_suppressed {
             return;
         }
         let rel_x = px - self.geom.win_x;
@@ -34,7 +34,11 @@ impl App {
     }
 
     pub(super) fn handle_right_input(&mut self, state: ElementState, px: i32, py: i32) {
-        if !self.config.right_click_drag || self.expanded || self.is_cursor_suppressed {
+        if !self.config.right_click_drag
+            || self.expanded
+            || self.is_cursor_suppressed
+            || self.is_fullscreen_suppressed
+        {
             return;
         }
         match state {
