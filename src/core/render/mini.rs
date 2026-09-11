@@ -176,15 +176,17 @@ fn draw_mini_lyrics(params: &MiniContentParams<'_>, alpha: u8) {
     let space_right = params.offset_x + params.current_w - LYRIC_RIGHT_INSET * params.global_scale;
     let available_width = space_right - space_left;
     let scrolling = params.lyric_scroll_offset > 0.0;
+    let center_x = space_left + available_width / 2.0;
     let layout = LyricLayout {
-        anchor_x: if scrolling {
+        primary_anchor_x: if scrolling {
             space_left - params.lyric_scroll_offset
         } else {
-            space_left + available_width / 2.0
+            center_x
         },
+        secondary_center_x: center_x,
         center_y: params.stable_offset_y + params.base_h / 2.0,
         size: lyric_font_size(params.font_size, params.global_scale),
-        centered: !scrolling,
+        primary_centered: !scrolling,
     };
 
     params.canvas.save();
@@ -215,10 +217,11 @@ fn has_lyrics(params: &MiniContentParams<'_>) -> bool {
 
 #[derive(Clone, Copy)]
 struct LyricLayout {
-    anchor_x: f32,
+    primary_anchor_x: f32,
+    secondary_center_x: f32,
     center_y: f32,
     size: f32,
-    centered: bool,
+    primary_centered: bool,
 }
 
 fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
@@ -233,10 +236,11 @@ fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLa
             canvas: params.canvas,
             primary: params.old_lyric,
             secondary: params.old_secondary_lyric,
-            anchor_x: layout.anchor_x,
+            primary_anchor_x: layout.primary_anchor_x,
+            secondary_center_x: layout.secondary_center_x,
             center_y: layout.center_y - LYRIC_TRANSITION_OFFSET * params.global_scale * transition,
             size: layout.size,
-            centered: layout.centered,
+            primary_centered: layout.primary_centered,
             paint: &paint,
             highlight: None,
         });
@@ -253,11 +257,12 @@ fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLa
         canvas: params.canvas,
         primary: params.current_lyric,
         secondary: params.current_secondary_lyric,
-        anchor_x: layout.anchor_x,
+        primary_anchor_x: layout.primary_anchor_x,
+        secondary_center_x: layout.secondary_center_x,
         center_y: layout.center_y
             + LYRIC_TRANSITION_OFFSET * params.global_scale * (1.0 - transition),
         size: layout.size,
-        centered: layout.centered,
+        primary_centered: layout.primary_centered,
         paint: &paint,
         highlight: params.lyric_highlight,
     });
@@ -275,10 +280,11 @@ fn draw_crossfade_lyric_transition(params: &MiniContentParams<'_>, layout: Lyric
             canvas: params.canvas,
             primary: params.old_lyric,
             secondary: params.old_secondary_lyric,
-            anchor_x: layout.anchor_x,
+            primary_anchor_x: layout.primary_anchor_x,
+            secondary_center_x: layout.secondary_center_x,
             center_y: layout.center_y - LYRIC_TRANSITION_OFFSET * params.global_scale * transition,
             size: layout.size,
-            centered: layout.centered,
+            primary_centered: layout.primary_centered,
             paint: &paint,
             highlight: None,
         });
@@ -291,11 +297,12 @@ fn draw_crossfade_lyric_transition(params: &MiniContentParams<'_>, layout: Lyric
         canvas: params.canvas,
         primary: params.current_lyric,
         secondary: params.current_secondary_lyric,
-        anchor_x: layout.anchor_x,
+        primary_anchor_x: layout.primary_anchor_x,
+        secondary_center_x: layout.secondary_center_x,
         center_y: layout.center_y
             + LYRIC_TRANSITION_OFFSET * params.global_scale * (1.0 - transition),
         size: layout.size,
-        centered: layout.centered,
+        primary_centered: layout.primary_centered,
         paint: &paint,
         highlight: params.lyric_highlight,
     });
@@ -384,10 +391,11 @@ struct LyricPairParams<'a> {
     canvas: &'a Canvas,
     primary: &'a str,
     secondary: &'a str,
-    anchor_x: f32,
+    primary_anchor_x: f32,
+    secondary_center_x: f32,
     center_y: f32,
     size: f32,
-    centered: bool,
+    primary_centered: bool,
     paint: &'a Paint,
     highlight: Option<LyricHighlight>,
 }
@@ -397,10 +405,11 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
         canvas,
         primary,
         secondary,
-        anchor_x,
+        primary_anchor_x,
+        secondary_center_x,
         center_y,
         size,
-        centered,
+        primary_centered,
         paint,
         highlight,
     } = params;
@@ -418,7 +427,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
     } else {
         center_y + secondary_size / 3.0
     };
-    let text_x = |text: &str, text_size: f32| {
+    let text_x = |text: &str, text_size: f32, anchor_x: f32, centered: bool| {
         if centered {
             let width = FontManager::global().measure_text_cached(
                 text,
@@ -435,7 +444,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
         draw_highlighted_lyric(
             canvas,
             primary,
-            text_x(primary, size),
+            text_x(primary, size, primary_anchor_x, primary_centered),
             primary_y,
             size,
             paint,
@@ -454,7 +463,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
         draw_text_cached(DrawTextCachedParams {
             canvas,
             text: secondary,
-            x: text_x(secondary, secondary_size),
+            x: text_x(secondary, secondary_size, secondary_center_x, true),
             y: secondary_y,
             size: secondary_size,
             bold: false,

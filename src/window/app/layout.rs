@@ -535,14 +535,15 @@ impl App {
             if has_visible_lyrics {
                 if self.config.lyrics_scroll {
                     let (primary, secondary) = self.displayed_lyric_texts();
-                    let text_w = self.measure_lyric_pair_width(primary, secondary);
+                    let primary_w = self.measure_lyric_text_width(primary);
+                    let text_w = primary_w.max(self.measure_lyric_text_width(secondary));
                     let natural_w = 60.0 + text_w;
                     let max_w = self.config.lyrics_scroll_max_width;
                     if natural_w > max_w {
                         let fixed_w = max_w;
                         let available_text_w = (fixed_w - 59.0) * self.config.compact_scale;
-                        let full_text_w = text_w * self.config.compact_scale;
-                        let overflow = full_text_w - available_text_w;
+                        let full_primary_w = primary_w * self.config.compact_scale;
+                        let overflow = full_primary_w - available_text_w;
                         if overflow > 0.0 && self.lyrics.transition >= 1.0 && !is_paused {
                             if self.lyrics.scroll_offset < overflow {
                                 if self.lyrics.scroll_pause > 0.0 {

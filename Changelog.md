@@ -2,6 +2,7 @@
 
 ### v1.3.4
 - Fixed the installer leaving WinIsland running in the background during updates
+- Kept secondary lyrics stationary while the primary lyric scrolls
 
 ### v1.3.3
 - Added independent size controls for compact and expanded states
