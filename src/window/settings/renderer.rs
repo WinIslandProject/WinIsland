@@ -142,7 +142,7 @@ impl SettingsApp {
             }
 
             self.draw_popup(canvas, &theme);
-            self.draw_widget_drag_overlay(canvas, &theme, win_w, win_h);
+            self.draw_widget_drag_overlay(canvas, win_w, win_h);
             canvas.restore();
 
             // Draw a subtle rounded border around the window
@@ -175,13 +175,7 @@ impl SettingsApp {
         None
     }
 
-    fn draw_widget_drag_overlay(
-        &self,
-        canvas: &Canvas,
-        _theme: &SettingsTheme,
-        win_w: f32,
-        win_h: f32,
-    ) {
+    fn draw_widget_drag_overlay(&self, canvas: &Canvas, win_w: f32, win_h: f32) {
         if self.widget_editor_mode == WidgetEditorMode::Compact {
             let Some(widget) = self.compact_widget_dragging else {
                 return;

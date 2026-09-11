@@ -34,9 +34,7 @@ pub struct DrawTextCachedParams<'a> {
     pub paint: &'a Paint,
 }
 
-pub struct FontManager {
-    _marker: (),
-}
+pub struct FontManager;
 
 struct CustomTypefaceState {
     path: Option<String>,
@@ -266,7 +264,7 @@ fn compute_text_paths(text: &str, size: f32, style: FontStyle) -> Vec<Path> {
 
 impl FontManager {
     pub fn global() -> &'static FontManager {
-        GLOBAL_FONT_MANAGER.get_or_init(|| FontManager { _marker: () })
+        GLOBAL_FONT_MANAGER.get_or_init(|| FontManager)
     }
 
     pub fn set_custom_font_path(&self, path: Option<&str>) {

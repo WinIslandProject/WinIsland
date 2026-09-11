@@ -133,9 +133,7 @@ impl App {
                     offset_x as f32,
                     island_y as f32,
                     w as f32,
-                    h as f32,
                     self.config.expanded_scale,
-                    &self.config.expanded_cover_shape,
                 );
                 let cx = rel_x as f32 - (page_shift as f32);
                 let cy = rel_y as f32;
@@ -155,9 +153,7 @@ impl App {
                     offset_x as f32,
                     island_y as f32,
                     w as f32,
-                    h as f32,
                     self.config.expanded_scale,
-                    &self.config.expanded_cover_shape,
                 );
                 if music_on
                     && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_PREVIOUS)
@@ -176,9 +172,7 @@ impl App {
                     offset_x as f32,
                     island_y as f32,
                     w as f32,
-                    h as f32,
                     self.config.expanded_scale,
-                    &self.config.expanded_cover_shape,
                 );
                 if music_on
                     && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_NEXT)
@@ -197,10 +191,8 @@ impl App {
                     offset_x as f32,
                     island_y as f32,
                     w as f32,
-                    &media,
                     music_on,
                     self.config.expanded_scale,
-                    &self.config.expanded_cover_shape,
                 ) && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_SEEK)
                     && cx >= bar_left
                     && cx <= bar_right

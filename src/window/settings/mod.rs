@@ -493,12 +493,7 @@ impl SettingsApp {
         Ok(())
     }
 
-    pub(crate) fn handle_window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        event: WindowEvent,
-        renderer: &mut D3DRenderer,
-    ) {
+    pub(crate) fn handle_window_event(&mut self, event: WindowEvent, renderer: &mut D3DRenderer) {
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => self.close_requested = true,
             WindowEvent::Focused(focused) => self.handle_focus_changed(focused),
@@ -535,7 +530,7 @@ impl SettingsApp {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
-            } => self.handle_left_mouse_pressed(event_loop),
+            } => self.handle_left_mouse_pressed(),
             WindowEvent::MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
@@ -734,7 +729,7 @@ impl SettingsApp {
         }
     }
 
-    fn handle_left_mouse_pressed(&mut self, event_loop: &ActiveEventLoop) {
+    fn handle_left_mouse_pressed(&mut self) {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
         if self.begin_scroll_drag(mouse_x, mouse_y) {
             self.request_redraw();
@@ -754,7 +749,7 @@ impl SettingsApp {
                 }
             }
             None if self.handle_widget_drag_press() => self.request_redraw(),
-            None => self.handle_click(event_loop),
+            None => self.handle_click(),
         }
     }
 

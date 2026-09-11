@@ -1,5 +1,3 @@
-use crate::core::smtc::MediaInfo;
-
 use super::{
     CONTENT_PADDING, COVER_FLIP_ANIM, COVER_FLIP_OLD_IMG, COVER_SIZE, IMG_CACHE, LOCAL_PLAY_STATE,
     NEXT_SKIP_ANIM, PAUSE_CONTROL_PRESS_VELOCITY, PAUSE_SPRING, PLAYBACK_CONTROLS_TOP_GAP,
@@ -65,14 +63,7 @@ pub fn set_progress_hover(active: bool) {
     });
 }
 
-pub fn get_pause_btn_rect(
-    ox: f32,
-    oy: f32,
-    w: f32,
-    _h: f32,
-    scale: f32,
-    _cover_shape: &str,
-) -> (f32, f32, f32, f32) {
+pub fn get_pause_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32, f32) {
     let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
@@ -81,14 +72,7 @@ pub fn get_pause_btn_rect(
     (btn_cx - hit / 2.0, btn_cy - hit / 2.0, hit, hit)
 }
 
-pub fn get_prev_btn_rect(
-    ox: f32,
-    oy: f32,
-    w: f32,
-    _h: f32,
-    scale: f32,
-    _cover_shape: &str,
-) -> (f32, f32, f32, f32) {
+pub fn get_prev_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32, f32) {
     let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
@@ -97,14 +81,7 @@ pub fn get_prev_btn_rect(
     (btn_cx - hit / 2.0, btn_cy - hit / 2.0, hit, hit)
 }
 
-pub fn get_next_btn_rect(
-    ox: f32,
-    oy: f32,
-    w: f32,
-    _h: f32,
-    scale: f32,
-    _cover_shape: &str,
-) -> (f32, f32, f32, f32) {
+pub fn get_next_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32, f32) {
     let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
@@ -117,10 +94,8 @@ pub fn get_progress_bar_rect(
     ox: f32,
     oy: f32,
     w: f32,
-    _media: &MediaInfo,
     music_active: bool,
     scale: f32,
-    _cover_shape: &str,
 ) -> Option<(f32, f32, f32, f32)> {
     if !music_active {
         return None;

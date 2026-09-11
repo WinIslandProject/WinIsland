@@ -22,7 +22,7 @@ impl ApplicationHandler for App {
             if let (Some(settings), Some(renderer)) =
                 (self.settings.as_mut(), self.renderer.as_mut())
             {
-                settings.handle_window_event(event_loop, event, renderer);
+                settings.handle_window_event(event, renderer);
             }
             if let Some(error) = self
                 .renderer

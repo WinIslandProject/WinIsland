@@ -506,10 +506,8 @@ impl App {
                 offset_x as f32,
                 island_y as f32,
                 self.springs.w.value,
-                self.current_media_info(),
                 music_active,
                 self.config.expanded_scale,
-                &self.config.expanded_cover_shape,
             ) {
                 let page_shift = self.springs.view.value * self.springs.w.value;
                 let cx = rel_x as f32 - page_shift;

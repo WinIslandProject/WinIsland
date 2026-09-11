@@ -426,7 +426,7 @@ unsafe extern "C" fn context_create(
         return PluginResultC::err("context resource limit reached");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
-    let context = context_from_ffi(token, id, &data);
+    let context = context_from_ffi(id, &data);
     let size_bytes = context.title.len() + context.body.len() + context.compact_text.len();
     state.resources.insert(
         id,
@@ -458,7 +458,7 @@ unsafe extern "C" fn context_update(
     if let Err(error) = validate_context_data(&data) {
         return PluginResultC::err(error);
     }
-    let context = context_from_ffi(token, id, &data);
+    let context = context_from_ffi(id, &data);
     let size_bytes = context.title.len() + context.body.len() + context.compact_text.len();
     let mut state = lock_runtime_or_return!();
     if let Err(error) = require_resource(&state, token, id, ResourceKind::Context) {

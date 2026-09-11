@@ -214,7 +214,7 @@ pub struct DrawMusicPageParams<'a> {
     pub palette: &'a [Color],
 }
 
-pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
+pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
     let DrawMusicPageParams {
         canvas,
         ox,
@@ -539,8 +539,6 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) -> bool {
         h_scale: viz_h_scale,
         smooth_factors: VISUALIZER_SMOOTHING,
     });
-
-    false
 }
 
 struct CoverParams<'a> {

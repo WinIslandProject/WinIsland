@@ -26,7 +26,6 @@ pub(super) struct ExpandedContentParams<'a> {
     pub(super) text_color: Color,
     pub(super) text_color_sec: Color,
     pub(super) palette: &'a [Color],
-    pub(super) lyrics_delay: f64,
     pub(super) widget_layout: &'a [WidgetSlot],
     pub(super) plugin_widget_layout: &'a [PluginWidgetSlot],
     pub(super) plugin_widgets: &'a crate::core::plugin_widget::WidgetManager,
@@ -54,7 +53,6 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
         text_color,
         text_color_sec,
         palette,
-        lyrics_delay,
         widget_layout,
         plugin_widget_layout,
         plugin_widgets,
@@ -80,7 +78,7 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
         if music_page_available {
             canvas.save();
             canvas.translate((-page_shift, 0.0));
-            let _ = draw_music_page(DrawMusicPageParams {
+            draw_music_page(DrawMusicPageParams {
                 canvas,
                 ox: offset_x,
                 oy: offset_y,
@@ -115,10 +113,6 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
                 current_h,
                 alpha,
                 global_scale,
-                media,
-                font_size,
-                lyrics_delay,
-                dt,
                 widget_layout,
                 plugin_widget_layout,
                 plugin_widgets,

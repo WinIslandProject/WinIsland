@@ -3,7 +3,6 @@ use crate::core::config::{
     span_cells, widget_footprint,
 };
 use crate::core::plugin_widget::WidgetManager;
-use crate::core::smtc::MediaInfo;
 use crate::icons::arrows::draw_arrow_left;
 use crate::plugin::types::{INTERFACE_VERSION_1, WidgetDrawContextV1};
 use crate::ui::widget::expanded::{draw_widget, widget_animates, widget_grid_layout};
@@ -52,10 +51,6 @@ pub fn draw_widget_page(
     h: f32,
     alpha: u8,
     scale: f32,
-    _media: &MediaInfo,
-    _font_size: f32,
-    _lyrics_delay: f64,
-    _dt: f32,
     widget_layout: &[WidgetSlot],
     plugin_widget_layout: &[PluginWidgetSlot],
     plugin_widgets: &WidgetManager,

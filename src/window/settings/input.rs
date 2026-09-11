@@ -10,7 +10,7 @@ use super::{
 };
 
 impl SettingsApp {
-    pub(super) fn handle_click(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+    pub(super) fn handle_click(&mut self) {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
 
         self.commit_number_input();

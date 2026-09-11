@@ -167,10 +167,7 @@ impl SettingsApp {
                 }
             }
         }
-        if safe_github_url(plugin.repository())
-            && github_rect(panel_x, matches!(plugin, DetailPlugin::Marketplace(_)))
-                .contains(content_point)
-        {
+        if safe_github_url(plugin.repository()) && github_rect(panel_x).contains(content_point) {
             open_url(plugin.repository());
             return true;
         }
@@ -217,9 +214,7 @@ impl SettingsApp {
             }
         };
         if action_hovered
-            || (safe_github_url(plugin.repository())
-                && github_rect(panel_x, matches!(plugin, DetailPlugin::Marketplace(_)))
-                    .contains(point))
+            || (safe_github_url(plugin.repository()) && github_rect(panel_x).contains(point))
         {
             return true;
         }
@@ -351,7 +346,7 @@ impl SettingsApp {
         }
 
         if safe_github_url(plugin.repository()) {
-            let button = github_rect(panel_x, matches!(plugin, DetailPlugin::Marketplace(_)));
+            let button = github_rect(panel_x);
             paint.set_color(theme.control_bg);
             canvas.draw_round_rect(button, BUTTON_H / 2.0, BUTTON_H / 2.0, &paint);
             paint.set_color(theme.accent);
@@ -531,7 +526,7 @@ fn detail_action_rect(panel_x: f32, label: &str) -> Rect {
     )
 }
 
-fn github_rect(panel_x: f32, _marketplace: bool) -> Rect {
+fn github_rect(panel_x: f32) -> Rect {
     Rect::from_xywh(panel_x + DETAIL_PADDING, DETAIL_ACTION_Y, 116.0, BUTTON_H)
 }
 

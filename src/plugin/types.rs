@@ -58,7 +58,6 @@ impl From<&HostState> for HostStateV1 {
 }
 
 pub fn context_from_ffi(
-    _owner: PluginToken,
     id: ResourceId,
     value: &ContextDataV1,
 ) -> crate::core::context::PluginContext {
