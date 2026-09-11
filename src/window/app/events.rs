@@ -22,6 +22,11 @@ impl App {
             && win.id() == id
         {
             match event {
+                WindowEvent::CloseRequested => {
+                    log::info!("Main window close requested, exiting application");
+                    self.close_settings();
+                    event_loop.exit();
+                }
                 WindowEvent::ThemeChanged(theme) => {
                     let is_light = theme == winit::window::Theme::Light;
                     self.is_light_theme = is_light;
