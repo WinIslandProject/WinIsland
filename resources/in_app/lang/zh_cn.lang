@@ -157,6 +157,7 @@ update_failed_save=无法保存新版本文件。
 tray_show=显示
 tray_hide=隐藏
 tray_settings=设置
+tray_restart=重启
 tray_exit=退出
 update_channel=更新渠道
 channel_stable=稳定版

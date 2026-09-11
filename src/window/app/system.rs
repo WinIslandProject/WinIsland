@@ -354,6 +354,14 @@ impl App {
                     log::info!("Tray: opening settings");
                     self.open_settings(event_loop);
                 }
+                Some(TrayAction::Restart) => {
+                    log::info!("Tray: restarting application");
+                    self.close_settings();
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe).arg("--restart").spawn();
+                    }
+                    event_loop.exit();
+                }
                 Some(TrayAction::Exit) => {
                     log::info!("Tray: exiting application");
                     self.close_settings();

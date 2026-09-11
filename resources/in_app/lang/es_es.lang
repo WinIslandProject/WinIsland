@@ -157,6 +157,7 @@ update_failed_save=No se pudo guardar la nueva versión.
 tray_show=Mostrar
 tray_hide=Ocultar
 tray_settings=Ajustes
+tray_restart=Reiniciar
 tray_exit=Salir
 update_channel=Canal de Actualización
 channel_stable=Estable
