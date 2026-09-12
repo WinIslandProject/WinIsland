@@ -282,6 +282,9 @@ impl App {
                                             old_secondary_lyric,
                                             lyric_highlight: self.lyrics.highlight,
                                             lyric_transition: self.lyrics.transition,
+                                            lyric_transition_animation: self
+                                                .lyrics
+                                                .transition_animation,
                                             lyric_scroll_offset: self.lyrics.scroll_offset,
                                         },
                                         style: crate::core::render::StyleParams {

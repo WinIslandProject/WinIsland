@@ -1,5 +1,5 @@
 use crate::core::audio::AudioProcessor;
-use crate::core::config::AppConfig;
+use crate::core::config::{AppConfig, LyricTransitionAnimation, LyricTransitionMode};
 use crate::core::context::ContextManager;
 use crate::core::lyrics::LyricHighlight;
 use crate::core::persistence::{get_config_path, load_config};
@@ -16,7 +16,7 @@ use crate::window::tray::TrayManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winit::dpi::PhysicalPosition;
 use winit::window::Window;
 
@@ -305,12 +305,20 @@ struct LyricState {
     old_secondary_text: String,
     highlight: Option<LyricHighlight>,
     transition: f32,
+    transition_animation: LyricTransitionAnimation,
+    random_state: u64,
     scroll_offset: f32,
     scroll_pause: f32,
 }
 
 impl Default for LyricState {
     fn default() -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let random_state =
+            (now.as_secs() ^ (u64::from(now.subsec_nanos()) << 32) ^ u64::from(std::process::id()))
+                .max(1);
         Self {
             current_text: String::new(),
             current_secondary_text: String::new(),
@@ -318,6 +326,8 @@ impl Default for LyricState {
             old_secondary_text: String::new(),
             highlight: None,
             transition: 1.0,
+            transition_animation: LyricTransitionAnimation::Blur,
+            random_state,
             scroll_offset: 0.0,
             scroll_pause: 0.0,
         }
@@ -331,14 +341,26 @@ impl LyricState {
         secondary_text: String,
         highlight: Option<LyricHighlight>,
         show_immediately: bool,
+        transition_mode: LyricTransitionMode,
     ) {
         self.old_text = std::mem::replace(&mut self.current_text, text);
         self.old_secondary_text =
             std::mem::replace(&mut self.current_secondary_text, secondary_text);
         self.highlight = highlight;
         self.transition = if show_immediately { 1.0 } else { 0.0 };
+        let random_value = self.next_random();
+        self.transition_animation = transition_mode.animation(random_value);
         self.scroll_offset = 0.0;
         self.scroll_pause = 0.0;
+    }
+
+    fn next_random(&mut self) -> u64 {
+        let mut value = self.random_state;
+        value ^= value << 13;
+        value ^= value >> 7;
+        value ^= value << 17;
+        self.random_state = value;
+        value
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::core::config::LyricTransitionMode;
 use crate::core::i18n::tr;
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
@@ -15,6 +16,7 @@ enum MusicAction {
     LyricsDelay,
     LyricsScroll,
     LyricsScrollWidth,
+    LyricsTransitionAnimation,
     LyricsFolder,
     App(String),
 }
@@ -120,6 +122,12 @@ impl SettingsApp {
                 );
             }
         }
+        page.row_source(
+            tr("lyrics_transition_animation"),
+            lyric_transition_options(self.config.lyrics_transition_animation),
+            show_lyrics,
+            MusicAction::LyricsTransitionAnimation,
+        );
         page.group_end();
         page.section(tr("media_apps"));
         page.group_start();
@@ -277,10 +285,42 @@ impl SettingsApp {
                 win_w,
                 win_h,
             ),
+            MusicAction::LyricsTransitionAnimation => PopupState::new(
+                select_lyrics_transition_animation,
+                button_rect,
+                lyric_transition_labels(),
+                LyricTransitionMode::ALL
+                    .into_iter()
+                    .map(|mode| mode.as_str().to_string())
+                    .collect(),
+                LyricTransitionMode::ALL
+                    .iter()
+                    .position(|mode| *mode == self.config.lyrics_transition_animation)
+                    .unwrap_or_default(),
+                win_w,
+                win_h,
+            ),
             _ => return,
         };
         self.show_popup(popup);
     }
+}
+
+fn lyric_transition_labels() -> Vec<String> {
+    vec![
+        tr("lyrics_transition_random"),
+        tr("lyrics_transition_blur"),
+        tr("lyrics_transition_slide"),
+        tr("lyrics_transition_fade"),
+    ]
+}
+
+fn lyric_transition_options(selected: LyricTransitionMode) -> Vec<(String, bool)> {
+    lyric_transition_labels()
+        .into_iter()
+        .zip(LyricTransitionMode::ALL)
+        .map(|(label, mode)| (label, mode == selected))
+        .collect()
 }
 
 fn step(value: f32, direction: StepDirection, amount: f32, min: f32, max: f32) -> f32 {
@@ -308,6 +348,10 @@ fn select_lyrics_mode(app: &mut SettingsApp, value: &str) {
     if value == "lrc" {
         app.config.show_lyrics = true;
     }
+}
+
+fn select_lyrics_transition_animation(app: &mut SettingsApp, value: &str) {
+    app.config.lyrics_transition_animation = value.to_string().into();
 }
 
 fn set_lyrics_delay(app: &mut SettingsApp, value: &str) {

@@ -654,16 +654,26 @@ impl App {
             if lyric != self.lyrics.current_text
                 || secondary_lyric != self.lyrics.current_secondary_text
             {
-                self.lyrics
-                    .transition_to(lyric, secondary_lyric, highlight, started);
+                self.lyrics.transition_to(
+                    lyric,
+                    secondary_lyric,
+                    highlight,
+                    started,
+                    self.config.lyrics_transition_animation,
+                );
                 window.request_redraw();
             } else if highlight != self.lyrics.highlight {
                 self.lyrics.highlight = highlight;
                 window.request_redraw();
             }
         } else if !is_paused && !self.lyrics.current_text.is_empty() {
-            self.lyrics
-                .transition_to(String::new(), String::new(), None, false);
+            self.lyrics.transition_to(
+                String::new(),
+                String::new(),
+                None,
+                false,
+                self.config.lyrics_transition_animation,
+            );
         }
 
         if self.lyrics.transition < 1.0 {

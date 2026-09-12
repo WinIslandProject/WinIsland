@@ -10,7 +10,9 @@ use self::background::{BackgroundParams, draw_background};
 use self::expanded::{ExpandedContentParams, draw_expanded_content};
 use self::mini::{MiniContentParams, draw_mini_content};
 
-use crate::core::config::{CompactWidgetSlot, PluginWidgetSlot, WidgetSlot};
+use crate::core::config::{
+    CompactWidgetSlot, LyricTransitionAnimation, PluginWidgetSlot, WidgetSlot,
+};
 use crate::core::lyrics::LyricHighlight;
 use crate::core::smtc::MediaInfo;
 use crate::ui::compact::CompactOverlay;
@@ -47,6 +49,7 @@ pub struct LyricsParams<'a> {
     pub old_secondary_lyric: &'a str,
     pub lyric_highlight: Option<LyricHighlight>,
     pub lyric_transition: f32,
+    pub lyric_transition_animation: LyricTransitionAnimation,
     pub lyric_scroll_offset: f32,
 }
 
@@ -292,8 +295,8 @@ fn draw_compact_layer(
         expansion_progress: layout.expansion_progress,
         font_size: style.font_size,
         lyric_scroll_offset: lyrics.lyric_scroll_offset,
-        use_blur: style.use_blur,
         lyric_transition: lyrics.lyric_transition,
+        lyric_transition_animation: lyrics.lyric_transition_animation,
         text_color: Color::WHITE,
     });
     crate::ui::widget::compact::draw(

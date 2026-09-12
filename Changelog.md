@@ -1,6 +1,7 @@
 # Changelog
 
 ### v1.3.4
+- Added selectable lyric transition animations with blur, slide, sequential fade, and random modes
 - Added double-click on the album cover to activate the source media app
 - Fixed the installer leaving WinIsland running in the background during updates
 - Kept secondary lyrics stationary while the primary lyric scrolls

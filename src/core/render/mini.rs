@@ -4,6 +4,7 @@ use skia_safe::{
     image_filters,
 };
 
+use crate::core::config::LyricTransitionAnimation;
 use crate::core::context::MiniContent;
 use crate::core::lyrics::LyricHighlight;
 use crate::core::smtc::MediaInfo;
@@ -72,8 +73,8 @@ pub(super) struct MiniContentParams<'a> {
     pub(super) expansion_progress: f32,
     pub(super) font_size: f32,
     pub(super) lyric_scroll_offset: f32,
-    pub(super) use_blur: bool,
     pub(super) lyric_transition: f32,
+    pub(super) lyric_transition_animation: LyricTransitionAnimation,
     pub(super) text_color: Color,
 }
 
@@ -200,11 +201,12 @@ fn draw_mini_lyrics(params: &MiniContentParams<'_>, alpha: u8) {
         ClipOp::Intersect,
         true,
     );
-    if params.use_blur {
-        draw_blurred_lyric_transition(params, layout, lyric_alpha);
-    } else {
-        draw_crossfade_lyric_transition(params, layout, lyric_alpha);
-    }
+    draw_lyric_transition(
+        params,
+        layout,
+        lyric_alpha,
+        params.lyric_transition_animation,
+    );
     params.canvas.restore();
 }
 
@@ -224,13 +226,35 @@ struct LyricLayout {
     primary_centered: bool,
 }
 
-fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
+fn draw_lyric_transition(
+    params: &MiniContentParams<'_>,
+    layout: LyricLayout,
+    alpha: u8,
+    animation: LyricTransitionAnimation,
+) {
     let transition = lyric_transition_progress(params.lyric_transition);
-    if transition < 1.0 && !params.old_lyric.is_empty() {
+    let (blur_sigma, offset, old_opacity, new_opacity) = match animation {
+        LyricTransitionAnimation::Blur => (
+            LYRIC_TRANSITION_BLUR_SIGMA,
+            LYRIC_TRANSITION_OFFSET,
+            1.0 - transition,
+            transition,
+        ),
+        LyricTransitionAnimation::Slide => {
+            (0.0, LYRIC_TRANSITION_OFFSET, 1.0 - transition, transition)
+        }
+        LyricTransitionAnimation::Fade => (
+            0.0,
+            0.0,
+            1.0 - lyric_transition_progress(params.lyric_transition * 2.0),
+            lyric_transition_progress(params.lyric_transition * 2.0 - 1.0),
+        ),
+    };
+    if old_opacity > 0.0 && !params.old_lyric.is_empty() {
         let paint = lyric_paint(
             params.text_color,
-            scaled_alpha(alpha, 1.0 - transition),
-            transition.powi(2) * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
+            scaled_alpha(alpha, old_opacity),
+            transition.powi(2) * blur_sigma * params.global_scale,
         );
         draw_lyric_pair(LyricPairParams {
             canvas: params.canvas,
@@ -238,20 +262,20 @@ fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLa
             secondary: params.old_secondary_lyric,
             primary_anchor_x: layout.primary_anchor_x,
             secondary_center_x: layout.secondary_center_x,
-            center_y: layout.center_y - LYRIC_TRANSITION_OFFSET * params.global_scale * transition,
+            center_y: layout.center_y - offset * params.global_scale * transition,
             size: layout.size,
             primary_centered: layout.primary_centered,
             paint: &paint,
             highlight: None,
         });
     }
-    if params.current_lyric.is_empty() {
+    if new_opacity <= 0.0 || params.current_lyric.is_empty() {
         return;
     }
     let paint = lyric_paint(
         params.text_color,
-        scaled_alpha(alpha, transition),
-        (1.0 - transition).powi(2) * LYRIC_TRANSITION_BLUR_SIGMA * params.global_scale,
+        scaled_alpha(alpha, new_opacity),
+        (1.0 - transition).powi(2) * blur_sigma * params.global_scale,
     );
     draw_lyric_pair(LyricPairParams {
         canvas: params.canvas,
@@ -259,48 +283,7 @@ fn draw_blurred_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLa
         secondary: params.current_secondary_lyric,
         primary_anchor_x: layout.primary_anchor_x,
         secondary_center_x: layout.secondary_center_x,
-        center_y: layout.center_y
-            + LYRIC_TRANSITION_OFFSET * params.global_scale * (1.0 - transition),
-        size: layout.size,
-        primary_centered: layout.primary_centered,
-        paint: &paint,
-        highlight: params.lyric_highlight,
-    });
-}
-
-fn draw_crossfade_lyric_transition(params: &MiniContentParams<'_>, layout: LyricLayout, alpha: u8) {
-    let transition = lyric_transition_progress(params.lyric_transition);
-    if transition < 1.0 && !params.old_lyric.is_empty() {
-        let paint = lyric_paint(
-            params.text_color,
-            scaled_alpha(alpha, 1.0 - transition),
-            0.0,
-        );
-        draw_lyric_pair(LyricPairParams {
-            canvas: params.canvas,
-            primary: params.old_lyric,
-            secondary: params.old_secondary_lyric,
-            primary_anchor_x: layout.primary_anchor_x,
-            secondary_center_x: layout.secondary_center_x,
-            center_y: layout.center_y - LYRIC_TRANSITION_OFFSET * params.global_scale * transition,
-            size: layout.size,
-            primary_centered: layout.primary_centered,
-            paint: &paint,
-            highlight: None,
-        });
-    }
-    if params.current_lyric.is_empty() {
-        return;
-    }
-    let paint = lyric_paint(params.text_color, scaled_alpha(alpha, transition), 0.0);
-    draw_lyric_pair(LyricPairParams {
-        canvas: params.canvas,
-        primary: params.current_lyric,
-        secondary: params.current_secondary_lyric,
-        primary_anchor_x: layout.primary_anchor_x,
-        secondary_center_x: layout.secondary_center_x,
-        center_y: layout.center_y
-            + LYRIC_TRANSITION_OFFSET * params.global_scale * (1.0 - transition),
+        center_y: layout.center_y + offset * params.global_scale * (1.0 - transition),
         size: layout.size,
         primary_centered: layout.primary_centered,
         paint: &paint,
