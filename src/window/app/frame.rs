@@ -698,19 +698,23 @@ impl App {
         dt: f32,
     ) {
         let lyric_target_w = self.compute_lyric_target_width(window, music_active, is_paused, dt);
-        let compact_widget_target_w =
-            if !self.expanded && !self.compact_overlay.is_visible() && !self.is_width_hiding() {
-                let scale = self.config.compact_scale.max(f32::EPSILON);
-                let has_mini_content = self.ctx_mgr.current_mini().is_some();
-                let center_content_width = has_mini_content.then_some(lyric_target_w / scale);
-                crate::ui::widget::compact::target_width(
-                    &self.config.compact_widget_layout,
-                    self.config.base_width,
-                    center_content_width,
-                ) * scale
-            } else {
-                lyric_target_w
-            };
+        let preserve_compact_widget_width = !self.is_width_hiding()
+            || !crate::ui::widget::compact::hide_fade_complete(self.springs.hide.value);
+        let compact_widget_target_w = if !self.expanded
+            && !self.compact_overlay.is_visible()
+            && preserve_compact_widget_width
+        {
+            let scale = self.config.compact_scale.max(f32::EPSILON);
+            let has_mini_content = self.ctx_mgr.current_mini().is_some();
+            let center_content_width = has_mini_content.then_some(lyric_target_w / scale);
+            crate::ui::widget::compact::target_width(
+                &self.config.compact_widget_layout,
+                self.config.base_width,
+                center_content_width,
+            ) * scale
+        } else {
+            lyric_target_w
+        };
         let compact_content_h = self.compact_content_height();
         let default_target_h = if self.expanded {
             self.config.expanded_height * self.config.expanded_scale

@@ -6,6 +6,16 @@ use skia_safe::{Canvas, Color, Paint, Rect};
 
 const CONTENT_EDGE_INSET: f32 = 9.0;
 const CONTENT_GAP: f32 = 7.0;
+const HIDE_FADE_END: f32 = 0.45;
+
+pub(crate) fn hide_opacity(hide_progress: f32) -> f32 {
+    let progress = (hide_progress / HIDE_FADE_END).clamp(0.0, 1.0);
+    1.0 - progress * progress * (3.0 - 2.0 * progress)
+}
+
+pub(crate) fn hide_fade_complete(hide_progress: f32) -> bool {
+    hide_progress >= HIDE_FADE_END
+}
 
 pub(crate) fn widget_width(widget: CompactWidgetKind) -> f32 {
     match widget {

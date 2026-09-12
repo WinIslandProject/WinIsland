@@ -30,6 +30,7 @@ pub struct LayoutParams {
     pub compact_scale: f32,
     pub expanded_scale: f32,
     pub hide_progress: f32,
+    pub compact_widget_opacity: f32,
     pub island_x: f32,
     pub island_y: f32,
     pub stable_island_y: f32,
@@ -309,7 +310,7 @@ fn draw_compact_layer(
             layout.base_h,
         ),
         layout.compact_scale,
-        (alpha * f32::from(u8::MAX)) as u8,
+        (alpha * layout.compact_widget_opacity * f32::from(u8::MAX)) as u8,
         has_mini_content,
     );
 }

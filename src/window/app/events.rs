@@ -266,6 +266,10 @@ impl App {
                                             expanded_scale: self.config.expanded_scale,
                                             hide_progress: self.springs.hide.value
                                                 * island_layout.content_hide_ratio,
+                                            compact_widget_opacity:
+                                                crate::ui::widget::compact::hide_opacity(
+                                                    self.springs.hide.value,
+                                                ),
                                             island_x: island_layout.current_island_x as f32,
                                             island_y: island_layout.current_island_y as f32,
                                             stable_island_y: island_layout.stable_island_y as f32,

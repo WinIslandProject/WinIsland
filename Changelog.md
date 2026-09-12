@@ -2,6 +2,7 @@
 
 ### v1.3.5
 - Fixed some auto-hide issues
+- Fixed known issues
 
 ### v1.3.4
 - Added selectable lyric transition animations with blur, slide, sequential fade, and random modes
