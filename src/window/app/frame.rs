@@ -125,8 +125,13 @@ impl App {
                         layout.hidden_reveal_w,
                         layout.hidden_reveal_h,
                     )));
-        let is_hovering_visible = !self.is_fullscreen_suppressed && is_hovering_island;
-        let is_on_hidden_reveal = !self.is_fullscreen_suppressed
+        let fullscreen_interaction_active = self.is_fullscreen_suppressed
+            && self.hide.fullscreen_reveal_override
+            && !self.is_hidden();
+        let interaction_suppressed = (self.is_cursor_suppressed || self.is_fullscreen_suppressed)
+            && !fullscreen_interaction_active;
+        let is_hovering_visible = !interaction_suppressed && is_hovering_island;
+        let is_on_hidden_reveal = !interaction_suppressed
             && is_over_hidden_reveal
             && self.config.hidden_width <= MIN_HIDDEN_WIDTH
             && self.springs.hide.value >= 0.999;
@@ -144,7 +149,7 @@ impl App {
             log::info!("Island revealed by fullscreen edge double-click");
         }
 
-        if self.is_cursor_suppressed || self.is_fullscreen_suppressed {
+        if interaction_suppressed {
             let _ = window.set_cursor_hittest(false);
         } else {
             let _ = window.set_cursor_hittest(is_hovering_visible || is_on_hidden_reveal);

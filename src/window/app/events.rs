@@ -45,6 +45,7 @@ impl App {
                     self.geom.win_y = position.y;
                     if !self.is_dragging
                         && !self.is_right_dragging
+                        && self.hide.origin.is_none()
                         && self.geom.position_restore_after.is_none()
                         && (position.x != self.geom.configured_x
                             || position.y != self.geom.configured_y)
