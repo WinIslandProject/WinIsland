@@ -84,11 +84,27 @@ body:
     validations:
       required: false
 
-  - type: textarea
-    id: notes
+  - type: checkboxes
+    id: check-list
     attributes:
-      label: Notes
-      description: (Optional) provide any other relevant information
-      placeholder: Additional information, if any
-    validations:
-      required: false
+      label: Checklist
+      description: Check all inspections according to the checklist below.
+      options:
+        - label: "I'm running the official release build (GitHub Releases), not a fork or third-party build"
+          required: false
+        - label: "I confirm that I'm running the latest version, whether stable or nightly"
+          required: false
+        - label: "I confirm that I have provided my Windows version and build number (e.g. Windows 11 23H2, build 22631)"
+          required: false
+        - label: "I confirm that I have provided GPU/driver information if the issue is rendering-related"
+          required: false
+        - label: "I confirm that I have included relevant logs or error messages"
+          required: false
+        - label: "I confirm that I have included a screenshot or screen recording if the issue is visual or UI-related"
+          required: false
+        - label: "I confirm that I have searched for existing issues and this is not a duplicate"
+          required: false
+        - label: "I confirm that I have not read these checkboxes and therefore I just ticked them all."
+          required: false
+        - label: "I am well aware that if the issue is not filled out correctly and completely, it will simply be closed without any response or reason."
+          required: false
