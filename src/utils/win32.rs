@@ -1,23 +1,31 @@
 use std::ffi::c_void;
+use std::path::Path;
 use std::sync::OnceLock;
 
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HWND, LPARAM,
+};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
+use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
 use windows::Win32::System::Com::{
     CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
-use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW, SetProcessWorkingSetSize,
+};
 use windows::Win32::UI::Shell::{
     ACTIVATEOPTIONS, ApplicationActivationManager, IApplicationActivationManager,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, HWND_TOPMOST, SW_RESTORE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
-    SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_THICKFRAME,
+    EnumWindows, FindWindowW, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetWindow, GetWindowLongPtrW,
+    GetWindowThreadProcessId, HWND_TOPMOST, IsWindowVisible, SW_RESTORE, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX,
+    WS_THICKFRAME,
 };
-use windows::core::{BOOL, PCWSTR, s, w};
+use windows::core::{BOOL, PCWSTR, PWSTR, s, w};
 
 type SetWindowCompositionAttribute =
     unsafe extern "system" fn(HWND, *mut WindowCompositionAttributeData) -> BOOL;
@@ -214,14 +222,125 @@ pub fn activate_application(app_user_model_id: &str) -> bool {
     }
     match result {
         Ok(process_id) => {
-            log::info!("Notification application activated: {app_id} (process {process_id})");
+            log::info!("Application activated: {app_id} (process {process_id})");
             true
         }
         Err(error) => {
-            log::debug!("Notification application could not be activated: {error:?}");
+            log::debug!("Application could not be activated: {error:?}");
             false
         }
     }
+}
+
+struct MediaWindowSearch {
+    source_app_id: String,
+    executable_name: String,
+    window: Option<HWND>,
+}
+
+pub fn activate_media_application(source_app_id: &str) -> bool {
+    if source_app_id.is_empty() {
+        return false;
+    }
+    let executable_name = Path::new(source_app_id)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(source_app_id)
+        .to_string();
+    let mut search = MediaWindowSearch {
+        source_app_id: source_app_id.to_string(),
+        executable_name,
+        window: None,
+    };
+    // SAFETY: EnumWindows invokes the callback synchronously. lparam points to search for the
+    // entire enumeration, and the callback only stores HWND values owned by other processes.
+    let _ = unsafe {
+        EnumWindows(
+            Some(find_media_window),
+            LPARAM((&mut search as *mut MediaWindowSearch) as isize),
+        )
+    };
+    if let Some(hwnd) = search.window {
+        // SAFETY: hwnd was returned by EnumWindows and remained valid through the synchronous
+        // search. Restoring and foregrounding it do not retain any caller-owned pointers.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            if SetForegroundWindow(hwnd).as_bool() {
+                return true;
+            }
+        }
+    }
+    activate_application(source_app_id)
+}
+
+unsafe extern "system" fn find_media_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    // SAFETY: lparam is the MediaWindowSearch pointer supplied to synchronous EnumWindows above.
+    let search = unsafe { &mut *(lparam.0 as *mut MediaWindowSearch) };
+    if !unsafe { IsWindowVisible(hwnd) }.as_bool() || unsafe { GetWindow(hwnd, GW_OWNER) }.is_ok() {
+        return true.into();
+    }
+    let mut process_id = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut process_id)) };
+    if process_id == 0 || process_id == std::process::id() {
+        return true.into();
+    }
+    let Ok(process) =
+        (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
+    else {
+        return true.into();
+    };
+    let matches = process_application_user_model_id(process)
+        .is_some_and(|id| id.eq_ignore_ascii_case(&search.source_app_id))
+        || process_executable_name(process)
+            .is_some_and(|name| name.eq_ignore_ascii_case(&search.executable_name));
+    // SAFETY: process is the owned handle returned by OpenProcess and is closed exactly once.
+    let _ = unsafe { CloseHandle(process) };
+    if matches {
+        search.window = Some(hwnd);
+        false.into()
+    } else {
+        true.into()
+    }
+}
+
+fn process_application_user_model_id(
+    process: windows::Win32::Foundation::HANDLE,
+) -> Option<String> {
+    let mut length = 0;
+    // SAFETY: the first call queries the required UTF-16 buffer length and writes only length.
+    if unsafe { GetApplicationUserModelId(process, &mut length, None) } != ERROR_INSUFFICIENT_BUFFER
+        || length == 0
+    {
+        return None;
+    }
+    let mut buffer = vec![0u16; length as usize];
+    // SAFETY: buffer has the length requested by the first call and remains valid synchronously.
+    if unsafe { GetApplicationUserModelId(process, &mut length, Some(PWSTR(buffer.as_mut_ptr()))) }
+        != ERROR_SUCCESS
+    {
+        return None;
+    }
+    buffer.truncate(length.saturating_sub(1) as usize);
+    String::from_utf16(&buffer).ok()
+}
+
+fn process_executable_name(process: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    let mut buffer = vec![0u16; 32_768];
+    let mut length = buffer.len() as u32;
+    // SAFETY: buffer is writable for length UTF-16 code units and length is updated synchronously.
+    unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
+    }
+    .ok()?;
+    let path = String::from_utf16_lossy(&buffer[..length as usize]);
+    Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
 pub fn trim_process_working_set() {

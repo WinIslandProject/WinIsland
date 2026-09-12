@@ -63,8 +63,18 @@ pub fn set_progress_hover(active: bool) {
     });
 }
 
+pub fn get_cover_rect(ox: f32, oy: f32, scale: f32) -> (f32, f32, f32, f32) {
+    let size = COVER_SIZE * scale;
+    (
+        ox + CONTENT_PADDING * scale,
+        oy + CONTENT_PADDING * scale,
+        size,
+        size,
+    )
+}
+
 pub fn get_pause_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32, f32) {
-    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let (_, img_y, img_size, _) = get_cover_rect(ox, oy, scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
     let hit = 40.0 * scale;
@@ -73,7 +83,7 @@ pub fn get_pause_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f3
 }
 
 pub fn get_prev_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32, f32) {
-    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let (_, img_y, img_size, _) = get_cover_rect(ox, oy, scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
     let hit = 36.0 * scale;
@@ -82,7 +92,7 @@ pub fn get_prev_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32
 }
 
 pub fn get_next_btn_rect(ox: f32, oy: f32, w: f32, scale: f32) -> (f32, f32, f32, f32) {
-    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let (_, img_y, img_size, _) = get_cover_rect(ox, oy, scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let btn_cy = bar_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
     let hit = 36.0 * scale;
@@ -100,7 +110,7 @@ pub fn get_progress_bar_rect(
     if !music_active {
         return None;
     }
-    let (img_size, img_y) = (COVER_SIZE * scale, oy + CONTENT_PADDING * scale);
+    let (_, img_y, img_size, _) = get_cover_rect(ox, oy, scale);
     let bar_y = img_y + img_size + PROGRESS_TOP_GAP * scale;
     let time_w = PROGRESS_TIME_WIDTH * scale;
     let bar_full_left = ox + CONTENT_PADDING * scale;

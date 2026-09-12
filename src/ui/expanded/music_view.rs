@@ -4,9 +4,9 @@ mod palette;
 mod visualizer;
 
 pub use controls::{
-    get_next_btn_rect, get_pause_btn_rect, get_prev_btn_rect, get_progress_bar_rect,
-    set_progress_dragging, set_progress_hover, snap_progress, trigger_cover_flip,
-    trigger_next_click, trigger_pause_click, trigger_prev_click,
+    get_cover_rect, get_next_btn_rect, get_pause_btn_rect, get_prev_btn_rect,
+    get_progress_bar_rect, set_progress_dragging, set_progress_hover, snap_progress,
+    trigger_cover_flip, trigger_next_click, trigger_pause_click, trigger_prev_click,
 };
 pub use visualizer::{DrawVisualizerParams, draw_visualizer};
 

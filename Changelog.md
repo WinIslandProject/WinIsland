@@ -1,6 +1,7 @@
 # Changelog
 
 ### v1.3.4
+- Added double-click on the album cover to activate the source media app
 - Fixed the installer leaving WinIsland running in the background during updates
 - Kept secondary lyrics stationary while the primary lyric scrolls
 - Prevented the hidden island from capturing the mouse in fullscreen apps while retaining edge double-click reveal (#163)

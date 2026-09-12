@@ -135,7 +135,7 @@ impl App {
         if self.hidden_reveal_click.update(
             passive_reveal_active,
             is_left_button_pressed(),
-            (px, py),
+            (px as f32, py as f32),
             now,
             double_click_interval(),
         ) {

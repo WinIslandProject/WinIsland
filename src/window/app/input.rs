@@ -1,13 +1,18 @@
+use std::time::Instant;
+
 use winit::event::ElementState;
 use winit::event_loop::ActiveEventLoop;
 
 use crate::core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
 use crate::ui::expanded::music_view::{
-    get_next_btn_rect, get_pause_btn_rect, get_prev_btn_rect, get_progress_bar_rect,
-    trigger_cover_flip, trigger_next_click, trigger_pause_click, trigger_prev_click,
+    get_cover_rect, get_next_btn_rect, get_pause_btn_rect, get_prev_btn_rect,
+    get_progress_bar_rect, trigger_cover_flip, trigger_next_click, trigger_pause_click,
+    trigger_prev_click,
 };
 use crate::ui::widget::expanded::{widget_corner_radius, widget_grid_layout};
-use crate::utils::mouse::{is_point_in_continuous_rounded_rect, is_point_in_rect};
+use crate::utils::mouse::{
+    double_click_interval, is_point_in_continuous_rounded_rect, is_point_in_rect,
+};
 
 use super::{App, IslandLayout, should_show_widget_view};
 
@@ -132,6 +137,33 @@ impl App {
                 let media = self.current_media_info().clone();
                 let music_on = !media.title.is_empty()
                     && (self.plugin_media_source.is_some() || self.config.smtc_enabled);
+                let cx = rel_x as f32 - page_shift as f32;
+                let cy = rel_y as f32;
+                let (cover_x, cover_y, cover_w, cover_h) =
+                    get_cover_rect(offset_x as f32, island_y as f32, self.config.expanded_scale);
+                if music_on
+                    && !media.source_app_id.is_empty()
+                    && cx >= cover_x
+                    && cx <= cover_x + cover_w
+                    && cy >= cover_y
+                    && cy <= cover_y + cover_h
+                {
+                    if self
+                        .cover_click
+                        .register((cx, cy), Instant::now(), double_click_interval())
+                    {
+                        if crate::utils::win32::activate_media_application(&media.source_app_id) {
+                            log::info!("Media application activated: {}", media.source_app_id);
+                        } else {
+                            log::warn!(
+                                "Media application could not be activated: {}",
+                                media.source_app_id
+                            );
+                        }
+                    }
+                    return;
+                }
+                self.cover_click.reset();
 
                 let (bx, by, bw, bh) = get_pause_btn_rect(
                     offset_x as f32,
@@ -139,8 +171,6 @@ impl App {
                     w as f32,
                     self.config.expanded_scale,
                 );
-                let cx = rel_x as f32 - (page_shift as f32);
-                let cy = rel_y as f32;
                 if music_on
                     && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_TOGGLE_PLAY)
                     && cx >= bx

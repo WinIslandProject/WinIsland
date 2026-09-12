@@ -32,7 +32,7 @@ type InstallResult = Result<(PluginManifest, PathBuf), String>;
 type MarketplaceCatalogResult = Result<MarketplaceCatalog, String>;
 type MarketplaceDownloadResult = Result<PathBuf, String>;
 const RIGHT_DRAG_THRESHOLD: i32 = 4;
-const HIDDEN_REVEAL_DOUBLE_CLICK_DISTANCE: i32 = 8;
+const DOUBLE_CLICK_DISTANCE: f32 = 8.0;
 pub(super) const DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ: u32 = 144_000;
 pub(super) const DEFAULT_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_micros(6_944);
 
@@ -99,6 +99,7 @@ pub struct App {
     is_fullscreen_suppressed: bool,
     is_cursor_suppressed: bool,
     hidden_reveal_click: HiddenRevealClick,
+    cover_click: DoubleClick,
     touch_id: Option<u64>,
     touch_pos: PhysicalPosition<f64>,
     ctx_mgr: ContextManager,
@@ -175,6 +176,7 @@ impl Default for App {
             is_fullscreen_suppressed: false,
             is_cursor_suppressed: false,
             hidden_reveal_click: HiddenRevealClick::default(),
+            cover_click: DoubleClick::default(),
             touch_id: None,
             touch_pos: PhysicalPosition::new(0.0, 0.0),
             ctx_mgr: ContextManager::new(),
@@ -196,7 +198,7 @@ impl Default for App {
 #[derive(Default)]
 struct HiddenRevealClick {
     left_pressed: bool,
-    first_click: Option<(Instant, i32, i32)>,
+    sequence: DoubleClick,
 }
 
 impl HiddenRevealClick {
@@ -204,35 +206,44 @@ impl HiddenRevealClick {
         &mut self,
         active: bool,
         left_pressed: bool,
-        position: (i32, i32),
+        position: (f32, f32),
         now: Instant,
         interval: Duration,
     ) -> bool {
         let pressed = left_pressed && !self.left_pressed;
         self.left_pressed = left_pressed;
         if !active {
-            self.first_click = None;
+            self.sequence.reset();
             return false;
-        }
-        if self
-            .first_click
-            .is_some_and(|(first, _, _)| now.saturating_duration_since(first) > interval)
-        {
-            self.first_click = None;
         }
         if !pressed {
             return false;
         }
+        self.sequence.register(position, now, interval)
+    }
+}
+
+#[derive(Default)]
+struct DoubleClick {
+    first_click: Option<(Instant, f32, f32)>,
+}
+
+impl DoubleClick {
+    fn register(&mut self, position: (f32, f32), now: Instant, interval: Duration) -> bool {
         let (x, y) = position;
         if let Some((first, first_x, first_y)) = self.first_click.take()
             && now.saturating_duration_since(first) <= interval
-            && (x - first_x).abs() <= HIDDEN_REVEAL_DOUBLE_CLICK_DISTANCE
-            && (y - first_y).abs() <= HIDDEN_REVEAL_DOUBLE_CLICK_DISTANCE
+            && (x - first_x).abs() <= DOUBLE_CLICK_DISTANCE
+            && (y - first_y).abs() <= DOUBLE_CLICK_DISTANCE
         {
             return true;
         }
         self.first_click = Some((now, x, y));
         false
+    }
+
+    fn reset(&mut self) {
+        self.first_click = None;
     }
 }
 
