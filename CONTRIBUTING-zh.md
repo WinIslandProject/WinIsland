@@ -81,11 +81,21 @@ cargo clippy --workspace -- -D warnings
 
 ### 4.1 分支命名
 
-- `feat/功能名` - 新功能
-- `fix/问题描述` - Bug 修复
-- `refactor/任务描述` - 重构
-- `chore/任务描述` - 杂项（依赖更新、构建配置等）
-- `docs/文档说明` - 文档更新
+- `feat/` — 新功能
+- `fix/` — Bug 修复
+- `hotfix/` — 紧急 Bug 修复
+- `refactor/` — 重构
+- `chore/` — 杂项（依赖更新、构建配置等）
+- `docs/` — 文档更新
+- `test/` — 测试
+- `ci/` — CI 变更
+- `build/` — 构建系统变更
+- `perf/` — 性能优化
+- `style/` — 代码风格变更
+- `revert/` — 回滚变更
+- `release/` — 发布分支
+- `deps/` — 依赖更新
+- `security/` — 安全修复
 
 ### 4.2 Commit 规范
 
