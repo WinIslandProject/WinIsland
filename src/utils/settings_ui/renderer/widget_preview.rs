@@ -20,10 +20,10 @@ use crate::utils::settings_ui::{SettingsPainter, settings_paint};
 use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
 
 use super::super::input::{
-    COMPACT_WIDGET_ISLAND_PANEL_H, COMPACT_WIDGET_PREVIEW_H, CompactWidgetGridGeom,
-    WIDGET_ISLAND_PANEL_H, WIDGET_LIBRARY_HEADER_H, WIDGET_PANEL_GAP, WidgetDropAnimation,
-    WidgetDropTarget, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetGridGeom,
-    WidgetSource, compact_widget_grid_geom, compact_widget_library_items,
+    COMPACT_WIDGET_ISLAND_PANEL_H, CompactWidgetGridGeom, WIDGET_ISLAND_PANEL_H,
+    WIDGET_LIBRARY_HEADER_H, WIDGET_PANEL_GAP, WidgetDropAnimation, WidgetDropTarget,
+    WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetGridGeom, WidgetSource,
+    compact_widget_grid_geom, compact_widget_library_items, compact_widget_preview_height,
     widget_delete_button_center, widget_grid_geom, widget_library_items, widget_source_rect,
     widget_source_span,
 };
@@ -610,6 +610,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         widget_layout,
         plugin_widget_layout,
         widget_dragging,
+        width,
     );
     let Some(frame) = PreviewFrame::new(params, preview_height, WIDGET_ISLAND_PANEL_H) else {
         return;
@@ -752,7 +753,8 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         frame.draw_empty_library(canvas, widget_dragging.is_some(), theme);
     } else {
         for (index, source) in library_items.iter().enumerate() {
-            let (x, y, width, height) = widget_source_rect(frame.panel_x, source_y, index);
+            let (x, y, width, height) =
+                widget_source_rect(frame.panel_x, frame.panel_width, source_y, index);
             let rect = Rect::from_xywh(x, y, width, height);
             let hover = if widget_hover.is_some_and(|hover| {
                 matches!(
@@ -903,7 +905,9 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
     let compact_widget_drag_hover_slot = widget_drag_hover_slot.and_then(WidgetEditorSlot::compact);
     let compact_widget_preview_hover_slot =
         widget_preview_hover_slot.and_then(WidgetEditorSlot::compact);
-    let preview_height = COMPACT_WIDGET_PREVIEW_H - 20.0;
+    let library_items =
+        compact_widget_library_items(compact_widget_layout, compact_widget_dragging);
+    let preview_height = compact_widget_preview_height(library_items.len(), width) - 20.0;
     let Some(frame) = PreviewFrame::new(params, preview_height, COMPACT_WIDGET_ISLAND_PANEL_H)
     else {
         return;
@@ -981,13 +985,12 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
     }
 
     let source_y = frame.source_y();
-    let library_items =
-        compact_widget_library_items(compact_widget_layout, compact_widget_dragging);
     if library_items.is_empty() {
         frame.draw_empty_library(canvas, compact_widget_dragging.is_some(), theme);
     } else {
         for (index, widget) in library_items.into_iter().enumerate() {
-            let (x, y, width, height) = widget_source_rect(frame.panel_x, source_y, index);
+            let (x, y, width, height) =
+                widget_source_rect(frame.panel_x, frame.panel_width, source_y, index);
             let hover = if widget_hover.is_some_and(|hover| {
                 matches!(hover, WidgetEditorHover::CompactLibrary(candidate) if *candidate == widget)
             }) {
@@ -1011,6 +1014,7 @@ fn params_item_height(
     widget_layout: &[WidgetSlot],
     plugin_widget_layout: &[PluginWidgetSlot],
     dragging: Option<&WidgetSource>,
+    width: f32,
 ) -> f32 {
     super::super::input::widget_preview_height(
         widget_library_items(
@@ -1020,5 +1024,6 @@ fn params_item_height(
             dragging,
         )
         .len(),
+        width,
     ) - 20.0
 }

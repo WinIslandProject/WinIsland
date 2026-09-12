@@ -9,8 +9,9 @@ use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{
     CompactWidgetPreviewHit, WidgetDropAnimation, WidgetDropTarget, WidgetEditorHover,
     WidgetEditorSlot, WidgetPreviewHit, WidgetSource, compact_widget_grid_geom,
-    compact_widget_preview_hit_test, widget_delete_button_hit, widget_grid_geom,
-    widget_library_items, widget_preview_height, widget_preview_hit_test,
+    compact_widget_library_items, compact_widget_preview_height, compact_widget_preview_hit_test,
+    widget_delete_button_hit, widget_grid_geom, widget_library_items, widget_preview_height,
+    widget_preview_hit_test,
 };
 
 use super::super::{SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WIDGETS_PAGE_INDEX};
@@ -29,6 +30,7 @@ struct WidgetPreviewContext {
 
 impl SettingsApp {
     pub(crate) fn build_widget_items(&self) -> Vec<SettingsItem> {
+        let width = self.content_width();
         let height = match self.widget_editor_mode {
             WidgetEditorMode::Expanded => {
                 let count = widget_library_items(
@@ -38,9 +40,16 @@ impl SettingsApp {
                     self.widget_dragging.as_ref(),
                 )
                 .len();
-                widget_preview_height(count)
+                widget_preview_height(count, width)
             }
-            WidgetEditorMode::Compact => crate::utils::settings_ui::input::COMPACT_WIDGET_PREVIEW_H,
+            WidgetEditorMode::Compact => compact_widget_preview_height(
+                compact_widget_library_items(
+                    &self.config.compact_widget_layout,
+                    self.compact_widget_dragging,
+                )
+                .len(),
+                width,
+            ),
         };
         vec![SettingsItem::WidgetPreview { height }]
     }

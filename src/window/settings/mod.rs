@@ -587,6 +587,7 @@ impl SettingsApp {
     fn handle_resized(&mut self, renderer: &mut D3DRenderer, size: PhysicalSize<u32>) {
         self.win_w = size.width as f32;
         self.win_h = size.height as f32;
+        self.mark_items_dirty();
         self.resize_renderer_target(renderer, size);
         self.request_redraw();
     }
@@ -596,6 +597,7 @@ impl SettingsApp {
             return;
         };
         let size = window.inner_size();
+        self.mark_items_dirty();
         self.resize_renderer_target(renderer, size);
         self.request_redraw();
     }

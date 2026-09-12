@@ -18,11 +18,14 @@ pub const WIDGET_ISLAND_PANEL_H: f32 = 308.0;
 pub const WIDGET_PANEL_GAP: f32 = 12.0;
 pub const WIDGET_EDITOR_HEADER_H: f32 = 56.0;
 pub const WIDGET_LIBRARY_HEADER_H: f32 = 52.0;
-pub const WIDGET_LIBRARY_TILE_W: f32 = 112.0;
 pub const WIDGET_LIBRARY_TILE_H: f32 = 72.0;
 pub const WIDGET_LIBRARY_TILE_GAP: f32 = 10.0;
-pub const COMPACT_WIDGET_PREVIEW_H: f32 = 388.0;
+pub const COMPACT_WIDGET_PREVIEW_H: f32 = 398.0;
 pub const COMPACT_WIDGET_ISLAND_PANEL_H: f32 = 226.0;
+const WIDGET_LIBRARY_HORIZONTAL_PADDING: f32 = 12.0;
+const WIDGET_LIBRARY_MIN_TILE_W: f32 = 104.0;
+const WIDGET_LIBRARY_MAX_TILE_W: f32 = 132.0;
+const WIDGET_LIBRARY_MAX_COLUMNS: usize = 6;
 const COMPACT_WIDGET_PREVIEW_PREFERRED_W: f32 = 260.0;
 const COMPACT_WIDGET_PREVIEW_WIDTH_GROWTH: f32 = 0.75;
 const COMPACT_WIDGET_PREVIEW_MAX_SCALE: f32 = 1.8;
@@ -293,17 +296,36 @@ pub fn widget_delete_button_hit(mouse: (f32, f32), rect: (f32, f32, f32, f32), s
     (mx - cx).powi(2) + (my - cy).powi(2) <= radius.powi(2)
 }
 
-pub fn widget_source_rect(row_x: f32, source_y: f32, index: usize) -> (f32, f32, f32, f32) {
-    let column = index % 4;
-    let row = index / 4;
-    let source_x = row_x + 12.0 + column as f32 * (WIDGET_LIBRARY_TILE_W + WIDGET_LIBRARY_TILE_GAP);
+fn widget_library_panel_width(width: f32) -> f32 {
+    width - CONTENT_PADDING * 2.0 - GROUP_INNER_PAD * 2.0
+}
+
+fn widget_library_columns(panel_width: f32) -> usize {
+    let available_width = (panel_width - WIDGET_LIBRARY_HORIZONTAL_PADDING * 2.0).max(1.0);
+    (((available_width + WIDGET_LIBRARY_TILE_GAP)
+        / (WIDGET_LIBRARY_MIN_TILE_W + WIDGET_LIBRARY_TILE_GAP))
+        .floor() as usize)
+        .clamp(1, WIDGET_LIBRARY_MAX_COLUMNS)
+}
+
+pub fn widget_source_rect(
+    panel_x: f32,
+    panel_width: f32,
+    source_y: f32,
+    index: usize,
+) -> (f32, f32, f32, f32) {
+    let columns = widget_library_columns(panel_width);
+    let inner_width = (panel_width - WIDGET_LIBRARY_HORIZONTAL_PADDING * 2.0).max(1.0);
+    let total_gap = WIDGET_LIBRARY_TILE_GAP * columns.saturating_sub(1) as f32;
+    let tile_width =
+        ((inner_width - total_gap) / columns as f32).clamp(1.0, WIDGET_LIBRARY_MAX_TILE_W);
+    let grid_width = tile_width * columns as f32 + total_gap;
+    let grid_x = panel_x + (panel_width - grid_width) / 2.0;
+    let column = index % columns;
+    let row = index / columns;
+    let source_x = grid_x + column as f32 * (tile_width + WIDGET_LIBRARY_TILE_GAP);
     let source_y = source_y + row as f32 * (WIDGET_LIBRARY_TILE_H + WIDGET_LIBRARY_TILE_GAP);
-    (
-        source_x,
-        source_y,
-        WIDGET_LIBRARY_TILE_W,
-        WIDGET_LIBRARY_TILE_H,
-    )
+    (source_x, source_y, tile_width, WIDGET_LIBRARY_TILE_H)
 }
 
 pub fn widget_library_items(
@@ -345,9 +367,19 @@ pub fn compact_widget_library_items(
         .collect()
 }
 
-pub fn widget_preview_height(item_count: usize) -> f32 {
-    let rows = item_count.max(1).div_ceil(4);
+pub fn widget_preview_height(item_count: usize, width: f32) -> f32 {
+    let rows = item_count
+        .max(1)
+        .div_ceil(widget_library_columns(widget_library_panel_width(width)));
     WIDGET_PREVIEW_BASE_H
+        + (rows.saturating_sub(1) as f32) * (WIDGET_LIBRARY_TILE_H + WIDGET_LIBRARY_TILE_GAP)
+}
+
+pub fn compact_widget_preview_height(item_count: usize, width: f32) -> f32 {
+    let rows = item_count
+        .max(1)
+        .div_ceil(widget_library_columns(widget_library_panel_width(width)));
+    COMPACT_WIDGET_PREVIEW_H
         + (rows.saturating_sub(1) as f32) * (WIDGET_LIBRARY_TILE_H + WIDGET_LIBRARY_TILE_GAP)
 }
 
@@ -483,6 +515,7 @@ pub fn compact_widget_preview_hit_test(
     let (item_y, width) = panel;
     let (base_width, base_height) = base_size;
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
+    let panel_width = widget_library_panel_width(width);
     let panel_y = item_y + 10.0;
     let library_y = panel_y + COMPACT_WIDGET_ISLAND_PANEL_H + WIDGET_PANEL_GAP;
     let source_y = library_y + WIDGET_LIBRARY_HEADER_H;
@@ -490,7 +523,8 @@ pub fn compact_widget_preview_hit_test(
         .into_iter()
         .enumerate()
     {
-        let (source_x, source_y, source_w, source_h) = widget_source_rect(row_x, source_y, index);
+        let (source_x, source_y, source_w, source_h) =
+            widget_source_rect(row_x, panel_width, source_y, index);
         if in_rect(mx, my, source_x, source_y, source_w, source_h) {
             return CompactWidgetPreviewHit::Source(widget);
         }
@@ -516,6 +550,7 @@ pub fn widget_preview_hit_test(
     let (expanded_width, expanded_height) = expanded_size;
     let (widget_layout, plugin_widget_layout, plugin_widgets) = layouts;
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
+    let panel_width = widget_library_panel_width(width);
     let py = item_y + 10.0;
     let library_panel_y = py + WIDGET_ISLAND_PANEL_H + WIDGET_PANEL_GAP;
 
@@ -529,7 +564,8 @@ pub fn widget_preview_hit_test(
     .iter()
     .enumerate()
     {
-        let (source_x, source_y, source_w, source_h) = widget_source_rect(row_x, source_y, idx);
+        let (source_x, source_y, source_w, source_h) =
+            widget_source_rect(row_x, panel_width, source_y, idx);
         if in_rect(mx, my, source_x, source_y, source_w, source_h) {
             return WidgetPreviewHit::Source(source.clone());
         }
