@@ -1,13 +1,36 @@
-use crate::core::config::{APP_AUTHOR, APP_HOMEPAGE, APP_VERSION};
-use crate::core::i18n::tr;
-use crate::utils::settings_ui::ClickResult;
-use crate::utils::settings_ui::items::SettingsItem;
+use std::cell::OnceCell;
+
+use skia_safe::{Data, Image};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::PCWSTR;
 
+use crate::core::config::{APP_AUTHOR, APP_HOMEPAGE, APP_VERSION};
+use crate::core::i18n::tr;
+use crate::utils::settings_ui::ClickResult;
+use crate::utils::settings_ui::items::SettingsItem;
+
 use super::super::SettingsApp;
 use super::{PageInput, SettingsPage};
+
+const ABOUT_ICON_SIZE: f32 = 96.0;
+const ABOUT_ICON_HEIGHT: f32 = 112.0;
+
+thread_local! {
+    static ABOUT_ICON: OnceCell<Image> = const { OnceCell::new() };
+}
+
+fn app_icon() -> Image {
+    ABOUT_ICON.with(|icon| {
+        icon.get_or_init(|| {
+            Image::from_encoded(Data::new_copy(include_bytes!(
+                "../../../../resources/icon-dark.png"
+            )))
+            .expect("Failed to load about page icon")
+        })
+        .clone()
+    })
+}
 
 #[derive(Clone, Copy)]
 enum AboutAction {
@@ -19,6 +42,7 @@ impl SettingsApp {
         let theme = self.theme();
         let mut page = SettingsPage::new();
         page.spacer(20.0);
+        page.center_image(app_icon(), ABOUT_ICON_SIZE, ABOUT_ICON_HEIGHT);
         page.center_text("WinIsland".to_string(), 28.0, theme.text_pri);
         page.center_text(format!("Version {APP_VERSION}"), 14.0, theme.text_sec);
         page.center_text(

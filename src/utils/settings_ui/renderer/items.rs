@@ -1,4 +1,7 @@
-use skia_safe::{Canvas, Color, Contains, FontStyle, Paint, Point, Rect};
+use skia_safe::{
+    Canvas, Color, Contains, FilterMode, FontStyle, Image, MipmapMode, Paint, Point, Rect,
+    SamplingOptions,
+};
 
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::{DrawTextInRectParams, FontManager};
@@ -585,6 +588,30 @@ fn draw_row_label(ctx: &ItemCtx, y: f32, label: &str, groups: &mut GroupRows) {
     advance_group_row(ctx, y + ROW_HEIGHT, groups, visible);
 }
 
+fn draw_center_image(ctx: &ItemCtx, y: f32, height: f32, image: &Image, size: f32) {
+    if !ctx.row_visible(y, height) || image.width() <= 0 || image.height() <= 0 {
+        return;
+    }
+    let scale = (size / image.width() as f32).min(size / image.height() as f32);
+    let width = image.width() as f32 * scale;
+    let image_height = image.height() as f32 * scale;
+    let rect = Rect::from_xywh(
+        (ctx.width - width) / 2.0,
+        y + (height - image_height) / 2.0,
+        width,
+        image_height,
+    );
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    ctx.canvas.draw_image_rect_with_sampling_options(
+        image,
+        None,
+        rect,
+        SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
+        &paint,
+    );
+}
+
 fn draw_center_link(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Color) {
     if !ctx.row_visible(y, height) {
         return;
@@ -814,6 +841,13 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             }
             SettingsItem::CenterText { text, size, color } => {
                 draw_center_text(&ctx, y, item.height(), text, *size, *color);
+            }
+            SettingsItem::CenterImage {
+                image,
+                size,
+                height,
+            } => {
+                draw_center_image(&ctx, y, *height, image, *size);
             }
             SettingsItem::Spacer { .. } => {}
             SettingsItem::Custom { .. } => {}

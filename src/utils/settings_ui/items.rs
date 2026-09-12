@@ -1,4 +1,4 @@
-use skia_safe::{Color, Rect};
+use skia_safe::{Color, Image, Rect};
 
 pub const CONTENT_PADDING: f32 = 24.0;
 pub const ROW_HEIGHT: f32 = 48.0;
@@ -108,6 +108,11 @@ pub enum SettingsItem {
         size: f32,
         color: Color,
     },
+    CenterImage {
+        image: Image,
+        size: f32,
+        height: f32,
+    },
     Spacer {
         height: f32,
     },
@@ -127,6 +132,7 @@ impl SettingsItem {
             SettingsItem::GroupEnd => 16.0,
             SettingsItem::CenterLink { .. } => 40.0,
             SettingsItem::CenterText { .. } => 35.0,
+            SettingsItem::CenterImage { height, .. } => *height,
             SettingsItem::Spacer { height } => *height,
             SettingsItem::Custom { height } => *height,
             SettingsItem::WidgetPreview { height } => *height,

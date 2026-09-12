@@ -1,5 +1,4 @@
-use skia_safe::Color;
-use skia_safe::Rect;
+use skia_safe::{Color, Image, Rect};
 
 use crate::utils::settings_ui::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_H, POPUP_BTN_W, ROW_HEIGHT, STEPPER_BTN_SIZE,
@@ -105,6 +104,14 @@ impl<A> SettingsPage<A> {
 
     pub(crate) fn center_text(&mut self, text: String, size: f32, color: Color) {
         self.push(SettingsItem::CenterText { text, size, color });
+    }
+
+    pub(crate) fn center_image(&mut self, image: Image, size: f32, height: f32) {
+        self.push(SettingsItem::CenterImage {
+            image,
+            size,
+            height,
+        });
     }
 
     pub(crate) fn spacer(&mut self, height: f32) {
