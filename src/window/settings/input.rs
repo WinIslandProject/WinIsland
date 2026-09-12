@@ -85,6 +85,10 @@ impl SettingsApp {
         self.scroll_y = 0.0;
         self.target_scroll_y = 0.0;
         self.scroll_vel_y = 0.0;
+        self.widget_hover_target = None;
+        self.widget_hover_visual = None;
+        self.widget_hover_progress = 0.0;
+        self.widget_preview_hover_slot = None;
         self.mark_items_dirty();
         self.request_redraw();
     }

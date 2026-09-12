@@ -7,9 +7,10 @@ use crate::core::config::{
 };
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{
-    CompactWidgetPreviewHit, WidgetEditorSlot, WidgetPreviewHit, WidgetSource,
-    compact_widget_grid_geom, compact_widget_preview_hit_test, widget_delete_button_hit,
-    widget_grid_geom, widget_library_items, widget_preview_height, widget_preview_hit_test,
+    CompactWidgetPreviewHit, WidgetDropAnimation, WidgetDropTarget, WidgetEditorHover,
+    WidgetEditorSlot, WidgetPreviewHit, WidgetSource, compact_widget_grid_geom,
+    compact_widget_preview_hit_test, widget_delete_button_hit, widget_grid_geom,
+    widget_library_items, widget_preview_height, widget_preview_hit_test,
 };
 
 use super::super::{SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WIDGETS_PAGE_INDEX};
@@ -97,6 +98,10 @@ impl SettingsApp {
             self.compact_widget_dragging = None;
             self.widget_drag_hover_slot = None;
             self.widget_preview_hover_slot = None;
+            self.widget_hover_target = None;
+            self.widget_hover_visual = None;
+            self.widget_hover_progress = 0.0;
+            self.widget_drop_animation = None;
             self.scroll_y = 0.0;
             self.target_scroll_y = 0.0;
             self.scroll_vel_y = 0.0;
@@ -165,6 +170,54 @@ impl SettingsApp {
             WidgetEditorMode::Compact => self
                 .compact_widget_preview_hit_at_mouse()
                 .is_some_and(|hit| hit != CompactWidgetPreviewHit::None),
+        }
+    }
+
+    pub(crate) fn widget_editor_hover_at_mouse(&mut self) -> Option<WidgetEditorHover> {
+        match self.widget_editor_mode {
+            WidgetEditorMode::Expanded => {
+                self.expanded_widget_preview_hit_at_mouse()
+                    .and_then(|hit| match hit {
+                        WidgetPreviewHit::Source(source) => {
+                            Some(WidgetEditorHover::ExpandedLibrary(source))
+                        }
+                        WidgetPreviewHit::Slot(slot) => {
+                            widget_covering_slot(&self.config.widget_layout, slot)
+                                .map(|(_, widget)| {
+                                    WidgetEditorHover::ExpandedWidget(WidgetSource::BuiltIn(widget))
+                                })
+                                .or_else(|| {
+                                    plugin_widget_covering_slot(
+                                        &self.config.plugin_widget_layout,
+                                        &self.plugin_widgets,
+                                        slot,
+                                    )
+                                    .map(|(entry, _)| {
+                                        WidgetEditorHover::ExpandedWidget(WidgetSource::Plugin(
+                                            entry.id(),
+                                        ))
+                                    })
+                                })
+                        }
+                        WidgetPreviewHit::None => None,
+                    })
+            }
+            WidgetEditorMode::Compact => {
+                self.compact_widget_preview_hit_at_mouse()
+                    .and_then(|hit| match hit {
+                        CompactWidgetPreviewHit::Source(widget) => {
+                            Some(WidgetEditorHover::CompactLibrary(widget))
+                        }
+                        CompactWidgetPreviewHit::Slot(position) => self
+                            .config
+                            .compact_widget_layout
+                            .iter()
+                            .find(|entry| entry.position() == position)
+                            .and_then(|entry| entry.widget)
+                            .map(WidgetEditorHover::CompactWidget),
+                        CompactWidgetPreviewHit::None => None,
+                    })
+            }
         }
     }
 
@@ -328,6 +381,7 @@ impl SettingsApp {
         let Some(source) = self.widget_dragging.take() else {
             return false;
         };
+        let drop_target = WidgetDropTarget::Expanded(source.clone());
         let old_widget_layout = self.config.widget_layout.clone();
         let old_plugin_layout = self.config.plugin_widget_layout.clone();
         if let Some(slot) = self
@@ -359,6 +413,10 @@ impl SettingsApp {
             || old_plugin_layout != self.config.plugin_widget_layout
         {
             crate::core::persistence::save_config(&self.config);
+            self.widget_drop_animation = Some(WidgetDropAnimation {
+                target: drop_target,
+                progress: 0.0,
+            });
         }
         true
     }
@@ -378,6 +436,10 @@ impl SettingsApp {
         self.mark_items_dirty();
         if old_layout != self.config.compact_widget_layout {
             crate::core::persistence::save_config(&self.config);
+            self.widget_drop_animation = Some(WidgetDropAnimation {
+                target: WidgetDropTarget::Compact(widget),
+                progress: 0.0,
+            });
         }
         true
     }

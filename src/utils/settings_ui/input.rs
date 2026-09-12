@@ -56,6 +56,26 @@ pub enum WidgetEditorMode {
     Compact,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WidgetEditorHover {
+    ExpandedLibrary(WidgetSource),
+    ExpandedWidget(WidgetSource),
+    CompactLibrary(CompactWidgetKind),
+    CompactWidget(CompactWidgetKind),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WidgetDropTarget {
+    Expanded(WidgetSource),
+    Compact(CompactWidgetKind),
+}
+
+#[derive(Debug, Clone)]
+pub struct WidgetDropAnimation {
+    pub target: WidgetDropTarget,
+    pub progress: f32,
+}
+
 impl ClickResult {
     pub fn item_index(&self) -> Option<usize> {
         match self {

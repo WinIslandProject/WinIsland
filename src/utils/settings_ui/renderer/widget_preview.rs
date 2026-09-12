@@ -21,10 +21,11 @@ use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
 
 use super::super::input::{
     COMPACT_WIDGET_ISLAND_PANEL_H, COMPACT_WIDGET_PREVIEW_H, CompactWidgetGridGeom,
-    WIDGET_ISLAND_PANEL_H, WIDGET_LIBRARY_HEADER_H, WIDGET_PANEL_GAP, WidgetEditorMode,
-    WidgetEditorSlot, WidgetGridGeom, WidgetSource, compact_widget_grid_geom,
-    compact_widget_library_items, widget_delete_button_center, widget_grid_geom,
-    widget_library_items, widget_source_rect, widget_source_span,
+    WIDGET_ISLAND_PANEL_H, WIDGET_LIBRARY_HEADER_H, WIDGET_PANEL_GAP, WidgetDropAnimation,
+    WidgetDropTarget, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetGridGeom,
+    WidgetSource, compact_widget_grid_geom, compact_widget_library_items,
+    widget_delete_button_center, widget_grid_geom, widget_library_items, widget_source_rect,
+    widget_source_span,
 };
 use super::super::items::{CONTENT_PADDING, GROUP_INNER_PAD};
 
@@ -50,6 +51,9 @@ pub(super) struct WidgetPreviewParams<'a> {
     pub(super) widget_preview_hover_slot: Option<WidgetEditorSlot>,
     pub(super) compact_widget_layout: &'a [CompactWidgetSlot],
     pub(super) compact_widget_dragging: Option<CompactWidgetKind>,
+    pub(super) widget_hover: Option<&'a WidgetEditorHover>,
+    pub(super) widget_hover_progress: f32,
+    pub(super) widget_drop_animation: Option<&'a WidgetDropAnimation>,
     pub(super) theme: &'a SettingsTheme,
 }
 
@@ -91,6 +95,97 @@ fn draw_centered_label(canvas: &Canvas, text: &str, rect: Rect, size: f32, color
         size,
         false,
         color,
+    );
+}
+
+fn with_alpha(color: Color, alpha: u8) -> Color {
+    Color::from_argb(alpha, color.r(), color.g(), color.b())
+}
+
+fn ease_out_back(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0) - 1.0;
+    let overshoot = 1.70158;
+    1.0 + (overshoot + 1.0) * progress.powi(3) + overshoot * progress.powi(2)
+}
+
+fn begin_card_transform(canvas: &Canvas, rect: Rect, hover: f32, drop: Option<f32>) {
+    let drop_scale = drop.map_or(1.0, |progress| 0.94 + 0.06 * ease_out_back(progress));
+    let scale = (1.0 + hover * 0.018) * drop_scale;
+    canvas.save();
+    canvas.translate((rect.center_x(), rect.center_y() - hover * 2.0));
+    canvas.scale((scale, scale));
+    canvas.translate((-rect.center_x(), -rect.center_y()));
+}
+
+fn draw_card_feedback(
+    canvas: &Canvas,
+    rect: Rect,
+    radius: f32,
+    hover: f32,
+    drop: Option<f32>,
+    theme: &SettingsTheme,
+) {
+    let drop_glow = drop.map_or(0.0, |progress| 1.0 - progress);
+    if hover <= 0.001 && drop_glow <= 0.001 {
+        return;
+    }
+    let intensity = hover.max(drop_glow);
+    let shadow = settings_paint(Color::from_argb((42.0 * intensity) as u8, 0, 0, 0));
+    canvas.draw_round_rect(
+        Rect::from_xywh(rect.left, rect.top + 3.0, rect.width(), rect.height()),
+        radius,
+        radius,
+        &shadow,
+    );
+    let mut paint = settings_paint(with_alpha(theme.accent, (22.0 * intensity) as u8));
+    canvas.draw_round_rect(rect, radius, radius, &paint);
+    paint.set_style(skia_safe::paint::Style::Stroke);
+    paint.set_stroke_width(1.0 + drop_glow);
+    paint.set_color(with_alpha(theme.accent, (110.0 * intensity) as u8));
+    canvas.draw_round_rect(
+        Rect::from_xywh(
+            rect.left + 0.5,
+            rect.top + 0.5,
+            rect.width() - 1.0,
+            rect.height() - 1.0,
+        ),
+        radius,
+        radius,
+        &paint,
+    );
+}
+
+fn draw_library_tile_surface(canvas: &Canvas, rect: Rect, hover: f32, theme: &SettingsTheme) {
+    let shadow = settings_paint(Color::from_argb((28.0 * hover) as u8, 0, 0, 0));
+    canvas.draw_round_rect(
+        Rect::from_xywh(rect.left, rect.top + 2.0, rect.width(), rect.height()),
+        12.0,
+        12.0,
+        &shadow,
+    );
+    let mut paint = settings_paint(theme.control_bg);
+    canvas.draw_round_rect(rect, 12.0, 12.0, &paint);
+    if hover > 0.001 {
+        paint.set_color(with_alpha(theme.accent, (18.0 * hover) as u8));
+        canvas.draw_round_rect(rect, 12.0, 12.0, &paint);
+    }
+    paint.set_style(skia_safe::paint::Style::Stroke);
+    paint.set_stroke_width(0.75 + hover * 0.5);
+    paint.set_color(if hover > 0.001 {
+        with_alpha(theme.accent, (105.0 * hover) as u8)
+    } else {
+        theme.control_border
+    });
+    canvas.draw_round_rect(
+        Rect::from_xywh(
+            rect.left + 0.375,
+            rect.top + 0.375,
+            rect.width() - 0.75,
+            rect.height() - 0.75,
+        ),
+        12.0,
+        12.0,
+        &paint,
     );
 }
 
@@ -313,7 +408,11 @@ fn draw_library_tile(
     source: &WidgetSource,
     plugin_widgets: &[PluginWidget],
     rect: Rect,
+    hover: f32,
+    theme: &SettingsTheme,
 ) {
+    begin_card_transform(canvas, rect, hover, None);
+    draw_library_tile_surface(canvas, rect, hover, theme);
     let preview_rect = Rect::from_xywh(
         rect.left + 7.0,
         rect.top + 6.0,
@@ -363,6 +462,7 @@ fn draw_library_tile(
             }
         }
     }
+    canvas.restore();
 }
 
 pub(super) fn draw_widget_preview(params: WidgetPreviewParams<'_>) {
@@ -497,6 +597,9 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         widget_dragging,
         widget_drag_hover_slot,
         widget_preview_hover_slot,
+        widget_hover,
+        widget_hover_progress,
+        widget_drop_animation,
         theme,
         ..
     } = params;
@@ -543,6 +646,28 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             continue;
         }
         let (x, y, width, height) = geometry.footprint_rect(kind.span(), entry.slot);
+        let footprint = widget_footprint(kind, entry.slot);
+        let hover = if widget_hover.is_some_and(|hover| {
+            matches!(
+                hover,
+                WidgetEditorHover::ExpandedWidget(WidgetSource::BuiltIn(candidate))
+                    if *candidate == kind
+            )
+        }) {
+            widget_hover_progress
+        } else {
+            0.0
+        };
+        let drop = widget_drop_animation.and_then(|animation| {
+            matches!(
+                &animation.target,
+                WidgetDropTarget::Expanded(WidgetSource::BuiltIn(candidate)) if *candidate == kind
+            )
+            .then_some(animation.progress)
+        });
+        let rect = Rect::from_xywh(x, y, width, height);
+        begin_card_transform(canvas, rect, hover, drop);
+        draw_card_feedback(canvas, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
         draw_widget_card_preview(
             canvas,
             kind,
@@ -554,9 +679,9 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             255,
             Color::WHITE,
         );
+        canvas.restore();
 
-        let hovered = widget_preview_hover_slot
-            .is_some_and(|slot| widget_footprint(kind, entry.slot).contains(&slot));
+        let hovered = widget_preview_hover_slot.is_some_and(|slot| footprint.contains(&slot));
         if kind != WidgetKind::Settings && (dragging || hovered) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
@@ -575,6 +700,28 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             continue;
         }
         let (x, y, width, height) = geometry.footprint_rect(widget.span(), entry.slot);
+        let cells = span_cells(entry.slot, widget.span());
+        let hover = if widget_hover.is_some_and(|hover| {
+            matches!(
+                hover,
+                WidgetEditorHover::ExpandedWidget(WidgetSource::Plugin(candidate))
+                    if candidate == &id
+            )
+        }) {
+            widget_hover_progress
+        } else {
+            0.0
+        };
+        let drop = widget_drop_animation.and_then(|animation| {
+            matches!(
+                &animation.target,
+                WidgetDropTarget::Expanded(WidgetSource::Plugin(candidate)) if candidate == &id
+            )
+            .then_some(animation.progress)
+        });
+        let rect = Rect::from_xywh(x, y, width, height);
+        begin_card_transform(canvas, rect, hover, drop);
+        draw_card_feedback(canvas, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
         crate::ui::expanded::widget_view::draw_plugin_widget(
             canvas,
             widget,
@@ -585,7 +732,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             geometry.cap_scale,
             255,
         );
-        let cells = span_cells(entry.slot, widget.span());
+        canvas.restore();
         let hovered = widget_preview_hover_slot.is_some_and(|slot| cells.contains(&slot));
         if dragging || hovered {
             let (button_x, button_y) =
@@ -607,7 +754,17 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         for (index, source) in library_items.iter().enumerate() {
             let (x, y, width, height) = widget_source_rect(frame.panel_x, source_y, index);
             let rect = Rect::from_xywh(x, y, width, height);
-            draw_library_tile(canvas, source, plugin_widgets, rect);
+            let hover = if widget_hover.is_some_and(|hover| {
+                matches!(
+                    hover,
+                    WidgetEditorHover::ExpandedLibrary(candidate) if candidate == source
+                )
+            }) {
+                widget_hover_progress
+            } else {
+                0.0
+            };
+            draw_library_tile(canvas, source, plugin_widgets, rect, hover, theme);
         }
     }
 }
@@ -682,23 +839,17 @@ fn draw_compact_grid(
     canvas.restore();
 }
 
-fn draw_compact_library_tile(canvas: &Canvas, widget: CompactWidgetKind, rect: Rect) {
-    let mut paint = settings_paint(Color::from_argb(8, 255, 255, 255));
-    canvas.draw_round_rect(rect, 12.0, 12.0, &paint);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(0.75);
-    paint.set_color(Color::from_argb(24, 255, 255, 255));
-    canvas.draw_round_rect(
-        Rect::from_xywh(
-            rect.left + 0.375,
-            rect.top + 0.375,
-            rect.width() - 0.75,
-            rect.height() - 0.75,
-        ),
-        12.0,
-        12.0,
-        &paint,
-    );
+fn draw_compact_library_tile(
+    canvas: &Canvas,
+    widget: CompactWidgetKind,
+    rect: Rect,
+    hover: f32,
+    theme: &SettingsTheme,
+) {
+    begin_card_transform(canvas, rect, hover, None);
+    draw_library_tile_surface(canvas, rect, hover, theme);
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
     let widget_width = crate::ui::widget::compact::widget_width(widget);
     let natural_width = widget_width + 18.0;
     let preview_scale = ((rect.width() - 8.0) / natural_width).min(1.0);
@@ -728,6 +879,7 @@ fn draw_compact_library_tile(canvas: &Canvas, widget: CompactWidgetKind, rect: R
         preview_scale,
         255,
     );
+    canvas.restore();
 }
 
 fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
@@ -742,6 +894,9 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
         compact_widget_dragging,
         widget_drag_hover_slot,
         widget_preview_hover_slot,
+        widget_hover,
+        widget_hover_progress,
+        widget_drop_animation,
         theme,
         ..
     } = params;
@@ -793,6 +948,23 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
         let Some((x, y, width, height)) = geometry.slot_rect(entry.position()) else {
             continue;
         };
+        let hover = if widget_hover.is_some_and(|hover| {
+            matches!(hover, WidgetEditorHover::CompactWidget(candidate) if *candidate == widget)
+        }) {
+            widget_hover_progress
+        } else {
+            0.0
+        };
+        let drop = widget_drop_animation.and_then(|animation| {
+            matches!(
+                &animation.target,
+                WidgetDropTarget::Compact(candidate) if *candidate == widget
+            )
+            .then_some(animation.progress)
+        });
+        let rect = Rect::from_xywh(x, y, width, height);
+        begin_card_transform(canvas, rect, hover, drop);
+        draw_card_feedback(canvas, rect, height / 2.0, hover, drop, theme);
         crate::ui::widget::compact::draw_widget(
             canvas,
             widget,
@@ -800,6 +972,7 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
             geometry.cap_scale,
             255,
         );
+        canvas.restore();
         if compact_widget_preview_hover_slot == Some(entry.position()) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
@@ -815,7 +988,20 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
     } else {
         for (index, widget) in library_items.into_iter().enumerate() {
             let (x, y, width, height) = widget_source_rect(frame.panel_x, source_y, index);
-            draw_compact_library_tile(canvas, widget, Rect::from_xywh(x, y, width, height));
+            let hover = if widget_hover.is_some_and(|hover| {
+                matches!(hover, WidgetEditorHover::CompactLibrary(candidate) if *candidate == widget)
+            }) {
+                widget_hover_progress
+            } else {
+                0.0
+            };
+            draw_compact_library_tile(
+                canvas,
+                widget,
+                Rect::from_xywh(x, y, width, height),
+                hover,
+                theme,
+            );
         }
     }
 }

@@ -6,7 +6,10 @@ use crate::utils::anim::AnimPool;
 use crate::utils::color::{SettingsTheme, dark_settings_theme, light_settings_theme};
 use crate::utils::icon::get_app_icon;
 use crate::utils::settings_ui::items::{POPUP_MENU_R, SIDEBAR_PAD, SettingsItem};
-use crate::utils::settings_ui::{SwitchAnimator, WidgetEditorMode, WidgetEditorSlot, WidgetSource};
+use crate::utils::settings_ui::{
+    SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
+    WidgetSource,
+};
 use crate::window::d3d::{D3DRenderer, D3DTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -61,6 +64,18 @@ const SIDEBAR_TITLE_HEIGHT: f32 = 60.0;
 const POPUP_CLOSE_SPEED: f32 = 0.3;
 const WINDOW_CONTROL_CLOSE: usize = 0;
 const WINDOW_CONTROL_MINIMIZE: usize = 1;
+const WIDGET_HOVER_RATE: f32 = 18.0;
+const WIDGET_DRAG_LIFT_RATE: f32 = 22.0;
+const WIDGET_DROP_DURATION: f32 = 0.28;
+
+fn animate_towards(value: &mut f32, target: f32, rate: f32, dt: f32) -> bool {
+    let previous = *value;
+    *value += (target - *value) * (1.0 - (-rate * dt).exp());
+    if (target - *value).abs() < 0.001 {
+        *value = target;
+    }
+    (*value - previous).abs() > f32::EPSILON
+}
 
 pub(crate) fn window_control_at(x: f32, y: f32) -> Option<usize> {
     WINDOW_CONTROL_CENTERS.iter().position(|&(cx, cy)| {
@@ -197,6 +212,11 @@ pub struct SettingsApp {
     pub(crate) widget_preview_hover_slot: Option<WidgetEditorSlot>,
     pub(crate) widget_editor_mode: WidgetEditorMode,
     pub(crate) compact_widget_dragging: Option<crate::core::config::CompactWidgetKind>,
+    pub(crate) widget_hover_target: Option<WidgetEditorHover>,
+    pub(crate) widget_hover_visual: Option<WidgetEditorHover>,
+    pub(crate) widget_hover_progress: f32,
+    pub(crate) widget_drag_lift_progress: f32,
+    pub(crate) widget_drop_animation: Option<WidgetDropAnimation>,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
     pub(crate) plugins: Vec<InstalledPlugin>,
     plugin_inventory_rx: Option<mpsc::Receiver<Vec<InstalledPlugin>>>,
@@ -276,6 +296,11 @@ impl SettingsApp {
             widget_preview_hover_slot: None,
             widget_editor_mode: WidgetEditorMode::Expanded,
             compact_widget_dragging: None,
+            widget_hover_target: None,
+            widget_hover_visual: None,
+            widget_hover_progress: 0.0,
+            widget_drag_lift_progress: 0.0,
+            widget_drop_animation: None,
             plugin_widgets,
             plugins,
             plugin_inventory_rx: None,
@@ -638,22 +663,35 @@ impl SettingsApp {
 
     fn update_widget_hover(&mut self) -> bool {
         if self.widget_drag_active() {
+            let hover_changed = self.set_widget_hover_target(None);
             let new_slot = self.widget_preview_slot_at_mouse();
             let current_slot = self.active_widget_drag_hover_slot();
             if new_slot != current_slot {
                 self.set_active_widget_drag_hover_slot(new_slot);
             }
-            return widget_drag_move_needs_redraw(true, current_slot, new_slot);
+            return hover_changed || widget_drag_move_needs_redraw(true, current_slot, new_slot);
         }
         if self.active_page != WIDGETS_PAGE_INDEX {
-            return false;
+            return self.set_widget_hover_target(None);
         }
+        let new_hover = self.widget_editor_hover_at_mouse();
         let new_slot = self.widget_preview_slot_at_mouse();
         let current_slot = self.active_widget_preview_hover_slot();
-        if new_slot == current_slot {
+        if new_slot != current_slot {
+            self.set_active_widget_preview_hover_slot(new_slot);
+        }
+        self.set_widget_hover_target(new_hover) || new_slot != current_slot
+    }
+
+    fn set_widget_hover_target(&mut self, target: Option<WidgetEditorHover>) -> bool {
+        if self.widget_hover_target == target {
             return false;
         }
-        self.set_active_widget_preview_hover_slot(new_slot);
+        self.widget_hover_target = target.clone();
+        if target.is_some() {
+            self.widget_hover_visual = target;
+            self.widget_hover_progress = 0.0;
+        }
         true
     }
 
@@ -695,7 +733,10 @@ impl SettingsApp {
     }
 
     fn handle_cursor_left(&mut self) {
-        if self.dots_hovered {
+        let hover_changed = self.set_widget_hover_target(None);
+        let slot_changed = self.active_widget_preview_hover_slot().is_some();
+        self.set_active_widget_preview_hover_slot(None);
+        if self.dots_hovered || hover_changed || slot_changed {
             self.dots_hovered = false;
             self.request_redraw();
         }
@@ -748,7 +789,12 @@ impl SettingsApp {
                     let _ = window.drag_window();
                 }
             }
-            None if self.handle_widget_drag_press() => self.request_redraw(),
+            None if self.handle_widget_drag_press() => {
+                self.widget_drag_lift_progress = 0.0;
+                self.widget_drop_animation = None;
+                self.set_widget_hover_target(None);
+                self.request_redraw();
+            }
             None => self.handle_click(),
         }
     }
@@ -775,6 +821,42 @@ impl SettingsApp {
         }
     }
 
+    fn widget_interaction_animating(&self) -> bool {
+        let hover_target = f32::from(self.widget_hover_target.is_some());
+        let drag_target = f32::from(self.widget_drag_active());
+        (self.widget_hover_progress - hover_target).abs() > 0.001
+            || (self.widget_drag_lift_progress - drag_target).abs() > 0.001
+            || self.widget_drop_animation.is_some()
+    }
+
+    fn update_widget_interaction_animations(&mut self, dt: f32) -> bool {
+        let hover_target = f32::from(self.widget_hover_target.is_some());
+        let drag_target = f32::from(self.widget_drag_active());
+        let mut changed = animate_towards(
+            &mut self.widget_hover_progress,
+            hover_target,
+            WIDGET_HOVER_RATE,
+            dt,
+        );
+        changed |= animate_towards(
+            &mut self.widget_drag_lift_progress,
+            drag_target,
+            WIDGET_DRAG_LIFT_RATE,
+            dt,
+        );
+        if hover_target == 0.0 && self.widget_hover_progress == 0.0 {
+            self.widget_hover_visual = None;
+        }
+        if let Some(animation) = &mut self.widget_drop_animation {
+            animation.progress = (animation.progress + dt / WIDGET_DROP_DURATION).min(1.0);
+            changed = true;
+            if animation.progress >= 1.0 {
+                self.widget_drop_animation = None;
+            }
+        }
+        changed
+    }
+
     pub(crate) fn update(&mut self) -> Option<Instant> {
         self.window.as_ref()?;
 
@@ -785,7 +867,9 @@ impl SettingsApp {
             self.update_detected_apps();
         }
 
-        let has_anim = self.switch_anim.is_animating() || self.anim.is_animating();
+        let has_anim = self.switch_anim.is_animating()
+            || self.anim.is_animating()
+            || self.widget_interaction_animating();
         let has_popup = self.popup.is_some();
         let is_scrolling = (self.target_scroll_y - self.scroll_y).abs() > 0.1;
         let is_widget_dragging = self.widget_drag_active();
@@ -825,6 +909,7 @@ impl SettingsApp {
             .as_secs_f32()
             .clamp(0.001, 0.05);
         self.last_frame_time = now;
+        redraw |= self.update_widget_interaction_animations(dt);
 
         let diff = self.target_scroll_y - self.scroll_y;
         let accel = diff * SCROLL_STIFFNESS - self.scroll_vel_y * SCROLL_DAMPING;
@@ -936,6 +1021,9 @@ impl SettingsApp {
         self.popup = None;
         self.widget_dragging = None;
         self.compact_widget_dragging = None;
+        self.widget_hover_target = None;
+        self.widget_hover_visual = None;
+        self.widget_drop_animation = None;
         sidebar::clear_sidebar_icon_cache();
         pages::plugins::clear_plugin_icon_cache();
         let renderer_target = self.renderer_target.take();

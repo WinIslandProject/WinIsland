@@ -679,6 +679,9 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
     let widget_preview_hover_slot = params.widget_preview_hover_slot;
     let compact_widget_layout = params.compact_widget_layout;
     let compact_widget_dragging = params.compact_widget_dragging;
+    let widget_hover = params.widget_hover;
+    let widget_hover_progress = params.widget_hover_progress;
+    let widget_drop_animation = params.widget_drop_animation;
     let active_source_button = params.active_source_button;
     let active_stepper_value = params.active_stepper_value;
 
@@ -873,6 +876,9 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                     widget_preview_hover_slot,
                     compact_widget_layout,
                     compact_widget_dragging,
+                    widget_hover,
+                    widget_hover_progress,
+                    widget_drop_animation,
                     theme,
                 });
             }

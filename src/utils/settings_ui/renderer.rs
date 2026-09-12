@@ -7,7 +7,9 @@ use skia_safe::{Canvas, Rect};
 use crate::core::config::{CompactWidgetKind, CompactWidgetSlot, PluginWidgetSlot, WidgetSlot};
 use crate::core::plugin_widget::PluginWidget;
 use crate::utils::color::SettingsTheme;
-use crate::utils::settings_ui::input::{WidgetEditorMode, WidgetEditorSlot, WidgetSource};
+use crate::utils::settings_ui::input::{
+    WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetSource,
+};
 
 use super::anim::SwitchAnimator;
 use super::items::SettingsItem;
@@ -44,6 +46,9 @@ pub struct DrawItemsParams<'a> {
     pub widget_preview_hover_slot: Option<WidgetEditorSlot>,
     pub compact_widget_layout: &'a [CompactWidgetSlot],
     pub compact_widget_dragging: Option<CompactWidgetKind>,
+    pub widget_hover: Option<&'a WidgetEditorHover>,
+    pub widget_hover_progress: f32,
+    pub widget_drop_animation: Option<&'a WidgetDropAnimation>,
     pub active_source_button: Option<Rect>,
     pub active_stepper_value: Option<ActiveStepperValue<'a>>,
     pub hover_pos: Option<(f32, f32)>,

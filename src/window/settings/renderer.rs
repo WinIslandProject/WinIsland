@@ -118,6 +118,9 @@ impl SettingsApp {
                 widget_preview_hover_slot: self.widget_preview_hover_slot,
                 compact_widget_layout: &self.config.compact_widget_layout,
                 compact_widget_dragging: self.compact_widget_dragging,
+                widget_hover: self.widget_hover_visual.as_ref(),
+                widget_hover_progress: self.widget_hover_progress,
+                widget_drop_animation: self.widget_drop_animation.as_ref(),
                 active_source_button,
                 active_stepper_value,
                 hover_pos: Some((
@@ -176,19 +179,21 @@ impl SettingsApp {
     }
 
     fn draw_widget_drag_overlay(&self, canvas: &Canvas, win_w: f32, win_h: f32) {
+        let lift = self.widget_drag_lift_progress.clamp(0.0, 1.0);
+        let lift_scale = 0.94 + 0.06 * (1.0 - (1.0 - lift).powi(3));
         if self.widget_editor_mode == WidgetEditorMode::Compact {
             let Some(widget) = self.compact_widget_dragging else {
                 return;
             };
-            let width = 92.0;
-            let height = 32.0;
+            let width = 92.0 * lift_scale;
+            let height = 32.0 * lift_scale;
             let (mouse_x, mouse_y) = self.logical_mouse_pos;
             let x = (mouse_x - width / 2.0).clamp(8.0, win_w - width - 8.0);
-            let y = (mouse_y - height / 2.0).clamp(8.0, win_h - height - 8.0);
+            let y = (mouse_y - height / 2.0 - 5.0 * lift).clamp(8.0, win_h - height - 8.0);
             let rect = Rect::from_xywh(x, y, width, height);
-            let mut paint = settings_paint(Color::from_argb(90, 0, 0, 0));
+            let mut paint = settings_paint(Color::from_argb((55.0 + 65.0 * lift) as u8, 0, 0, 0));
             canvas.draw_round_rect(
-                Rect::from_xywh(x, y + 4.0, width, height),
+                Rect::from_xywh(x, y + 2.0 + 5.0 * lift, width, height),
                 height / 2.0,
                 height / 2.0,
                 &paint,
@@ -202,7 +207,7 @@ impl SettingsApp {
             return;
         };
 
-        let (w, h) = self
+        let (base_w, base_h) = self
             .widget_preview_item_y_cached()
             .map(|item_y| {
                 let width = self.content_width();
@@ -220,13 +225,20 @@ impl SettingsApp {
                     .unwrap_or((96.0, 72.0))
             })
             .unwrap_or((96.0, 96.0));
+        let w = base_w * lift_scale;
+        let h = base_h * lift_scale;
 
         let (mx, my) = self.logical_mouse_pos;
         let x = (mx - w / 2.0).clamp(8.0, win_w - w - 8.0);
-        let y = (my - h / 2.0).clamp(8.0, win_h - h - 8.0);
+        let y = (my - h / 2.0 - 6.0 * lift).clamp(8.0, win_h - h - 8.0);
 
-        let shadow = settings_paint(Color::from_argb(90, 0, 0, 0));
-        canvas.draw_round_rect(Rect::from_xywh(x, y + 4.0, w, h), 12.0, 12.0, &shadow);
+        let shadow = settings_paint(Color::from_argb((55.0 + 65.0 * lift) as u8, 0, 0, 0));
+        canvas.draw_round_rect(
+            Rect::from_xywh(x, y + 2.0 + 5.0 * lift, w, h),
+            12.0,
+            12.0,
+            &shadow,
+        );
 
         match source {
             WidgetSource::BuiltIn(widget) => draw_mini_card(canvas, *widget, x, y, w, h),
