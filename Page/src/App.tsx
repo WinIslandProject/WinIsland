@@ -23,10 +23,12 @@ import {
   GitFork,
   Languages,
   Menu,
+  Moon,
   Music2,
   Orbit,
   ShieldCheck,
   Sparkles,
+  Sun,
   Waves,
   X,
 } from 'lucide-react'
@@ -50,6 +52,53 @@ import {
 } from './content'
 
 const DocumentPage = lazy(() => import('./components/DocumentPage'))
+type SiteTheme = 'light' | 'dark'
+
+const THEME_STORAGE_KEY = 'winisland-site-theme'
+
+const systemTheme = (): SiteTheme =>
+  window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+
+const storedTheme = (): SiteTheme | null => {
+  try {
+    const value = window.localStorage.getItem(THEME_STORAGE_KEY)
+    return value === 'light' || value === 'dark' ? value : null
+  } catch {
+    return null
+  }
+}
+
+function useSiteTheme() {
+  const [preference, setPreference] = useState<SiteTheme | null>(storedTheme)
+  const [system, setSystem] = useState<SiteTheme>(systemTheme)
+  const theme = preference ?? system
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const update = (event: MediaQueryListEvent) => setSystem(event.matches ? 'dark' : 'light')
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      theme === 'dark' ? '#0f1013' : '#f5f5f7',
+    )
+  }, [theme])
+
+  const toggle = useCallback(() => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setPreference(next)
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next)
+    } catch {}
+  }, [theme])
+
+  return { theme, toggle }
+}
 
 const DOWNLOAD_PROBE_TIMEOUT = 2500
 const DOWNLOAD_PROBES = {
@@ -147,6 +196,7 @@ function App() {
 
 function Site() {
   const location = useLocation()
+  const { theme, toggle: toggleTheme } = useSiteTheme()
   const locale: Locale = location.pathname.startsWith('/zh') ? 'zh' : 'en'
   const page = pageFromPath(location.pathname)
 
@@ -160,9 +210,9 @@ function Site() {
   }, [locale])
 
   return (
-    <KonstaApp theme="ios" safeAreas={false} className="site-app">
+    <KonstaApp theme="ios" dark={theme === 'dark'} safeAreas={false} className="site-app">
       <GlassFilter />
-      <SiteHeader locale={locale} />
+      <SiteHeader locale={locale} theme={theme} onThemeToggle={toggleTheme} />
       <main>
         <div className="page-transition" key={page}>
           {page === 'home' && <HomePage locale={locale} />}
@@ -180,7 +230,15 @@ function Site() {
   )
 }
 
-function SiteHeader({ locale }: { locale: Locale }) {
+function SiteHeader({
+  locale,
+  theme,
+  onThemeToggle,
+}: {
+  locale: Locale
+  theme: SiteTheme
+  onThemeToggle: () => void
+}) {
   const [open, setOpen] = useState(false)
   const [indicator, setIndicator] = useState({ x: 0, width: 0, visible: false })
   const headerRef = useRef<HTMLElement>(null)
@@ -194,6 +252,9 @@ function SiteHeader({ locale }: { locale: Locale }) {
   const guidePaths = ['/guide', '/getting-started', '/plugin-dev', '/api-changelog']
   const isGuidePath = guidePaths.includes(currentPath) || currentPath.startsWith('/plugin-dev/')
   const activeIndex = currentPath === '/' ? 0 : isGuidePath ? 1 : currentPath === '/changelog' ? 2 : -1
+  const themeLabel = theme === 'dark'
+    ? locale === 'zh' ? '切换为浅色模式' : 'Switch to light mode'
+    : locale === 'zh' ? '切换为深色模式' : 'Switch to dark mode'
 
   const moveIndicator = useCallback((index: number) => {
     const nav = navRef.current
@@ -319,6 +380,15 @@ function SiteHeader({ locale }: { locale: Locale }) {
         </nav>
 
         <div className="nav-actions">
+          <button
+            className="theme-toggle"
+            type="button"
+            aria-label={themeLabel}
+            title={themeLabel}
+            onClick={onThemeToggle}
+          >
+            {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
           <Link
             className="language-link"
             to={localePath(otherLocale, currentPath)}
