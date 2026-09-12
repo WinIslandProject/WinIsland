@@ -56,13 +56,6 @@ pub(super) fn draw_background(params: BackgroundParams<'_>) {
                 draw_solid(canvas, island_path, fallback_color);
             }
         }
-        "mica" => {
-            if host_backdrop {
-                draw_solid(canvas, island_path, Color::from_argb(185, 32, 32, 36));
-            } else {
-                draw_solid(canvas, island_path, fallback_color);
-            }
-        }
         "dynamic" => {
             if let Some(blurred_cover) = get_blurred_cover_background(direct_context, media) {
                 draw_effect_base(canvas, rect);

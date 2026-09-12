@@ -42,7 +42,6 @@ impl SettingsApp {
             vec![
                 (tr("style_default"), self.config.island_style == "default"),
                 (tr("style_glass"), self.config.island_style == "glass"),
-                (tr("style_mica"), self.config.island_style == "mica"),
                 (tr("style_dynamic"), self.config.island_style == "dynamic"),
             ],
             true,
@@ -122,22 +121,15 @@ impl SettingsApp {
             EffectsAction::IslandStyle => PopupState::new(
                 select_island_style,
                 button_rect,
-                vec![
-                    tr("style_default"),
-                    tr("style_glass"),
-                    tr("style_mica"),
-                    tr("style_dynamic"),
-                ],
+                vec![tr("style_default"), tr("style_glass"), tr("style_dynamic")],
                 vec![
                     "default".to_string(),
                     "glass".to_string(),
-                    "mica".to_string(),
                     "dynamic".to_string(),
                 ],
                 match self.config.island_style.as_str() {
                     "glass" => 1,
-                    "mica" => 2,
-                    "dynamic" => 3,
+                    "dynamic" => 2,
                     _ => 0,
                 },
                 win_w,

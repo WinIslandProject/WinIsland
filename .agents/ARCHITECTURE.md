@@ -80,7 +80,7 @@ RedrawRequested → draw_island():
   1. Compute dt, motion blur sigmas
   2. Get current MediaInfo from SMTC
   3. Get spectrum from AudioProcessor
-  4. Draw background (default, glass, dynamic, or mica)
+  4. Draw background (default, glass, or dynamic)
   5. Draw album art (rounded/cover fit)
   6. Draw lyrics with transitions
   7. Draw spectrum visualizer bars
@@ -92,7 +92,6 @@ RedrawRequested → draw_island():
 Each style draws its background differently:
 - **glass**: GDI screen capture → cached GPU surfaces → Skia blur → dark multiply blend
 - **dynamic**: Cached GPU-blurred album art with animated movement
-- **mica**: Downscaled desktop capture blurred on cached GPU surfaces
 - **default**: Solid black
 
 ---

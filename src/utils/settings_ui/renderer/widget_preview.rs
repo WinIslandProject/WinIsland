@@ -190,7 +190,7 @@ fn draw_island_background_path(
 
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
-    if island_style == "glass" || island_style == "mica" {
+    if island_style == "glass" {
         paint.set_color(Color::from_argb(220, 24, 24, 28));
     } else if island_style == "dynamic" {
         let colors = [
@@ -228,11 +228,7 @@ fn draw_island_background_path(
     paint.set_style(skia_safe::paint::Style::Stroke);
     paint.set_stroke_width(1.0);
     paint.set_color(Color::from_argb(
-        if island_style == "glass" || island_style == "mica" {
-            52
-        } else {
-            38
-        },
+        if island_style == "glass" { 52 } else { 38 },
         theme.text_pri.r(),
         theme.text_pri.g(),
         theme.text_pri.b(),

@@ -783,11 +783,10 @@ impl App {
     }
 
     fn periodic_effect_redraw_due(&mut self) -> bool {
-        let is_dynamic_or_mica =
-            self.config.island_style == "dynamic" || self.config.island_style == "mica";
+        let is_dynamic = self.config.island_style == "dynamic";
         let due = !self.is_hidden()
             && self.last_effect_refresh.elapsed().as_millis() >= 1000
-            && (is_dynamic_or_mica || self.expanded);
+            && (is_dynamic || self.expanded);
         if due {
             self.last_effect_refresh = Instant::now();
         }

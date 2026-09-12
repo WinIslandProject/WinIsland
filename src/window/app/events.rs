@@ -239,7 +239,7 @@ impl App {
                             HostBackdropParams {
                                 enabled: matches!(
                                     self.config.island_style.as_str(),
-                                    "glass" | "mica" | "dynamic"
+                                    "glass" | "dynamic"
                                 ),
                                 x: island_layout.current_island_x as f32,
                                 y: island_layout.current_island_y as f32,
