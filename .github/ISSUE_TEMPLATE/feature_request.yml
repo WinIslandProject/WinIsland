@@ -25,17 +25,17 @@ body:
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed design or implementation
-      description: "Optional: propose an API, configuration, UI, or data-flow design"
-      placeholder: Describe the proposal or provide an example
+      label: How it should work
+      description: "Optional: describe your idea for how this should work"
+      placeholder: Describe what you expect to see or how you would like it to behave
     validations:
       required: false
 
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered
-      description: Describe other approaches and why they are less suitable
+      label: Other possible solutions
+      description: "Optional: have you considered any workarounds or other ways to solve this?"
       placeholder: Alternatives or trade-offs
     validations:
       required: false
@@ -43,9 +43,9 @@ body:
   - type: textarea
     id: impact
     attributes:
-      label: Impact
-      description: Which modules will be affected?
-      placeholder: List affected files or modules
+      label: Impact on existing features
+      description: "Optional: would this change affect any current features or settings?"
+      placeholder: "For example: May conflict with the current compact mode"
     validations:
       required: false
 
@@ -61,9 +61,9 @@ body:
   - type: textarea
     id: acceptance
     attributes:
-      label: Acceptance criteria
-      description: Explain how to verify that the feature is complete
-      placeholder: List the acceptance steps
+      label: Expected outcome
+      description: How do you expect this feature to work? When would you consider it complete?
+      placeholder: Describe what success looks like to you
     validations:
       required: true
 
