@@ -12,22 +12,27 @@ jobs:
   validate:
     if: github.repository != github.event.pull_request.head.repo.full_name
     runs-on: ubuntu-latest
+
+    env:
+      BRANCH: ${{ github.head_ref }}
+      ALLOWED_PREFIXES: 'feat|fix|hotfix|refactor|chore|docs|test|ci|build|perf|style|revert|release|deps|security'
+
     steps:
       - name: Check branch name against CONTRIBUTING.md § 4.1
         id: check
         run: |
-          BRANCH="${{ github.head_ref }}"
           echo "Checking branch: $BRANCH"
+          echo "Allowed prefixes: $ALLOWED_PREFIXES"
 
           if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
-            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "valid=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if [[ ! "$BRANCH" =~ ^(feat|fix|refactor|chore|docs)/.+ ]]; then
-            echo "valid=false" >> $GITHUB_OUTPUT
+          if [[ "$BRANCH" =~ ^(${ALLOWED_PREFIXES})/[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
           else
-            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "valid=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Close invalid PR
@@ -42,9 +47,19 @@ jobs:
             **Allowed prefixes:**
             - `feat/` — new feature
             - `fix/` — bug fix
+            - `hotfix/` — urgent bug fix
             - `refactor/` — refactoring
             - `chore/` — chores (dependency updates, build config, etc.)
             - `docs/` — documentation updates
+            - `test/` — tests
+            - `ci/` — CI changes
+            - `build/` — build system changes
+            - `perf/` — performance improvements
+            - `style/` — code style changes
+            - `revert/` — revert changes
+            - `release/` — release branches
+            - `deps/` — dependency updates
+            - `security/` — security fixes
 
             **Important:** Please **do not** open pull requests directly from `main` or `master`.
 
