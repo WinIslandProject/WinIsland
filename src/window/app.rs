@@ -36,14 +36,6 @@ const DOUBLE_CLICK_DISTANCE: f32 = 8.0;
 pub(super) const DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ: u32 = 144_000;
 pub(super) const DEFAULT_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_micros(6_944);
 
-#[derive(Clone, Copy)]
-enum HideEdge {
-    Top,
-    Bottom,
-    Left,
-    Right,
-}
-
 fn should_show_widget_view(music_page_available: bool) -> bool {
     !music_page_available
 }
@@ -364,6 +356,7 @@ impl LyricState {
     }
 }
 
+#[derive(Default)]
 struct HideState {
     auto: bool,
     manual: bool,
@@ -371,21 +364,6 @@ struct HideState {
     fullscreen_reveal_override: bool,
     notification_reveal: bool,
     origin: Option<(i32, i32)>,
-    edge: HideEdge,
-}
-
-impl Default for HideState {
-    fn default() -> Self {
-        Self {
-            auto: false,
-            manual: false,
-            fullscreen: false,
-            fullscreen_reveal_override: false,
-            notification_reveal: false,
-            origin: None,
-            edge: HideEdge::Top,
-        }
-    }
 }
 
 impl HideState {

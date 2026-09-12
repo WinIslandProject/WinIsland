@@ -9,7 +9,7 @@ use winit::window::Window;
 use crate::core::config::{DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, PADDING, TOP_OFFSET};
 use crate::utils::font::FontManager;
 
-use super::{App, DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ, HideEdge, IslandLayout};
+use super::{App, DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ, IslandLayout};
 
 impl App {
     pub(super) fn required_window_size(&self) -> PhysicalSize<u32> {
@@ -261,56 +261,13 @@ impl App {
         true
     }
 
-    pub(super) fn nearest_hide_edge(&self) -> HideEdge {
-        if self.geom.monitor_size.0 == 0 || self.geom.monitor_size.1 == 0 {
-            return self.hide.edge;
-        }
-        let layout = self.compute_island_layout();
-        let island_x = self.geom.win_x + layout.current_island_x.round() as i32;
-        let island_y = self.geom.win_y + layout.current_island_y.round() as i32;
-        let island_w = self.springs.w.value.round().max(1.0) as i32;
-        let island_h = self.springs.h.value.round().max(1.0) as i32;
-        let mon_right = self.geom.monitor_pos.0 + self.geom.monitor_size.0 as i32;
-        let mon_bottom = self.geom.monitor_pos.1 + self.geom.monitor_size.1 as i32;
-        [
-            ((island_y - self.geom.monitor_pos.1).max(0), HideEdge::Top),
-            ((mon_bottom - island_y - island_h).max(0), HideEdge::Bottom),
-            ((island_x - self.geom.monitor_pos.0).max(0), HideEdge::Left),
-            ((mon_right - island_x - island_w).max(0), HideEdge::Right),
-        ]
-        .into_iter()
-        .min_by_key(|(distance, _)| *distance)
-        .map(|(_, edge)| edge)
-        .unwrap_or(HideEdge::Top)
-    }
-
-    pub(super) fn snap_to_hide_edge(&mut self, window: &Window) {
+    pub(super) fn snap_to_top_edge(&mut self, window: &Window) {
         let Some(monitor) = Self::get_target_monitor(window, self.config.monitor_index) else {
             return;
         };
         let layout = self.compute_island_layout();
         let mon_pos = monitor.position();
-        let mon_size = monitor.size();
-        let mon_right = mon_pos.x + mon_size.width as i32;
-        let mon_bottom = mon_pos.y + mon_size.height as i32;
-        let island_w = self.springs.w.value.round() as i32;
-        let island_h = self.springs.h.value.round() as i32;
-
-        match self.hide.edge {
-            HideEdge::Top => {
-                self.geom.win_y = mon_pos.y + TOP_OFFSET - layout.island_y.round() as i32
-            }
-            HideEdge::Bottom => {
-                self.geom.win_y =
-                    mon_bottom - TOP_OFFSET - island_h - layout.island_y.round() as i32
-            }
-            HideEdge::Left => {
-                self.geom.win_x = mon_pos.x + TOP_OFFSET - layout.offset_x.round() as i32
-            }
-            HideEdge::Right => {
-                self.geom.win_x = mon_right - TOP_OFFSET - island_w - layout.offset_x.round() as i32
-            }
-        }
+        self.geom.win_y = mon_pos.y + TOP_OFFSET - layout.island_y.round() as i32;
         window.set_outer_position(PhysicalPosition::new(self.geom.win_x, self.geom.win_y));
     }
 
@@ -325,11 +282,8 @@ impl App {
         }
     }
 
-    fn hidden_visible_width(&self, hide_edge: HideEdge) -> f64 {
-        let edge_size = match hide_edge {
-            HideEdge::Top | HideEdge::Bottom => self.springs.h.value as f64,
-            HideEdge::Left | HideEdge::Right => self.springs.w.value as f64,
-        };
+    fn hidden_visible_height(&self) -> f64 {
+        let edge_size = self.springs.h.value as f64;
         if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
             edge_size
         } else {
@@ -342,22 +296,18 @@ impl App {
         }
     }
 
-    pub(super) fn can_hide_to_edge(&self, hide_edge: HideEdge) -> bool {
-        let edge_size = match hide_edge {
-            HideEdge::Top | HideEdge::Bottom => self.springs.h.value as f64,
-            HideEdge::Left | HideEdge::Right => self.springs.w.value as f64,
-        };
-        edge_size - self.hidden_visible_width(hide_edge) > f64::EPSILON
+    pub(super) fn can_hide(&self) -> bool {
+        let edge_size = self.springs.h.value as f64;
+        edge_size - self.hidden_visible_height() > f64::EPSILON
     }
 
-    pub(super) fn prepare_hide(&mut self, window: &Window, hide_edge: HideEdge) -> bool {
-        if !self.can_hide_to_edge(hide_edge) {
+    pub(super) fn prepare_hide(&mut self, window: &Window) -> bool {
+        if !self.can_hide() {
             return false;
         }
-        self.hide.edge = hide_edge;
         if self.hide.origin.is_none() {
             self.hide.origin = Some((self.geom.win_x, self.geom.win_y));
-            self.snap_to_hide_edge(window);
+            self.snap_to_top_edge(window);
         }
         true
     }
@@ -386,30 +336,22 @@ impl App {
             (self.geom.os_w as f64 - self.springs.w.value as f64) / 2.0
         };
 
-        let hide_edge = self.hide.edge;
-        let edge_size = match hide_edge {
-            HideEdge::Top | HideEdge::Bottom => self.springs.h.value as f64,
-            HideEdge::Left | HideEdge::Right => self.springs.w.value as f64,
-        };
-        let hidden_visible_width = self.hidden_visible_width(hide_edge);
-        let concealed_width = (edge_size - hidden_visible_width).max(0.0);
-        let hide_distance = if concealed_width > f64::EPSILON {
-            concealed_width + TOP_OFFSET as f64
+        let edge_size = self.springs.h.value as f64;
+        let hidden_visible_height = self.hidden_visible_height();
+        let concealed_height = (edge_size - hidden_visible_height).max(0.0);
+        let hide_distance = if concealed_height > f64::EPSILON {
+            concealed_height + TOP_OFFSET as f64
         } else {
             0.0
         };
         let content_hide_ratio = if edge_size > f64::EPSILON {
-            (concealed_width / edge_size) as f32
+            (concealed_height / edge_size) as f32
         } else {
             0.0
         };
         let hide_offset = self.springs.hide.value as f64 * hide_distance;
-        let (current_island_x, current_island_y) = match hide_edge {
-            HideEdge::Top => (offset_x, island_y - hide_offset),
-            HideEdge::Bottom => (offset_x, island_y + hide_offset),
-            HideEdge::Left => (offset_x - hide_offset, island_y),
-            HideEdge::Right => (offset_x + hide_offset, island_y),
-        };
+        let current_island_x = offset_x;
+        let current_island_y = island_y - hide_offset;
         let compact_content_h = self
             .compact_content_height()
             .min(self.springs.h.value)
@@ -419,37 +361,11 @@ impl App {
         } else {
             TOP_OFFSET as f64
         };
-        let stable_island_y = match hide_edge {
-            HideEdge::Top => stable_base_y - hide_offset,
-            HideEdge::Bottom => stable_base_y + hide_offset,
-            HideEdge::Left | HideEdge::Right => stable_base_y,
-        };
-        let (hidden_reveal_x, hidden_reveal_y, hidden_reveal_w, hidden_reveal_h) = match hide_edge {
-            HideEdge::Top => (
-                current_island_x,
-                current_island_y + self.springs.h.value as f64 - 1.0,
-                self.springs.w.value as f64,
-                1.0,
-            ),
-            HideEdge::Bottom => (
-                current_island_x,
-                current_island_y - 1.0,
-                self.springs.w.value as f64,
-                1.0,
-            ),
-            HideEdge::Left => (
-                current_island_x + self.springs.w.value as f64 - 1.0,
-                current_island_y,
-                1.0,
-                self.springs.h.value as f64,
-            ),
-            HideEdge::Right => (
-                current_island_x - 1.0,
-                current_island_y,
-                1.0,
-                self.springs.h.value as f64,
-            ),
-        };
+        let stable_island_y = stable_base_y - hide_offset;
+        let hidden_reveal_x = current_island_x;
+        let hidden_reveal_y = current_island_y + self.springs.h.value as f64 - 1.0;
+        let hidden_reveal_w = self.springs.w.value as f64;
+        let hidden_reveal_h = 1.0;
 
         IslandLayout {
             offset_x,

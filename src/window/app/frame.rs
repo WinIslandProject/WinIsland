@@ -15,7 +15,7 @@ use crate::utils::mouse::{
     is_left_button_pressed, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
 
-use super::{App, HideEdge, RIGHT_DRAG_THRESHOLD};
+use super::{App, RIGHT_DRAG_THRESHOLD};
 
 const INTERACTIVE_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
@@ -64,7 +64,7 @@ impl App {
         }
         self.handle_tray_events(&window, event_loop);
         self.reload_config_if_changed(&window);
-        if self.is_hidden() && !self.can_hide_to_edge(self.hide.edge) {
+        if self.is_hidden() && !self.can_hide() {
             self.reveal_island();
         }
 
@@ -341,18 +341,15 @@ impl App {
             self.geom.monitor_size.1,
         );
         self.is_cursor_suppressed = is_cursor_hidden();
-        let has_live_activity = self.media_active() && self.current_media_info().is_playing;
         let should_hide_for_fullscreen = self.config.auto_hide
             && self.is_fullscreen_suppressed
-            && !has_live_activity
             && !self.hide.fullscreen_reveal_override;
         if should_hide_for_fullscreen != self.hide.fullscreen {
             if should_hide_for_fullscreen {
                 let hide_started = if self.is_hidden() {
                     true
                 } else {
-                    let hide_edge = self.nearest_hide_edge();
-                    self.prepare_hide(window, hide_edge)
+                    self.prepare_hide(window)
                 };
                 if hide_started {
                     self.expanded = false;
@@ -487,7 +484,7 @@ impl App {
         if self.hide.notification_reveal && !self.compact_overlay.is_notification_visible() {
             self.hide.notification_reveal = false;
             if self.hide.has_hidden_reason() {
-                self.prepare_hide(window, self.hide.edge);
+                self.prepare_hide(window);
             }
             window.request_redraw();
         }
@@ -512,15 +509,14 @@ impl App {
             }
             log::info!("Island un-hidden (media playing)");
         } else if !self.is_hidden() && is_idle {
-            if self.idle_timer.elapsed().as_secs_f32() > self.config.auto_hide_delay {
-                let hide_edge = self.nearest_hide_edge();
-                if self.prepare_hide(window, hide_edge) {
-                    self.hide.auto = true;
-                    log::info!(
-                        "Island auto-hidden (idle {:.1}s)",
-                        self.config.auto_hide_delay
-                    );
-                }
+            if self.idle_timer.elapsed().as_secs_f32() > self.config.auto_hide_delay
+                && self.prepare_hide(window)
+            {
+                self.hide.auto = true;
+                log::info!(
+                    "Island auto-hidden (idle {:.1}s)",
+                    self.config.auto_hide_delay
+                );
             }
         } else if !self.is_hidden() && !is_idle {
             self.idle_timer = Instant::now();
@@ -586,7 +582,7 @@ impl App {
                 self.drag_has_moved = true;
             }
             if upward_distance > 3 && self.hide.origin.is_none() {
-                self.prepare_hide(window, HideEdge::Top);
+                self.prepare_hide(window);
             }
             if self.hide.origin.is_some() {
                 let drag_layout = self.compute_island_layout();

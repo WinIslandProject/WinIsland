@@ -1,5 +1,8 @@
 # Changelog
 
+### v1.3.5
+- Fixed some auto-hide issues
+
 ### v1.3.4
 - Added selectable lyric transition animations with blur, slide, sequential fade, and random modes
 - Added double-click on the album cover to activate the source media app
