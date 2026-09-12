@@ -49,15 +49,6 @@ body:
     validations:
       required: false
 
-  - type: input
-    id: version
-    attributes:
-      label: Target version
-      description: Target software version or milestone; use nightly if unknown
-      placeholder: nightly
-    validations:
-      required: true
-
   - type: textarea
     id: mockups
     attributes:
