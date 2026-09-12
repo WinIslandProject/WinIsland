@@ -461,7 +461,9 @@ img, svg { display: block; }
   h3 { margin: 34px 0 12px; font-size: 20px; }
   h4 { margin: 26px 0 10px; font-size: 16px; }
   :is(p, li) { color: #424245; font-size: 15px; line-height: 1.72; }
-  :is(ul, ol) { padding-left: 24px; }
+  ul { list-style-type: disc; padding-left: 24px; }
+  ul ul { list-style-type: circle; }
+  ol { list-style-type: decimal; padding-left: 24px; }
   li + li { margin-top: 6px; }
   a { color: var(--blue); text-decoration: underline; text-decoration-color: rgba(0, 113, 227, .25); text-underline-offset: 3px; }
   blockquote { margin: 24px 0; border: 1px solid rgba(0, 113, 227, .16); border-radius: 14px; background: rgba(0, 113, 227, .06); padding: 2px 18px; }
