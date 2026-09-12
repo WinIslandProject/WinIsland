@@ -3,6 +3,7 @@
 - [ ] I have read `CONTRIBUTING.md` and completed the required checks
 - [ ] Local and CI checks pass
 - [ ] I have completed a self-review
+- [ ] I confirm that I haven't read the checkboxes and just ticked them all
 
 ## Change type (select one)
 
