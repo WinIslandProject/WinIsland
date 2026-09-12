@@ -168,3 +168,5 @@ update_no_update_title=Check for Updates
 update_no_update_desc=You are already using the latest version of WinIsland.
 update_failed_desc=Failed to check for updates. Please try again later.
 volume=Volume
+d3d12_unsupported_title=Direct3D 12 Unsupported
+d3d12_unsupported_desc=WinIsland requires a graphics device and driver with Direct3D 12 support. The application will now exit.

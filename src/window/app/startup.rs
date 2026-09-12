@@ -7,7 +7,9 @@ use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Window, WindowButtons, WindowLevel};
 
 use crate::core::config::WINDOW_TITLE;
+use crate::core::i18n::tr;
 use crate::utils::icon::get_app_icon;
+use crate::utils::logger;
 use crate::window::tray::TrayManager;
 
 use super::App;
@@ -75,16 +77,21 @@ impl App {
                     self.geom.win_y
                 );
             }
-            self.renderer =
+            let renderer =
                 match crate::window::d3d::D3DRenderer::new(&window, self.geom.os_w, self.geom.os_h)
                 {
-                    Ok(renderer) => Some(renderer),
+                    Ok(renderer) => renderer,
                     Err(error) => {
                         log::error!("D3D12 renderer initialization failed: {error}");
-                        self.renderer_retry_at = Some(std::time::Instant::now());
-                        None
+                        logger::show_error_message(
+                            &tr("d3d12_unsupported_title"),
+                            &tr("d3d12_unsupported_desc"),
+                        );
+                        event_loop.exit();
+                        return;
                     }
                 };
+            self.renderer = Some(renderer);
             let is_light = window.theme() == Some(winit::window::Theme::Light);
             self.is_light_theme = is_light;
             crate::plugin::manager::update_host_state(crate::plugin::types::HostState {

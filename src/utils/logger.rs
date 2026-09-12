@@ -6,14 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::UI::WindowsAndMessaging::{MESSAGEBOX_STYLE, MessageBoxW};
+use windows::Win32::UI::WindowsAndMessaging::{
+    MB_ICONERROR, MB_SETFOREGROUND, MB_TOPMOST, MESSAGEBOX_STYLE, MessageBoxW,
+};
 use windows::core::PCWSTR;
 
 const LOG_DIR: &str = ".winisland/logs";
 const LOG_FILE: &str = "winisland.log";
 const CRASH_FLAG: &str = ".winisland/.crash_flag";
 const MAX_LOG_SIZE: u64 = 1_024_000; // 1MB
-const ERROR_MESSAGE_BOX_STYLE: MESSAGEBOX_STYLE = MESSAGEBOX_STYLE(0x0000_0010);
+const ERROR_MESSAGE_BOX_STYLE: MESSAGEBOX_STYLE =
+    MESSAGEBOX_STYLE(MB_ICONERROR.0 | MB_SETFOREGROUND.0 | MB_TOPMOST.0);
 
 struct FileLogger {
     state: Mutex<LogFile>,
@@ -241,7 +244,7 @@ See ~/.winisland/logs/winisland.log for recent activity.
     path.push(format!("crash-{file_ts}.txt"));
 
     if write_report_to(&path, &report).is_ok() {
-        show_message_box(
+        show_error_message(
             "WinIsland Crash",
             "Crash report saved. Logs will be written on next startup.",
         );
@@ -254,7 +257,7 @@ See ~/.winisland/logs/winisland.log for recent activity.
         let mut desktop_path = desktop;
         desktop_path.push(format!("WinIsland-crash-{file_ts}.txt"));
         if write_report_to(&desktop_path, &report).is_ok() {
-            show_message_box(
+            show_error_message(
                 "WinIsland Crash",
                 &format!("Crash report saved to:\n{}", desktop_path.display()),
             );
@@ -263,10 +266,10 @@ See ~/.winisland/logs/winisland.log for recent activity.
     }
 
     // Final fallback: show message box with crash info
-    show_message_box("WinIsland Crash", &msg_text);
+    show_error_message("WinIsland Crash", &msg_text);
 }
 
-fn show_message_box(title: &str, text: &str) {
+pub(crate) fn show_error_message(title: &str, text: &str) {
     let title_w: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
     let text_w: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     // SAFETY: both UTF-16 buffers are NUL-terminated and remain valid for the synchronous call.

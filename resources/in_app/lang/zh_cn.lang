@@ -168,3 +168,5 @@ update_no_update_title=检查更新
 update_no_update_desc=您当前已是最新版本的 WinIsland。
 update_failed_desc=检查更新失败，请稍后重试。
 volume=音量
+d3d12_unsupported_title=不支持 Direct3D 12
+d3d12_unsupported_desc=WinIsland 需要支持 Direct3D 12 的显卡和驱动程序，应用程序即将退出。
