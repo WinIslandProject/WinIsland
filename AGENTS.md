@@ -33,4 +33,4 @@ cargo build --release   # Production build
 9. **WDA_EXCLUDEFROMCAPTURE is intentionally NOT set** — see glass.rs doc comments for rationale.
 10. **Do not modify changelog files** (`Changelog.md`, `Changelog-zh.md`) — only project maintainers can modify them, unless explicitly requested by the user.
 11. **Do not add tests** — this project does not accept unit, integration, snapshot, or UI tests.
-
+12. **Pull requests must follow the PR format** — see [`.github/pull_request_template.md`](.github/pull_request_template.md) for the required template and guidelines.
