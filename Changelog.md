@@ -4,6 +4,7 @@
 - Fixed some auto-hide issues
 - Fixed known issues
 - Improved the widget settings UI and animations
+- Improved the music progress bar UI
 
 ### v1.3.4
 - Added selectable lyric transition animations with blur, slide, sequential fade, and random modes

@@ -48,9 +48,11 @@ const PROGRESS_HOVER_SMOOTHING: f32 = 0.18;
 const PROGRESS_HOVER_SNAP_THRESHOLD: f32 = 0.005;
 const PROGRESS_BAR_HEIGHT: f32 = 6.5;
 const PROGRESS_BAR_HOVER_GROWTH: f32 = 3.5;
+const PROGRESS_FILL_IDLE_BRIGHTNESS: f32 = 0.72;
+const PROGRESS_FILL_BRIGHTEN_DELAY: f32 = 0.18;
 const PROGRESS_TIME_BASELINE_SCALE: f32 = 0.35;
 const PROGRESS_TIME_IDLE_ALPHA: f32 = 0.5;
-const PROGRESS_TRACK_ALPHA: f32 = 0.15;
+const PROGRESS_TRACK_ALPHA: f32 = 0.12;
 const PLAYBACK_CONTROLS_TOP_GAP: f32 = 42.0;
 const SKIP_BUTTON_GAP: f32 = 75.0;
 const SKIP_ANIMATION_DURATION_SECS: f32 = 0.5;
@@ -431,11 +433,17 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             .min(bar_total_w);
         let mut fill_paint = Paint::default();
         fill_paint.set_anti_alias(true);
+        let fill_hover_t = ((hover_t - PROGRESS_FILL_BRIGHTEN_DELAY)
+            / (1.0 - PROGRESS_FILL_BRIGHTEN_DELAY))
+            .clamp(0.0, 1.0);
+        let fill_hover_t = fill_hover_t * fill_hover_t * (3.0 - 2.0 * fill_hover_t);
+        let fill_brightness =
+            PROGRESS_FILL_IDLE_BRIGHTNESS + (1.0 - PROGRESS_FILL_IDLE_BRIGHTNESS) * fill_hover_t;
         fill_paint.set_color(Color::from_argb(
             alpha,
-            text_color.r(),
-            text_color.g(),
-            text_color.b(),
+            (text_color.r() as f32 * fill_brightness).round() as u8,
+            (text_color.g() as f32 * fill_brightness).round() as u8,
+            (text_color.b() as f32 * fill_brightness).round() as u8,
         ));
         let fill_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, filled_w, bar_h);
         let fill_rrect = RRect::new_rect_radii(
