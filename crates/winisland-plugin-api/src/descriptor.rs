@@ -9,12 +9,14 @@ pub const CAPABILITY_I18N: u64 = 1 << 2;
 pub const CAPABILITY_HOST_STATE: u64 = 1 << 3;
 pub const CAPABILITY_WIDGET: u64 = 1 << 4;
 pub const CAPABILITY_LYRICS_TRANSFORM: u64 = 1 << 5;
+pub const CAPABILITY_SETTINGS: u64 = 1 << 6;
 pub const KNOWN_CAPABILITIES: u64 = CAPABILITY_CONTEXT
     | CAPABILITY_MEDIA
     | CAPABILITY_I18N
     | CAPABILITY_HOST_STATE
     | CAPABILITY_WIDGET
-    | CAPABILITY_LYRICS_TRANSFORM;
+    | CAPABILITY_LYRICS_TRANSFORM
+    | CAPABILITY_SETTINGS;
 
 /// Build plugin metadata from Cargo package fields while keeping the plugin ID and display name
 /// explicit.

@@ -70,6 +70,11 @@ impl App {
 
         self.poll_pending_plugin_install();
         self.poll_pending_plugin_marketplace();
+        if let Some(pages) = crate::plugin::manager::drain_settings_page_changes()
+            && let Some(settings) = self.settings.as_mut()
+        {
+            settings.set_plugin_settings_pages(pages);
+        }
         if self.ctx_mgr.tick() {
             window.request_redraw();
         }

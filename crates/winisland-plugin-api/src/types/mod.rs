@@ -2,6 +2,7 @@ pub mod context;
 pub mod i18n;
 pub mod lyrics;
 pub mod metadata;
+pub mod settings;
 pub mod widget;
 
 /// Opaque plugin-owned instance handle.

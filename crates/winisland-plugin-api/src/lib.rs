@@ -71,6 +71,12 @@ pub use types::lyrics::{
     LYRICS_TEXT_FLAG_WORD_SYNCED, LyricsTextV1, LyricsTransformFnV1, LyricsTransformerDataV1,
 };
 pub use types::metadata::PluginMetadataC;
+pub use types::settings::{
+    SETTINGS_ITEM_BUTTON, SETTINGS_ITEM_FLAG_DISABLED, SETTINGS_ITEM_GROUP_END,
+    SETTINGS_ITEM_GROUP_START, SETTINGS_ITEM_LABEL, SETTINGS_ITEM_SECTION, SETTINGS_ITEM_SELECT,
+    SETTINGS_ITEM_STEPPER, SETTINGS_ITEM_SWITCH, SettingsChangeV1, SettingsChangedFnV1,
+    SettingsItemV1, SettingsOptionV1, SettingsPageDataV1,
+};
 pub use types::widget::{WIDGET_FLAG_SHOW_COMPACT, WidgetDataV1};
 pub use types::{
     ByteSliceV1, INVALID_ID, PluginHandle, PluginResultC, PluginToken, ResourceId, Utf8SliceV1,

@@ -1,11 +1,13 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use crate::core::i18n::tr;
 use crate::utils::color::SettingsTheme;
+use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{SIDEBAR_PAD, SIDEBAR_SEL_RADIUS};
-use crate::utils::settings_ui::{SettingsPainter, settings_paint};
+use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
 use skia_safe::{
-    Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Rect, SamplingOptions,
+    Canvas, Color, Data, FilterMode, FontStyle, Image, MipmapMode, Paint, Rect, SamplingOptions,
     gpu::{DirectContext, Mipmapped},
 };
 
@@ -24,6 +26,7 @@ const SIDEBAR_ICON_BYTES: [&[u8]; 5] = [
 
 thread_local! {
     static SIDEBAR_ICONS: RefCell<Option<[Image; 5]>> = const { RefCell::new(None) };
+    static PLUGIN_SETTINGS_ICONS: RefCell<HashMap<u64, Image>> = RefCell::new(HashMap::new());
 }
 
 fn load_sidebar_icon(direct_context: &mut DirectContext, bytes: &[u8]) -> Image {
@@ -60,6 +63,98 @@ pub(super) fn clear_sidebar_icon_cache() {
     SIDEBAR_ICONS.with(|cache| {
         *cache.borrow_mut() = None;
     });
+}
+
+pub(super) fn clear_plugin_settings_icon_cache() {
+    PLUGIN_SETTINGS_ICONS.with(|cache| cache.borrow_mut().clear());
+}
+
+fn draw_plugin_settings_icon(
+    direct_context: &mut DirectContext,
+    canvas: &Canvas,
+    page: &crate::core::plugin_settings::PluginSettingsPage,
+    rect: Rect,
+) {
+    if page.icon.is_empty() {
+        draw_sidebar_icon(direct_context, canvas, 3, rect);
+        return;
+    }
+    let image = PLUGIN_SETTINGS_ICONS.with(|cache| {
+        if let Some(image) = cache.borrow().get(&page.resource_id) {
+            return Some(image.clone());
+        }
+        let image = Image::from_encoded(Data::new_copy(&page.icon))?
+            .new_texture_image(direct_context, Mipmapped::Yes)?;
+        cache.borrow_mut().insert(page.resource_id, image.clone());
+        Some(image)
+    });
+    if let Some(image) = image {
+        canvas.draw_image_rect_with_sampling_options(
+            &image,
+            None,
+            rect,
+            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
+            &Paint::default(),
+        );
+    } else {
+        draw_sidebar_icon(direct_context, canvas, 3, rect);
+    }
+}
+
+fn draw_sidebar_row_background(
+    app: &SettingsApp,
+    canvas: &Canvas,
+    theme: &SettingsTheme,
+    paint: &mut Paint,
+    index: usize,
+) -> Color {
+    let row_y = SIDEBAR_START_Y + index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
+    let row_x = SIDEBAR_PAD;
+    let row_w = SIDEBAR_W - SIDEBAR_PAD * 2.0;
+    if app.active_page == index {
+        paint.set_color(if app.focused {
+            theme.selection_bg
+        } else {
+            theme.card_highlight
+        });
+        canvas.draw_round_rect(
+            Rect::from_xywh(row_x, row_y, row_w, SIDEBAR_ROW_H),
+            SIDEBAR_SEL_RADIUS,
+            SIDEBAR_SEL_RADIUS,
+            paint,
+        );
+        if app.focused {
+            if app.is_light {
+                theme.selection_text
+            } else {
+                Color::WHITE
+            }
+        } else {
+            theme.text_pri
+        }
+    } else {
+        let hover = app.anim.get(SIDEBAR_KEY_BASE + index as u64);
+        if hover > 0.005 {
+            let base = theme.sidebar_hover;
+            paint.set_color(Color::from_argb(
+                (base.a() as f32 * hover) as u8,
+                base.r(),
+                base.g(),
+                base.b(),
+            ));
+            canvas.draw_round_rect(
+                Rect::from_xywh(row_x, row_y, row_w, SIDEBAR_ROW_H),
+                SIDEBAR_SEL_RADIUS,
+                SIDEBAR_SEL_RADIUS,
+                paint,
+            );
+        }
+        if app.sidebar_hover == index as i32 {
+            theme.text_pri
+        } else {
+            theme.text_sec
+        }
+    }
 }
 
 fn draw_window_control(
@@ -163,61 +258,39 @@ impl SettingsApp {
             tr("tab_plugins"),
             tr("tab_about"),
         ];
-        for (i, label) in pages.iter().enumerate() {
-            let row_y = SIDEBAR_START_Y + i as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
-            let row_x = SIDEBAR_PAD;
-            let row_w = SIDEBAR_W - SIDEBAR_PAD * 2.0;
-
-            if self.active_page == i {
-                paint.set_color(if self.focused {
-                    theme.selection_bg
-                } else {
-                    theme.card_highlight
-                });
-                canvas.draw_round_rect(
-                    Rect::from_xywh(row_x, row_y, row_w, SIDEBAR_ROW_H),
-                    SIDEBAR_SEL_RADIUS,
-                    SIDEBAR_SEL_RADIUS,
-                    &paint,
-                );
-                paint.set_color(if self.focused {
-                    if self.is_light {
-                        theme.selection_text
-                    } else {
-                        Color::WHITE
-                    }
-                } else {
-                    theme.text_pri
-                });
-            } else {
-                let hover_val = self.anim.get(SIDEBAR_KEY_BASE + i as u64);
-                if hover_val > 0.005 {
-                    let base = theme.sidebar_hover;
-                    let alpha = (base.a() as f32 * hover_val) as u8;
-                    paint.set_color(Color::from_argb(alpha, base.r(), base.g(), base.b()));
-                    canvas.draw_round_rect(
-                        Rect::from_xywh(row_x, row_y, row_w, SIDEBAR_ROW_H),
-                        SIDEBAR_SEL_RADIUS,
-                        SIDEBAR_SEL_RADIUS,
-                        &paint,
-                    );
-                }
-                paint.set_color(if self.sidebar_hover == i as i32 {
-                    theme.text_pri
-                } else {
-                    theme.text_sec
-                });
-            }
-
-            let icon_rect = Rect::from_xywh(row_x + 7.0, row_y + 6.0, 22.0, 22.0);
-            draw_sidebar_icon(direct_context, canvas, i, icon_rect);
-
+        for (index, label) in pages.iter().enumerate() {
+            let row_y = SIDEBAR_START_Y + index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
+            let text_color = draw_sidebar_row_background(self, canvas, theme, &mut paint, index);
+            let icon_rect = Rect::from_xywh(SIDEBAR_PAD + 7.0, row_y + 6.0, 22.0, 22.0);
+            draw_sidebar_icon(direct_context, canvas, index, icon_rect);
             SettingsPainter::new(canvas).text(
                 label,
-                (row_x + 36.0, row_y + 22.0),
+                (SIDEBAR_PAD + 36.0, row_y + 22.0),
                 13.0,
-                self.active_page == i,
-                paint.color(),
+                self.active_page == index,
+                text_color,
+            );
+        }
+
+        for (offset, page) in self.plugin_settings_pages.iter().enumerate() {
+            let index = super::BUILTIN_SIDEBAR_PAGE_COUNT + offset;
+            let row_y = SIDEBAR_START_Y + index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
+            let text_color = draw_sidebar_row_background(self, canvas, theme, &mut paint, index);
+            let icon_rect = Rect::from_xywh(SIDEBAR_PAD + 7.0, row_y + 6.0, 22.0, 22.0);
+            draw_plugin_settings_icon(direct_context, canvas, page, icon_rect);
+            let label = ellipsize_text(
+                FontManager::global(),
+                &page.title,
+                13.0,
+                FontStyle::normal(),
+                SIDEBAR_W - SIDEBAR_PAD * 2.0 - 40.0,
+            );
+            SettingsPainter::new(canvas).text(
+                &label,
+                (SIDEBAR_PAD + 36.0, row_y + 22.0),
+                13.0,
+                self.active_page == index,
+                text_color,
             );
         }
     }

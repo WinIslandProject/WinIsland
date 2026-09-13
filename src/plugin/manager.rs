@@ -8,14 +8,18 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use super::loader::NativePlugin;
 use super::types::{
     ABI_VERSION_1, ByteSliceV1, CAPABILITY_CONTEXT, CAPABILITY_HOST_STATE, CAPABILITY_I18N,
-    CAPABILITY_LYRICS_TRANSFORM, CAPABILITY_MEDIA, CAPABILITY_WIDGET, ContextApiV1, ContextDataV1,
-    DrawApiV1, HostApiV1, HostState, HostStateApiV1, HostStateV1, I18nApiV1, INTERFACE_CONTEXT,
-    INTERFACE_HOST_STATE, INTERFACE_I18N, INTERFACE_LYRICS_TRANSFORM, INTERFACE_MEDIA,
-    INTERFACE_VERSION_1, INTERFACE_WIDGET, INVALID_ID, LYRICS_TEXT_FLAG_WORD_SYNCED, LyricsTextV1,
-    LyricsTransformApiV1, LyricsTransformFnV1, LyricsTransformerDataV1, MediaApiV1, MediaCommandV1,
-    MediaSourceDataV1, PluginError, PluginResultC, PluginToken, ResourceId, TranslationPairV1,
-    Utf8SliceV1, WidgetApiV1, WidgetDataV1, WidgetDrawContextV1, WidgetDrawFnV1, context_from_ffi,
-    read_c_str, widget_from_ffi,
+    CAPABILITY_LYRICS_TRANSFORM, CAPABILITY_MEDIA, CAPABILITY_SETTINGS, CAPABILITY_WIDGET,
+    ContextApiV1, ContextDataV1, DrawApiV1, HostApiV1, HostState, HostStateApiV1, HostStateV1,
+    I18nApiV1, INTERFACE_CONTEXT, INTERFACE_HOST_STATE, INTERFACE_I18N, INTERFACE_LYRICS_TRANSFORM,
+    INTERFACE_MEDIA, INTERFACE_SETTINGS, INTERFACE_VERSION_1, INTERFACE_WIDGET, INVALID_ID,
+    LYRICS_TEXT_FLAG_WORD_SYNCED, LyricsTextV1, LyricsTransformApiV1, LyricsTransformFnV1,
+    LyricsTransformerDataV1, MediaApiV1, MediaCommandV1, MediaSourceDataV1, PluginError,
+    PluginResultC, PluginToken, ResourceId, SETTINGS_ITEM_BUTTON, SETTINGS_ITEM_FLAG_DISABLED,
+    SETTINGS_ITEM_GROUP_END, SETTINGS_ITEM_GROUP_START, SETTINGS_ITEM_LABEL, SETTINGS_ITEM_SECTION,
+    SETTINGS_ITEM_SELECT, SETTINGS_ITEM_STEPPER, SETTINGS_ITEM_SWITCH, SettingsApiV1,
+    SettingsChangeV1, SettingsChangedFnV1, SettingsItemV1, SettingsOptionV1, SettingsPageDataV1,
+    TranslationPairV1, Utf8SliceV1, WidgetApiV1, WidgetDataV1, WidgetDrawContextV1, WidgetDrawFnV1,
+    context_from_ffi, read_c_str, widget_from_ffi,
 };
 use super::zip_loader::{self, PluginManifest};
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
@@ -28,6 +32,11 @@ const MAX_I18N_BUNDLES_PER_PLUGIN: usize = 16;
 const MAX_I18N_BYTES_PER_PLUGIN: usize = 4 * 1024 * 1024;
 const MAX_WIDGETS_PER_PLUGIN: usize = 8;
 const MAX_LYRICS_TRANSFORMERS_PER_PLUGIN: usize = 4;
+const MAX_SETTINGS_PAGES_PER_PLUGIN: usize = 1;
+const MAX_SETTINGS_ITEMS: u32 = 64;
+const MAX_SETTINGS_OPTIONS: u32 = 64;
+const MAX_SETTINGS_ICON_BYTES: u32 = 1024 * 1024;
+const MAX_SETTINGS_BYTES_PER_PLUGIN: usize = 2 * 1024 * 1024;
 const MAX_TRANSFORMED_LYRIC_BYTES: u32 = 256 * 1024;
 const MAX_TRANSLATION_PAIRS: u32 = 4096;
 const MAX_TRANSLATION_STRING_BYTES: u32 = 64 * 1024;
@@ -82,6 +91,7 @@ enum ResourceKind {
     I18n,
     Widget,
     LyricsTransform,
+    Settings,
 }
 
 struct ResourceOwner {
@@ -117,6 +127,13 @@ struct WidgetResource {
     in_flight: u32,
 }
 
+struct SettingsResource {
+    page: crate::core::plugin_settings::PluginSettingsPage,
+    on_change: Option<SettingsChangedFnV1>,
+    callback_data: usize,
+    in_flight: u32,
+}
+
 #[derive(Default)]
 struct RuntimeState {
     plugins: HashMap<PluginToken, PluginRegistration>,
@@ -131,6 +148,10 @@ struct RuntimeState {
     widgets: HashMap<ResourceId, WidgetResource>,
     lyrics_transformers: HashMap<ResourceId, LyricsTransformerResource>,
     lyrics_transformer_sequence: u64,
+    settings_keys: HashMap<(PluginToken, String), ResourceId>,
+    settings: HashMap<ResourceId, SettingsResource>,
+    settings_sequence: u64,
+    settings_dirty: bool,
     host_state: HostState,
 }
 
@@ -181,6 +202,13 @@ static LYRICS_TRANSFORM_API: LyricsTransformApiV1 = LyricsTransformApiV1 {
     version: INTERFACE_VERSION_1,
     register: Some(lyrics_transform_register),
     release: Some(lyrics_transform_release),
+};
+static SETTINGS_API: SettingsApiV1 = SettingsApiV1 {
+    struct_size: std::mem::size_of::<SettingsApiV1>() as u32,
+    version: INTERFACE_VERSION_1,
+    create: Some(settings_create),
+    update: Some(settings_update),
+    release: Some(settings_release),
 };
 static DRAW_API: DrawApiV1 = DrawApiV1 {
     struct_size: std::mem::size_of::<DrawApiV1>() as u32,
@@ -249,6 +277,7 @@ unsafe extern "C" fn query_interface(interface_id: u32, version: u32) -> *const 
         INTERFACE_HOST_STATE => std::ptr::from_ref(&HOST_STATE_API).cast(),
         INTERFACE_WIDGET => std::ptr::from_ref(&WIDGET_API).cast(),
         INTERFACE_LYRICS_TRANSFORM => std::ptr::from_ref(&LYRICS_TRANSFORM_API).cast(),
+        INTERFACE_SETTINGS => std::ptr::from_ref(&SETTINGS_API).cast(),
         _ => std::ptr::null(),
     }
 }
@@ -375,6 +404,290 @@ fn validate_widget_data(data: &WidgetDataV1) -> Result<(), &'static str> {
         .is_some()
         .then_some(())
         .ok_or("widget render callback is required")
+}
+
+fn read_settings_key(value: &[u8; 64]) -> Result<String, &'static str> {
+    let end = value
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(value.len());
+    if end == 0
+        || end == value.len()
+        || !value[..end]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-' || *byte == b'_')
+    {
+        return Err("settings key must match [a-zA-Z0-9_-]{1,63}");
+    }
+    Ok(String::from_utf8_lossy(&value[..end]).into_owned())
+}
+
+unsafe fn read_bytes(value: ByteSliceV1, max_len: u32) -> Result<Vec<u8>, &'static str> {
+    if value.len > max_len {
+        return Err("byte value exceeds the size limit");
+    }
+    if value.len == 0 {
+        return Ok(Vec::new());
+    }
+    if value.ptr.is_null() {
+        return Err("byte pointer is null");
+    }
+    // SAFETY: The plugin guarantees this borrowed range is valid for the call.
+    Ok(unsafe { std::slice::from_raw_parts(value.ptr, value.len as usize) }.to_vec())
+}
+
+fn validate_settings_icon(icon: &[u8]) -> Result<(), &'static str> {
+    if icon.is_empty() {
+        return Ok(());
+    }
+    let image = skia_safe::Image::from_encoded(skia_safe::Data::new_copy(icon))
+        .ok_or("settings icon is not a supported image")?;
+    if image.width() <= 0 || image.height() <= 0 || image.width() > 1024 || image.height() > 1024 {
+        return Err("settings icon dimensions are out of range");
+    }
+    Ok(())
+}
+
+unsafe fn copy_settings_options(
+    item: &SettingsItemV1,
+) -> Result<Vec<crate::core::plugin_settings::PluginSettingsOption>, &'static str> {
+    if item.option_count == 0 || item.option_count > MAX_SETTINGS_OPTIONS || item.options.is_null()
+    {
+        return Err("settings select options are empty or too large");
+    }
+    // SAFETY: The option count is bounded and the plugin keeps the borrowed array valid.
+    let options = unsafe { std::slice::from_raw_parts(item.options, item.option_count as usize) };
+    let mut copied = Vec::with_capacity(options.len());
+    let mut values = HashSet::new();
+    for option in options {
+        if option.struct_size < std::mem::size_of::<SettingsOptionV1>() as u32 {
+            return Err("settings option struct is truncated");
+        }
+        let value = read_c_str(&option.value);
+        let label = read_c_str(&option.label);
+        if value.is_empty() || label.trim().is_empty() {
+            return Err("settings option value and label are required");
+        }
+        if !values.insert(value.clone()) {
+            return Err("settings option values must be unique");
+        }
+        copied.push(crate::core::plugin_settings::PluginSettingsOption { value, label });
+    }
+    Ok(copied)
+}
+
+unsafe fn copy_settings_page(
+    id: ResourceId,
+    sequence: u64,
+    data: *const SettingsPageDataV1,
+) -> Result<(SettingsResource, usize), &'static str> {
+    // SAFETY: The page pointer is validated and copied before borrowed fields are read.
+    let data = unsafe { read_struct(data) }?;
+    let key = read_settings_key(&data.key)?;
+    let title = read_c_str(&data.title);
+    if title.trim().is_empty() {
+        return Err("settings page title is empty");
+    }
+    if data.item_count == 0 || data.item_count > MAX_SETTINGS_ITEMS || data.items.is_null() {
+        return Err("settings page items are empty or too large");
+    }
+    // SAFETY: The icon is borrowed only for this call and copied immediately.
+    let icon = unsafe { read_bytes(data.icon, MAX_SETTINGS_ICON_BYTES) }?;
+    validate_settings_icon(&icon)?;
+    // SAFETY: The item count is bounded and the plugin keeps the borrowed array valid.
+    let items = unsafe { std::slice::from_raw_parts(data.items, data.item_count as usize) };
+    let mut copied = Vec::with_capacity(items.len());
+    let mut keys = HashSet::new();
+    let mut group_open = false;
+    let mut has_actions = false;
+    let mut size_bytes = key.len() + title.len() + icon.len();
+
+    for item in items {
+        if item.struct_size < std::mem::size_of::<SettingsItemV1>() as u32 {
+            return Err("settings item struct is truncated");
+        }
+        if item.flags & !SETTINGS_ITEM_FLAG_DISABLED != 0 {
+            return Err("settings item contains unknown flags");
+        }
+        let enabled = item.flags & SETTINGS_ITEM_FLAG_DISABLED == 0;
+        let label = read_c_str(&item.label);
+        let copied_item = match item.kind {
+            SETTINGS_ITEM_SECTION => {
+                if group_open || label.trim().is_empty() {
+                    return Err("settings section is empty or inside a group");
+                }
+                crate::core::plugin_settings::PluginSettingsItem::Section(label)
+            }
+            SETTINGS_ITEM_GROUP_START => {
+                if group_open {
+                    return Err("settings groups cannot be nested");
+                }
+                group_open = true;
+                crate::core::plugin_settings::PluginSettingsItem::GroupStart
+            }
+            SETTINGS_ITEM_GROUP_END => {
+                if !group_open {
+                    return Err("settings group end has no matching start");
+                }
+                group_open = false;
+                crate::core::plugin_settings::PluginSettingsItem::GroupEnd
+            }
+            SETTINGS_ITEM_LABEL => {
+                if !group_open || label.trim().is_empty() {
+                    return Err("settings label is empty or outside a group");
+                }
+                crate::core::plugin_settings::PluginSettingsItem::Label(label)
+            }
+            SETTINGS_ITEM_SWITCH => {
+                let key = read_settings_key(&item.key)?;
+                let value = match read_c_str(&item.value).as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("settings switch value must be true or false"),
+                };
+                validate_settings_action(group_open, &label, &key, &mut keys)?;
+                has_actions = true;
+                crate::core::plugin_settings::PluginSettingsItem::Switch {
+                    key,
+                    label,
+                    value,
+                    enabled,
+                }
+            }
+            SETTINGS_ITEM_SELECT => {
+                let key = read_settings_key(&item.key)?;
+                let value = read_c_str(&item.value);
+                // SAFETY: Option data is copied during this host call.
+                let options = unsafe { copy_settings_options(item) }?;
+                if !options.iter().any(|option| option.value == value) {
+                    return Err("settings select value is not present in its options");
+                }
+                validate_settings_action(group_open, &label, &key, &mut keys)?;
+                has_actions = true;
+                crate::core::plugin_settings::PluginSettingsItem::Select {
+                    key,
+                    label,
+                    value,
+                    options,
+                    enabled,
+                }
+            }
+            SETTINGS_ITEM_STEPPER => {
+                let key = read_settings_key(&item.key)?;
+                let value = read_c_str(&item.value)
+                    .parse::<f64>()
+                    .map_err(|_| "settings stepper value is not a number")?;
+                if !value.is_finite()
+                    || !item.minimum.is_finite()
+                    || !item.maximum.is_finite()
+                    || !item.step.is_finite()
+                    || item.minimum > item.maximum
+                    || item.step <= 0.0
+                    || !(item.minimum..=item.maximum).contains(&value)
+                {
+                    return Err("settings stepper range is invalid");
+                }
+                validate_settings_action(group_open, &label, &key, &mut keys)?;
+                has_actions = true;
+                crate::core::plugin_settings::PluginSettingsItem::Stepper {
+                    key,
+                    label,
+                    value,
+                    minimum: item.minimum,
+                    maximum: item.maximum,
+                    step: item.step,
+                    enabled,
+                }
+            }
+            SETTINGS_ITEM_BUTTON => {
+                let key = read_settings_key(&item.key)?;
+                let button_label = read_c_str(&item.value);
+                if button_label.trim().is_empty() {
+                    return Err("settings button label is empty");
+                }
+                validate_settings_action(group_open, &label, &key, &mut keys)?;
+                has_actions = true;
+                crate::core::plugin_settings::PluginSettingsItem::Button {
+                    key,
+                    label,
+                    button_label,
+                    enabled,
+                }
+            }
+            _ => return Err("settings item kind is unknown"),
+        };
+        size_bytes = size_bytes.saturating_add(settings_item_size(&copied_item));
+        copied.push(copied_item);
+    }
+    if group_open {
+        return Err("settings group is not closed");
+    }
+    if has_actions && data.on_change.is_none() {
+        return Err("interactive settings require an on_change callback");
+    }
+
+    Ok((
+        SettingsResource {
+            page: crate::core::plugin_settings::PluginSettingsPage {
+                resource_id: id,
+                key,
+                title,
+                icon,
+                items: copied,
+                sequence,
+            },
+            on_change: data.on_change,
+            callback_data: data.callback_data as usize,
+            in_flight: 0,
+        },
+        size_bytes,
+    ))
+}
+
+fn validate_settings_action(
+    group_open: bool,
+    label: &str,
+    key: &str,
+    keys: &mut HashSet<String>,
+) -> Result<(), &'static str> {
+    if !group_open || label.trim().is_empty() {
+        return Err("interactive setting is empty or outside a group");
+    }
+    if !keys.insert(key.to_string()) {
+        return Err("settings item keys must be unique");
+    }
+    Ok(())
+}
+
+fn settings_item_size(item: &crate::core::plugin_settings::PluginSettingsItem) -> usize {
+    use crate::core::plugin_settings::PluginSettingsItem;
+    match item {
+        PluginSettingsItem::Section(label) | PluginSettingsItem::Label(label) => label.len(),
+        PluginSettingsItem::GroupStart | PluginSettingsItem::GroupEnd => 0,
+        PluginSettingsItem::Switch { key, label, .. }
+        | PluginSettingsItem::Stepper { key, label, .. } => key.len() + label.len(),
+        PluginSettingsItem::Select {
+            key,
+            label,
+            value,
+            options,
+            ..
+        } => {
+            key.len()
+                + label.len()
+                + value.len()
+                + options
+                    .iter()
+                    .map(|option| option.value.len() + option.label.len())
+                    .sum::<usize>()
+        }
+        PluginSettingsItem::Button {
+            key,
+            label,
+            button_label,
+            ..
+        } => key.len() + label.len() + button_label.len(),
+    }
 }
 
 fn validate_context_data(data: &ContextDataV1) -> Result<(), &'static str> {
@@ -1305,6 +1618,117 @@ unsafe extern "C" fn widget_release(token: PluginToken, id: ResourceId) -> Plugi
     PluginResultC::ok()
 }
 
+unsafe extern "C" fn settings_create(
+    token: PluginToken,
+    data: *const SettingsPageDataV1,
+    out_id: *mut ResourceId,
+) -> PluginResultC {
+    require_output!(out_id, "settings page output pointer is null");
+    let mut state = lock_runtime_or_return!();
+    if let Err(error) = require_capability(&state, token, CAPABILITY_SETTINGS) {
+        return PluginResultC::err(error);
+    }
+    if resource_count(&state, token, ResourceKind::Settings) >= MAX_SETTINGS_PAGES_PER_PLUGIN {
+        return PluginResultC::err("settings page limit reached");
+    }
+    let id = next_id(&NEXT_RESOURCE_ID);
+    let sequence = state.settings_sequence.wrapping_add(1);
+    // SAFETY: The plugin keeps the page and nested borrowed data valid for this call.
+    let (resource, size_bytes) = match unsafe { copy_settings_page(id, sequence, data) } {
+        Ok(resource) => resource,
+        Err(error) => return PluginResultC::err(error),
+    };
+    if state
+        .settings_keys
+        .contains_key(&(token, resource.page.key.clone()))
+    {
+        return PluginResultC::err("settings page key is already registered by this plugin");
+    }
+    if resource_bytes(&state, token, ResourceKind::Settings, None).saturating_add(size_bytes)
+        > MAX_SETTINGS_BYTES_PER_PLUGIN
+    {
+        return PluginResultC::err("settings page exceeds the 2 MiB limit");
+    }
+    state.settings_sequence = sequence;
+    state.resources.insert(
+        id,
+        ResourceOwner {
+            plugin: token,
+            kind: ResourceKind::Settings,
+            size_bytes,
+        },
+    );
+    state
+        .settings_keys
+        .insert((token, resource.page.key.clone()), id);
+    state.settings.insert(id, resource);
+    state.settings_dirty = true;
+    // SAFETY: out_id was checked non-null and belongs to the caller.
+    unsafe { out_id.write(id) };
+    release_runtime(state);
+    PluginResultC::ok()
+}
+
+unsafe extern "C" fn settings_update(
+    token: PluginToken,
+    id: ResourceId,
+    data: *const SettingsPageDataV1,
+) -> PluginResultC {
+    let mut state = lock_runtime_or_return!();
+    if let Err(error) = require_resource(&state, token, id, ResourceKind::Settings) {
+        return PluginResultC::err(error);
+    }
+    let Some(existing) = state.settings.get(&id) else {
+        return PluginResultC::err("settings page was not found");
+    };
+    let existing_key = existing.page.key.clone();
+    let sequence = existing.page.sequence;
+    let in_flight = existing.in_flight;
+    // SAFETY: The plugin keeps the page and nested borrowed data valid for this call.
+    let (mut resource, size_bytes) = match unsafe { copy_settings_page(id, sequence, data) } {
+        Ok(resource) => resource,
+        Err(error) => return PluginResultC::err(error),
+    };
+    if resource.page.key != existing_key {
+        return PluginResultC::err("settings page key cannot change after creation");
+    }
+    if resource_bytes(&state, token, ResourceKind::Settings, Some(id)).saturating_add(size_bytes)
+        > MAX_SETTINGS_BYTES_PER_PLUGIN
+    {
+        return PluginResultC::err("settings page exceeds the 2 MiB limit");
+    }
+    resource.in_flight = in_flight;
+    if let Some(owner) = state.resources.get_mut(&id) {
+        owner.size_bytes = size_bytes;
+    }
+    state.settings.insert(id, resource);
+    state.settings_dirty = true;
+    release_runtime(state);
+    PluginResultC::ok()
+}
+
+unsafe extern "C" fn settings_release(token: PluginToken, id: ResourceId) -> PluginResultC {
+    let mut state = lock_runtime_or_return!();
+    if let Err(error) = require_resource(&state, token, id, ResourceKind::Settings) {
+        return PluginResultC::err(error);
+    }
+    if state
+        .settings
+        .get(&id)
+        .is_some_and(|settings| settings.in_flight != 0)
+    {
+        return PluginResultC::err("settings callback is in progress");
+    }
+    state.resources.remove(&id);
+    state.settings.remove(&id);
+    state
+        .settings_keys
+        .retain(|_, resource_id| *resource_id != id);
+    state.settings_dirty = true;
+    release_runtime(state);
+    PluginResultC::ok()
+}
+
 pub fn update_host_state(state: HostState) {
     if let Ok(mut runtime) = runtime().lock() {
         runtime.host_state = state;
@@ -1582,6 +2006,89 @@ pub fn drain_widget_events(manager: &mut crate::core::plugin_widget::WidgetManag
     changed
 }
 
+fn settings_page_snapshot(
+    runtime: &RuntimeState,
+) -> Vec<crate::core::plugin_settings::PluginSettingsPage> {
+    let mut pages = runtime
+        .settings
+        .values()
+        .map(|settings| settings.page.clone())
+        .collect::<Vec<_>>();
+    pages.sort_by_key(|page| page.sequence);
+    pages
+}
+
+pub fn plugin_settings_pages() -> Vec<crate::core::plugin_settings::PluginSettingsPage> {
+    runtime()
+        .lock()
+        .map(|runtime| settings_page_snapshot(&runtime))
+        .unwrap_or_default()
+}
+
+pub fn drain_settings_page_changes() -> Option<Vec<crate::core::plugin_settings::PluginSettingsPage>>
+{
+    let mut runtime = runtime().try_lock().ok()?;
+    if !runtime.settings_dirty {
+        return None;
+    }
+    runtime.settings_dirty = false;
+    Some(settings_page_snapshot(&runtime))
+}
+
+pub fn dispatch_settings_change(
+    resource_id: ResourceId,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    let (callback, callback_data) = {
+        let mut runtime = runtime()
+            .lock()
+            .map_err(|_| "plugin runtime lock is poisoned".to_string())?;
+        let owner = runtime
+            .resources
+            .get(&resource_id)
+            .filter(|owner| owner.kind == ResourceKind::Settings)
+            .ok_or_else(|| "settings page was not found".to_string())?;
+        if runtime
+            .plugins
+            .get(&owner.plugin)
+            .is_none_or(|plugin| plugin.stopping)
+        {
+            return Err("plugin is shutting down".to_string());
+        }
+        let settings = runtime
+            .settings
+            .get_mut(&resource_id)
+            .ok_or_else(|| "settings page was not found".to_string())?;
+        if !settings
+            .page
+            .items
+            .iter()
+            .any(|item| item.key() == Some(key))
+        {
+            return Err("settings item was not found".to_string());
+        }
+        let callback = settings
+            .on_change
+            .ok_or_else(|| "settings page has no change callback".to_string())?;
+        settings.in_flight = settings.in_flight.saturating_add(1);
+        (callback, settings.callback_data)
+    };
+    let change = SettingsChangeV1 {
+        struct_size: std::mem::size_of::<SettingsChangeV1>() as u32,
+        key: super::types::str_to_fixed(key),
+        value: super::types::str_to_fixed(value),
+    };
+    // SAFETY: The callback belongs to a leased, loaded plugin and the event lives for the call.
+    let result = unsafe { callback(callback_data as *mut c_void, resource_id, &change) };
+    if let Ok(mut runtime) = runtime().lock()
+        && let Some(settings) = runtime.settings.get_mut(&resource_id)
+    {
+        settings.in_flight = settings.in_flight.saturating_sub(1);
+    }
+    result.into_result()
+}
+
 pub fn drain_media_source_event() -> Option<MediaSourceEvent> {
     let mut runtime = runtime().lock().ok()?;
     if !runtime.media_dirty {
@@ -1701,6 +2208,10 @@ fn begin_plugin_shutdown(token: PluginToken) -> Result<bool, PluginError> {
                 .widgets
                 .get(&id)
                 .is_some_and(|widget| widget.in_flight != 0),
+            ResourceKind::Settings => runtime
+                .settings
+                .get(&id)
+                .is_some_and(|settings| settings.in_flight != 0),
             _ => false,
         }
     });
@@ -1730,6 +2241,9 @@ fn revoke_plugin(token: PluginToken) {
         };
         runtime.plugins.remove(&token);
         runtime.widget_keys.retain(|(owner, _), _| *owner != token);
+        runtime
+            .settings_keys
+            .retain(|(owner, _), _| *owner != token);
         let resources = runtime
             .resources
             .iter()
@@ -1758,6 +2272,10 @@ fn revoke_plugin(token: PluginToken) {
                 }
                 ResourceKind::LyricsTransform => {
                     runtime.lyrics_transformers.remove(&id);
+                }
+                ResourceKind::Settings => {
+                    runtime.settings.remove(&id);
+                    runtime.settings_dirty = true;
                 }
             }
         }

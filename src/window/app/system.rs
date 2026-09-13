@@ -310,8 +310,13 @@ impl App {
         ) {
             crate::core::persistence::save_config(&config);
         }
-        let mut settings =
-            crate::window::settings::SettingsApp::new(config, Vec::new(), plugin_widgets);
+        let plugin_settings_pages = crate::plugin::manager::plugin_settings_pages();
+        let mut settings = crate::window::settings::SettingsApp::new(
+            config,
+            Vec::new(),
+            plugin_widgets,
+            plugin_settings_pages,
+        );
         let Some(renderer) = self.renderer.as_mut() else {
             log::error!("Cannot open settings without the shared D3D12 renderer");
             return;

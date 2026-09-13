@@ -11,7 +11,7 @@ impl SettingsApp {
             2 => self.build_widget_items(),
             3 => self.build_plugin_items(),
             4 => self.build_about_items(),
-            _ => vec![],
+            _ => self.build_plugin_settings_items(),
         }
     }
 

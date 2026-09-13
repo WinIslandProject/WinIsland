@@ -5,8 +5,8 @@ use winit::keyboard::{Key, NamedKey};
 use super::pages::PageInput;
 use super::{
     NumberInput, NumberInputHandler, PAGE_NAV_GAP, PAGE_NAV_SIZE, PAGE_NAV_X, PAGE_NAV_Y,
-    PLUGINS_PAGE_INDEX, POPUP_OPACITY_KEY, PageNavigation, SETTINGS_HEADER_H, SIDEBAR_PAGE_COUNT,
-    SIDEBAR_ROW_GAP, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
+    PLUGINS_PAGE_INDEX, POPUP_OPACITY_KEY, PageNavigation, SETTINGS_HEADER_H, SIDEBAR_ROW_GAP,
+    SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
 };
 
 impl SettingsApp {
@@ -16,6 +16,7 @@ impl SettingsApp {
         self.commit_number_input();
 
         if self.popup.is_some() {
+            let plugin_setting = self.pending_plugin_setting.is_some();
             let selection = self.popup.as_ref().and_then(|popup| {
                 popup
                     .hit_test_item(mouse_x, mouse_y)
@@ -26,15 +27,18 @@ impl SettingsApp {
             self.anim.set_with_speed(POPUP_OPACITY_KEY, 0.0, 0.3);
             if let Some((on_select, value)) = selection {
                 on_select(self, &value);
-                self.persist_settings_change();
+                if !plugin_setting {
+                    self.persist_settings_change();
+                }
             } else {
+                self.pending_plugin_setting = None;
                 self.request_redraw();
             }
             return;
         }
 
         if mouse_x < SIDEBAR_W {
-            for page in 0..SIDEBAR_PAGE_COUNT {
+            for page in 0..self.sidebar_page_count() {
                 let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
                 if mouse_y >= row_y
                     && mouse_y <= row_y + SIDEBAR_ROW_H
@@ -77,7 +81,7 @@ impl SettingsApp {
             }
             3 => self.handle_plugin_click(),
             4 => self.handle_about_click(input),
-            _ => {}
+            _ => self.handle_plugin_settings_click(input),
         }
     }
 
@@ -127,7 +131,7 @@ impl SettingsApp {
         }
 
         if mouse_x < SIDEBAR_W {
-            for page in 0..SIDEBAR_PAGE_COUNT {
+            for page in 0..self.sidebar_page_count() {
                 let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
                 if mouse_y >= row_y
                     && mouse_y <= row_y + SIDEBAR_ROW_H
@@ -238,8 +242,11 @@ impl SettingsApp {
         let Some(input) = self.number_input.take() else {
             return;
         };
+        let plugin_setting = self.pending_plugin_setting.is_some();
         (input.on_commit)(self, &input.text);
-        self.persist_settings_change();
+        if !plugin_setting {
+            self.persist_settings_change();
+        }
     }
 
     pub(super) fn handle_number_input_key(&mut self, key: &Key) -> bool {
@@ -257,6 +264,7 @@ impl SettingsApp {
             }
             Key::Named(NamedKey::Escape) => {
                 self.number_input = None;
+                self.pending_plugin_setting = None;
             }
             Key::Character(value)
                 if value.chars().all(|character| {

@@ -1,4 +1,5 @@
 use crate::core::config::AppConfig;
+use crate::core::plugin_settings::PluginSettingsPage;
 use crate::core::plugin_widget::PluginWidget;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::{MarketplaceCatalog, MarketplacePlugin};
@@ -38,7 +39,7 @@ pub(crate) const SIDEBAR_W: f32 = 184.0;
 pub(crate) const SIDEBAR_ROW_H: f32 = 34.0;
 pub(crate) const SIDEBAR_ROW_GAP: f32 = 2.0;
 pub(crate) const SIDEBAR_START_Y: f32 = 64.0;
-pub(crate) const SIDEBAR_PAGE_COUNT: usize = 5;
+pub(crate) const BUILTIN_SIDEBAR_PAGE_COUNT: usize = 5;
 pub(crate) const GENERAL_PAGE_INDEX: usize = 0;
 pub(crate) const WIDGETS_PAGE_INDEX: usize = 2;
 pub(crate) const PLUGINS_PAGE_INDEX: usize = 3;
@@ -145,6 +146,13 @@ pub(crate) fn settings_frame_should_continue(
 
 pub(crate) type NumberInputHandler = fn(&mut SettingsApp, &str);
 
+pub(crate) struct PendingPluginSetting {
+    resource_id: u64,
+    key: String,
+    minimum: Option<f64>,
+    maximum: Option<f64>,
+}
+
 pub(crate) struct NumberInput {
     pub(crate) rect: skia_safe::Rect,
     pub(crate) text: String,
@@ -229,6 +237,9 @@ pub struct SettingsApp {
     pub(crate) plugin_detail_scroll: f32,
     pub(crate) plugin_detail_max_scroll: f32,
     pub(crate) plugin_status: Option<(String, bool)>,
+    pub(crate) plugin_settings_pages: Vec<PluginSettingsPage>,
+    pub(crate) plugin_settings_error: Option<(u64, String)>,
+    pub(crate) pending_plugin_setting: Option<PendingPluginSetting>,
     plugin_request: Option<PluginSettingsRequest>,
     close_requested: bool,
 }
@@ -250,10 +261,35 @@ impl SettingsApp {
         self.logical_window_size().0 - SIDEBAR_W
     }
 
+    pub(crate) fn sidebar_page_count(&self) -> usize {
+        BUILTIN_SIDEBAR_PAGE_COUNT + self.plugin_settings_pages.len()
+    }
+
+    pub(crate) fn active_plugin_settings_page(&self) -> Option<&PluginSettingsPage> {
+        self.active_page
+            .checked_sub(BUILTIN_SIDEBAR_PAGE_COUNT)
+            .and_then(|index| self.plugin_settings_pages.get(index))
+    }
+
+    pub(crate) fn page_title(&self) -> String {
+        match self.active_page {
+            0 => crate::core::i18n::tr("tab_general"),
+            1 => crate::core::i18n::tr("tab_music"),
+            2 => crate::core::i18n::tr("tab_widgets"),
+            3 => crate::core::i18n::tr("tab_plugins"),
+            4 => crate::core::i18n::tr("tab_about"),
+            _ => self
+                .active_plugin_settings_page()
+                .map(|page| page.title.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     pub fn new(
         config: AppConfig,
         plugins: Vec<InstalledPlugin>,
         plugin_widgets: Vec<PluginWidget>,
+        plugin_settings_pages: Vec<PluginSettingsPage>,
     ) -> Self {
         let switch_anim = SwitchAnimator::new(&[]);
         let detected_apps = config.smtc_known_apps.clone();
@@ -313,6 +349,9 @@ impl SettingsApp {
             plugin_detail_scroll: 0.0,
             plugin_detail_max_scroll: 0.0,
             plugin_status: None,
+            plugin_settings_pages,
+            plugin_settings_error: None,
+            pending_plugin_setting: None,
             plugin_request: None,
             close_requested: false,
         }
@@ -636,8 +675,9 @@ impl SettingsApp {
         self.logical_mouse_pos = new_position;
         self.update_scroll_drag(new_position.1);
 
-        let mut redraw =
-            matches!(self.active_page, WIDGETS_PAGE_INDEX | PLUGINS_PAGE_INDEX) && mouse_moved;
+        let mut redraw = (matches!(self.active_page, WIDGETS_PAGE_INDEX | PLUGINS_PAGE_INDEX)
+            || self.active_plugin_settings_page().is_some())
+            && mouse_moved;
         let dots_hovered = self.focused && window_controls_hovered(new_position.0, new_position.1);
         if dots_hovered != self.dots_hovered {
             self.dots_hovered = dots_hovered;
@@ -713,7 +753,7 @@ impl SettingsApp {
     fn update_sidebar_hover(&mut self) -> bool {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
         let hover_index = (mouse_x < SIDEBAR_W).then(|| {
-            (0..SIDEBAR_PAGE_COUNT).find(|index| {
+            (0..self.sidebar_page_count()).find(|index| {
                 let row_y = SIDEBAR_START_Y + *index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
                 (row_y..=row_y + SIDEBAR_ROW_H).contains(&mouse_y)
                     && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mouse_x)
@@ -725,7 +765,7 @@ impl SettingsApp {
             return false;
         }
         self.sidebar_hover = sidebar_hover;
-        for index in 0..SIDEBAR_PAGE_COUNT {
+        for index in 0..self.sidebar_page_count() {
             self.anim.set(
                 SIDEBAR_KEY_BASE + index as u64,
                 if hover_index == Some(index) { 1.0 } else { 0.0 },
@@ -754,6 +794,7 @@ impl SettingsApp {
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         if self.popup.is_some() {
             self.popup = None;
+            self.pending_plugin_setting = None;
             self.anim
                 .set_with_speed(POPUP_OPACITY_KEY, 0.0, POPUP_CLOSE_SPEED);
             self.request_redraw();
@@ -1027,6 +1068,7 @@ impl SettingsApp {
         self.widget_hover_visual = None;
         self.widget_drop_animation = None;
         sidebar::clear_sidebar_icon_cache();
+        sidebar::clear_plugin_settings_icon_cache();
         pages::plugins::clear_plugin_icon_cache();
         let renderer_target = self.renderer_target.take();
         self.window = None;
@@ -1078,6 +1120,77 @@ impl SettingsApp {
         if layout_changed {
             crate::core::persistence::save_config(&self.config);
         }
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_plugin_settings_pages(&mut self, pages: Vec<PluginSettingsPage>) {
+        let previous_active_page = self.active_page;
+        let icons_changed = self.plugin_settings_pages.len() != pages.len()
+            || self.plugin_settings_pages.iter().any(|current| {
+                pages
+                    .iter()
+                    .find(|page| page.resource_id == current.resource_id)
+                    .is_none_or(|page| page.icon != current.icon)
+            });
+        let structure_changed = self
+            .plugin_settings_pages
+            .iter()
+            .map(|page| page.resource_id)
+            .ne(pages.iter().map(|page| page.resource_id));
+        let active_resource = self
+            .active_plugin_settings_page()
+            .map(|page| page.resource_id);
+        self.plugin_settings_pages = pages;
+        if let Some(resource_id) = active_resource {
+            self.active_page = self
+                .plugin_settings_pages
+                .iter()
+                .position(|page| page.resource_id == resource_id)
+                .map_or(PLUGINS_PAGE_INDEX, |index| {
+                    BUILTIN_SIDEBAR_PAGE_COUNT + index
+                });
+        } else if self.active_page >= self.sidebar_page_count() {
+            self.active_page = PLUGINS_PAGE_INDEX;
+        }
+        if structure_changed {
+            self.page_history.clear();
+            self.page_history.push(self.active_page);
+            self.page_history_index = 0;
+        }
+        if self.active_page != previous_active_page {
+            self.scroll_y = 0.0;
+            self.target_scroll_y = 0.0;
+            self.scroll_vel_y = 0.0;
+        }
+        let pending_is_current = self.pending_plugin_setting.as_ref().is_some_and(|pending| {
+            self.plugin_settings_pages
+                .iter()
+                .any(|page| page.resource_id == pending.resource_id)
+        });
+        if !pending_is_current {
+            if self.pending_plugin_setting.is_some() {
+                self.popup = None;
+                self.number_input = None;
+                self.anim
+                    .set_with_speed(POPUP_OPACITY_KEY, 0.0, POPUP_CLOSE_SPEED);
+            }
+            self.pending_plugin_setting = None;
+        }
+        let error_is_current =
+            self.plugin_settings_error
+                .as_ref()
+                .is_some_and(|(resource_id, _)| {
+                    self.plugin_settings_pages
+                        .iter()
+                        .any(|page| page.resource_id == *resource_id)
+                });
+        if !error_is_current {
+            self.plugin_settings_error = None;
+        }
+        if icons_changed {
+            sidebar::clear_plugin_settings_icon_cache();
+        }
+        self.mark_items_dirty();
         self.request_redraw();
     }
 

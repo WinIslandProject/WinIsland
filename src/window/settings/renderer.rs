@@ -5,8 +5,8 @@ use crate::utils::color::SettingsTheme;
 use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
 use crate::utils::settings_ui::{
-    ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, settings_paint,
-    widget_grid_geom, widget_source_span,
+    ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
+    settings_paint, widget_grid_geom, widget_source_span,
 };
 use crate::window::d3d::D3DRenderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
@@ -328,21 +328,17 @@ impl SettingsApp {
     }
 
     fn draw_page_header(&self, canvas: &Canvas, theme: &SettingsTheme, win_w: f32) {
-        let title = match self.active_page {
-            0 => tr("tab_general"),
-            1 => tr("tab_music"),
-            2 => tr("tab_widgets"),
-            3 => tr("tab_plugins"),
-            _ => tr("tab_about"),
-        };
-        let mut paint = settings_paint(theme.separator);
-        SettingsPainter::new(canvas).text(
+        let title = self.page_title();
+        let title_x = PAGE_NAV_X + PAGE_NAV_SIZE * 2.0 + PAGE_NAV_GAP + 14.0;
+        let title = ellipsize_text(
+            FontManager::global(),
             &title,
-            (PAGE_NAV_X + PAGE_NAV_SIZE * 2.0 + PAGE_NAV_GAP + 14.0, 39.0),
             17.0,
-            true,
-            theme.text_pri,
+            skia_safe::FontStyle::bold(),
+            (win_w - title_x - 20.0).max(0.0),
         );
+        let mut paint = settings_paint(theme.separator);
+        SettingsPainter::new(canvas).text(&title, (title_x, 39.0), 17.0, true, theme.text_pri);
 
         paint.set_stroke_width(0.5);
         canvas.draw_line(
