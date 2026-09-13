@@ -1,5 +1,9 @@
 # Changelog
 
+### v1.3.6
+- Migrated hardware rendering from D3D12 to Vulkan 1.2
+- Fixed known issues
+
 ### v1.3.5
 - Fixed some auto-hide issues
 - Fixed touchscreen input not working
@@ -71,7 +75,7 @@
 - Refactored the codebase for better maintainability
 
 ### v1.2.7
-- Migrated from software rendering to D3D12 hardware rendering
+- Migrated from software rendering to hardware rendering
 - Fixed an issue where the application would still auto-hide in full-screen mode even when the auto-hide option was disabled 
 - Fixed a lyrics display issue when looping a single track
 - Added a feature to redirect to the source application when clicking on a notification

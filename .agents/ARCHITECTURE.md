@@ -4,8 +4,8 @@
 
 WinIsland is a Windows desktop application that creates a Dynamic Island overlay — a translucent, always-on-top island that displays media playback info, lyrics, and audio visualization. Built entirely in Rust with Skia for GPU-accelerated rendering.
 
-- **Window system**: winit + DirectComposition
-- **Rendering**: skia-safe on a shared D3D12 Ganesh context
+- **Window system**: winit + Win32 Vulkan WSI, with a companion Windows Composition backdrop window
+- **Rendering**: skia-safe on a shared Vulkan 1.2 Ganesh context
 - **Media integration**: Windows SMTC (System Media Transport Controls) via COM
 - **Audio visualization**: cpal (loopback capture) + realfft (6-band spectrum)
 - **Plugin system**: Native C ABI DLLs loaded via libloading
@@ -61,9 +61,9 @@ src/
 The application uses winit's `ApplicationHandler` and `WaitUntil` scheduling in [app.rs](src/window/app.rs):
 
 ```
-resumed() → create window (transparent, topmost, skip-taskbar)
-           → create D3D12 device, queue, and shared Skia DirectContext
-           → create a DirectComposition swap chain and GPU surfaces
+resumed() → create Vulkan and backdrop windows (transparent, topmost, skip-taskbar)
+           → create a Vulkan 1.2 instance, device, queue, and shared Skia DirectContext
+           → create a Win32 Vulkan surface, swap chain, and GPU surfaces
 
 about_to_wait() [display refresh rate while active, throttled while idle]:
   1. Enforce topmost position
@@ -86,7 +86,7 @@ RedrawRequested → draw_island():
   7. Draw spectrum visualizer bars
   8. Draw progress bar
   9. Draw mini controls (play/pause/prev/next)
-  10. Flush the GPU surface → present the DirectComposition swap chain
+  10. Flush the GPU surface → present the Vulkan swap chain
 ```
 
 Each style draws its background differently:
@@ -159,7 +159,7 @@ bounded staging extraction and backup/rollback directory activation.
 | COM | `CoInitializeEx`, `CoUninitialize` |
 | Audio | `IMMDeviceEnumerator`, `IAudioMeterInformation` |
 | Window | `SetWindowPos` (topmost), extended styles (WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT) |
-| Rendering | D3D12, DXGI flip swap chains, DirectComposition, Skia Ganesh |
+| Rendering | Vulkan 1.2, `VK_KHR_win32_surface`, `VK_KHR_swapchain`, Skia Ganesh |
 | GDI | `GetDC`, `CreateCompatibleDC`, `BitBlt`, `GetDIBits`, `StretchBlt` |
 | DWM | `DwmEnableBlurBehindWindow` (deprecated), `DwmSetWindowAttribute` |
 | IME | `ImmGetContext`, `ImmSetCompositionWindow` |
