@@ -2,6 +2,7 @@
 
 ### v1.3.6
 - Migrated hardware rendering from D3D12 to Vulkan 1.2
+- Added software rendering as a fallback when Vulkan is unavailable or incompatible
 - Fixed known issues
 
 ### v1.3.5

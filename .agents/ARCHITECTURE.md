@@ -2,10 +2,10 @@
 
 ## Overview
 
-WinIsland is a Windows desktop application that creates a Dynamic Island overlay — a translucent, always-on-top island that displays media playback info, lyrics, and audio visualization. Built entirely in Rust with Skia for GPU-accelerated rendering.
+WinIsland is a Windows desktop application that creates a Dynamic Island overlay — a translucent, always-on-top island that displays media playback info, lyrics, and audio visualization. Built entirely in Rust with Skia rendering.
 
 - **Window system**: winit + Win32 Vulkan WSI, with a companion Windows Composition backdrop window
-- **Rendering**: skia-safe on a shared Vulkan 1.2 Ganesh context
+- **Rendering**: Vulkan 1.2 Ganesh by default, with Skia raster + softbuffer fallback
 - **Media integration**: Windows SMTC (System Media Transport Controls) via COM
 - **Audio visualization**: cpal (loopback capture) + realfft (6-band spectrum)
 - **Plugin system**: Native C ABI DLLs loaded via libloading
@@ -50,6 +50,10 @@ src/
 │   └── win32.rs       Raw Win32 API wrappers (topmost, window styles, etc.)
 └── window/
     ├── app.rs         Main App struct — event loop, state, input, orchestration
+    ├── backdrop.rs    Shared Windows Composition host-backdrop window
+    ├── renderer.rs    Backend selection and shared drawing context
+    ├── software.rs    Skia raster + softbuffer fallback
+    ├── vulkan.rs      Vulkan 1.2 WSI and Skia Ganesh backend
     ├── tray.rs        System tray icon + context menu
     └── settings/      Separate settings window
 ```
@@ -61,9 +65,10 @@ src/
 The application uses winit's `ApplicationHandler` and `WaitUntil` scheduling in [app.rs](src/window/app.rs):
 
 ```
-resumed() → create Vulkan and backdrop windows (transparent, topmost, skip-taskbar)
-           → create a Vulkan 1.2 instance, device, queue, and shared Skia DirectContext
-           → create a Win32 Vulkan surface, swap chain, and GPU surfaces
+resumed() → create foreground and backdrop windows (transparent, topmost, skip-taskbar)
+           → try Vulkan 1.2 with a shared Skia DirectContext
+           → fall back to Skia raster + softbuffer if Vulkan initialization fails
+           → create matching targets for the island and settings windows
 
 about_to_wait() [display refresh rate while active, throttled while idle]:
   1. Enforce topmost position
@@ -86,13 +91,18 @@ RedrawRequested → draw_island():
   7. Draw spectrum visualizer bars
   8. Draw progress bar
   9. Draw mini controls (play/pause/prev/next)
-  10. Flush the GPU surface → present the Vulkan swap chain
+  10. Present through the active Vulkan or softbuffer target
 ```
 
 Each style draws its background differently:
-- **glass**: GDI screen capture → cached GPU surfaces → Skia blur → dark multiply blend
-- **dynamic**: Cached GPU-blurred album art with animated movement
+- **glass**: Companion Windows Composition window with a clipped host-backdrop brush
+- **dynamic**: Cached blurred album art rendered by the active Skia backend
 - **default**: Solid black
+
+Vulkan is always attempted first. If its loader, device, required extensions, surface format, or
+transparent composition mode is unavailable, the renderer falls back to a Skia raster surface
+presented through softbuffer. The Win32 software path uses a color-keyed layered foreground window
+so transparent pixels continue to reveal the companion backdrop window.
 
 ---
 
@@ -159,7 +169,7 @@ bounded staging extraction and backup/rollback directory activation.
 | COM | `CoInitializeEx`, `CoUninitialize` |
 | Audio | `IMMDeviceEnumerator`, `IAudioMeterInformation` |
 | Window | `SetWindowPos` (topmost), extended styles (WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT) |
-| Rendering | Vulkan 1.2, `VK_KHR_win32_surface`, `VK_KHR_swapchain`, Skia Ganesh |
+| Rendering | Vulkan 1.2 + Skia Ganesh; Skia raster + softbuffer compatibility fallback |
 | GDI | `GetDC`, `CreateCompatibleDC`, `BitBlt`, `GetDIBits`, `StretchBlt` |
 | DWM | `DwmEnableBlurBehindWindow` (deprecated), `DwmSetWindowAttribute` |
 | IME | `ImmGetContext`, `ImmSetCompositionWindow` |
