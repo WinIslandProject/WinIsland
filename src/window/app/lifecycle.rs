@@ -27,7 +27,7 @@ impl ApplicationHandler for App {
             if let Some(error) = self
                 .renderer
                 .as_mut()
-                .and_then(crate::window::d3d::D3DRenderer::take_failure)
+                .and_then(crate::window::vulkan::VulkanRenderer::take_failure)
             {
                 self.invalidate_renderer(&error, Instant::now());
             }

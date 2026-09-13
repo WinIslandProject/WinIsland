@@ -10,9 +10,9 @@ use crate::plugin::marketplace::MarketplaceCatalog;
 use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
 use crate::utils::physics::Spring;
-use crate::window::d3d::D3DRenderer;
 use crate::window::settings::SettingsApp;
 use crate::window::tray::TrayManager;
+use crate::window::vulkan::VulkanRenderer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -48,7 +48,8 @@ struct PluginMediaSource {
 
 pub struct App {
     window: Option<Arc<Window>>,
-    renderer: Option<D3DRenderer>,
+    renderer: Option<VulkanRenderer>,
+    backdrop_window: Option<Arc<Window>>,
     settings: Option<SettingsApp>,
     tray: Option<TrayManager>,
     smtc: SmtcListener,
@@ -119,6 +120,7 @@ impl Default for App {
         Self {
             window: None,
             renderer: None,
+            backdrop_window: None,
             settings: None,
             tray: None,
             config: config.clone(),

@@ -7,7 +7,7 @@ use winit::window::WindowId;
 use crate::core::render::draw_island;
 use crate::utils::blur::calculate_blur_sigmas;
 use crate::utils::mouse::get_global_cursor_pos;
-use crate::window::d3d::{HostBackdropParams, MAIN_D3D_TARGET};
+use crate::window::vulkan::{HostBackdropParams, MAIN_VULKAN_TARGET};
 
 use super::App;
 use super::input::InputSource;
@@ -253,21 +253,23 @@ impl App {
                             };
 
                         let host_backdrop = renderer.update_host_backdrop(
-                            MAIN_D3D_TARGET,
+                            MAIN_VULKAN_TARGET,
                             HostBackdropParams {
                                 enabled: matches!(
                                     self.config.island_style.as_str(),
                                     "glass" | "dynamic"
                                 ),
-                                x: island_layout.current_island_x as f32,
-                                y: island_layout.current_island_y as f32,
+                                screen_x: self.geom.win_x as f32
+                                    + island_layout.current_island_x as f32,
+                                screen_y: self.geom.win_y as f32
+                                    + island_layout.current_island_y as f32,
                                 width: self.springs.w.value,
                                 height: self.springs.h.value,
                                 radius: self.springs.r.value,
                             },
                         );
                         let render_result =
-                            renderer.draw(MAIN_D3D_TARGET, |direct_context, surface| {
+                            renderer.draw(MAIN_VULKAN_TARGET, |direct_context, surface| {
                                 draw_island(
                                     direct_context,
                                     surface,

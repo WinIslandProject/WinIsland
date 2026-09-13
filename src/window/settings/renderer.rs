@@ -8,7 +8,7 @@ use crate::utils::settings_ui::{
     ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
     settings_paint, widget_grid_geom, widget_source_span,
 };
-use crate::window::d3d::D3DRenderer;
+use crate::window::vulkan::VulkanRenderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 
 use super::{
@@ -18,7 +18,7 @@ use super::{
 };
 
 impl SettingsApp {
-    pub(crate) fn draw(&mut self, renderer: &mut D3DRenderer) {
+    pub(crate) fn draw(&mut self, renderer: &mut VulkanRenderer) {
         let Some(win) = self.window.as_ref() else {
             return;
         };
@@ -159,7 +159,7 @@ impl SettingsApp {
             canvas.draw_rrect(border_rrect, &border_paint);
         });
         if let Err(error) = render_result {
-            log::error!("D3D12 settings rendering failed: {error}");
+            log::error!("Vulkan settings rendering failed: {error}");
             self.close_requested = true;
         }
     }

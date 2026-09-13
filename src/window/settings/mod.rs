@@ -11,7 +11,7 @@ use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
-use crate::window::d3d::{D3DRenderer, D3DTargetId};
+use crate::window::vulkan::{VulkanRenderer, VulkanTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
@@ -20,7 +20,6 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
-use winit::platform::windows::WindowAttributesExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowButtons, WindowId};
 
@@ -183,7 +182,7 @@ pub(crate) enum MarketplaceViewState {
 
 pub struct SettingsApp {
     pub(crate) window: Option<Arc<Window>>,
-    pub(crate) renderer_target: Option<D3DTargetId>,
+    pub(crate) renderer_target: Option<VulkanTargetId>,
     pub(crate) config: AppConfig,
     pub(crate) active_page: usize,
     pub(crate) page_history: Vec<usize>,
@@ -510,7 +509,7 @@ impl SettingsApp {
     pub(crate) fn create_window(
         &mut self,
         event_loop: &ActiveEventLoop,
-        renderer: &mut D3DRenderer,
+        renderer: &mut VulkanRenderer,
     ) {
         let attrs = Window::default_attributes()
             .with_title("WinIsland Settings")
@@ -519,7 +518,6 @@ impl SettingsApp {
             .with_enabled_buttons(WindowButtons::CLOSE | WindowButtons::MINIMIZE)
             .with_decorations(false)
             .with_transparent(true)
-            .with_no_redirection_bitmap(true)
             .with_window_icon(get_app_icon());
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.window = Some(window.clone());
@@ -529,7 +527,7 @@ impl SettingsApp {
         self.renderer_target = match renderer.create_target(&window, size.width, size.height) {
             Ok(target) => Some(target),
             Err(error) => {
-                log::error!("D3D12 settings renderer initialization failed: {error}");
+                log::error!("Vulkan settings renderer initialization failed: {error}");
                 self.close_requested = true;
                 return;
             }
@@ -548,7 +546,7 @@ impl SettingsApp {
 
     pub(crate) fn recreate_renderer_target(
         &mut self,
-        renderer: &mut D3DRenderer,
+        renderer: &mut VulkanRenderer,
     ) -> Result<(), String> {
         let Some(window) = self.window.as_ref() else {
             return Ok(());
@@ -559,7 +557,11 @@ impl SettingsApp {
         Ok(())
     }
 
-    pub(crate) fn handle_window_event(&mut self, event: WindowEvent, renderer: &mut D3DRenderer) {
+    pub(crate) fn handle_window_event(
+        &mut self,
+        event: WindowEvent,
+        renderer: &mut VulkanRenderer,
+    ) {
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => self.close_requested = true,
             WindowEvent::Focused(focused) => self.handle_focus_changed(focused),
@@ -626,7 +628,7 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_resized(&mut self, renderer: &mut D3DRenderer, size: PhysicalSize<u32>) {
+    fn handle_resized(&mut self, renderer: &mut VulkanRenderer, size: PhysicalSize<u32>) {
         self.win_w = size.width as f32;
         self.win_h = size.height as f32;
         self.mark_items_dirty();
@@ -634,7 +636,7 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_scale_changed(&mut self, renderer: &mut D3DRenderer) {
+    fn handle_scale_changed(&mut self, renderer: &mut VulkanRenderer) {
         let Some(window) = &self.window else {
             return;
         };
@@ -644,12 +646,12 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn resize_renderer_target(&mut self, renderer: &mut D3DRenderer, size: PhysicalSize<u32>) {
+    fn resize_renderer_target(&mut self, renderer: &mut VulkanRenderer, size: PhysicalSize<u32>) {
         let Some(target) = self.renderer_target else {
             return;
         };
         if let Err(error) = renderer.resize(target, size.width, size.height) {
-            log::error!("D3D12 settings renderer resize failed: {error}");
+            log::error!("Vulkan settings renderer resize failed: {error}");
             self.close_requested = true;
         }
     }
@@ -1081,7 +1083,7 @@ impl SettingsApp {
         self.close_requested
     }
 
-    pub(crate) fn close(&mut self) -> Option<D3DTargetId> {
+    pub(crate) fn close(&mut self) -> Option<VulkanTargetId> {
         self.commit_number_input();
         self.popup = None;
         self.widget_dragging = None;

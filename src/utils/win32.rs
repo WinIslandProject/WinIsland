@@ -63,7 +63,7 @@ fn set_window_composition_attribute() -> Option<SetWindowCompositionAttribute> {
 
 pub fn enable_host_backdrop(hwnd: HWND) -> bool {
     let enabled: i32 = 1;
-    // SAFETY: hwnd belongs to the live WinIsland window and enabled points to an initialized BOOL-
+    // SAFETY: hwnd belongs to the live backdrop window and enabled points to an initialized BOOL-
     // compatible value for the duration of the synchronous DWM call.
     if unsafe {
         DwmSetWindowAttribute(

@@ -4,6 +4,7 @@ use std::time::Duration;
 use winit::dpi::PhysicalSize;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::platform::windows::WindowAttributesExtWindows;
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowButtons, WindowLevel};
 
 use crate::core::config::WINDOW_TITLE;
@@ -22,21 +23,42 @@ impl App {
             let window_size = self.required_window_size();
             self.geom.os_w = window_size.width;
             self.geom.os_h = window_size.height;
+            let backdrop_attrs = Window::default_attributes()
+                .with_title("WinIsland Backdrop")
+                .with_inner_size(PhysicalSize::new(1, 1))
+                .with_transparent(true)
+                .with_no_redirection_bitmap(true)
+                .with_visible(false)
+                .with_decorations(false)
+                .with_resizable(false)
+                .with_enabled_buttons(WindowButtons::empty())
+                .with_window_level(WindowLevel::AlwaysOnTop)
+                .with_skip_taskbar(true);
+            let backdrop_window = Arc::new(event_loop.create_window(backdrop_attrs).unwrap());
+            let backdrop_hwnd = backdrop_window
+                .window_handle()
+                .ok()
+                .and_then(|handle| match handle.as_raw() {
+                    RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as _),
+                    _ => None,
+                })
+                .expect("WinIsland backdrop requires a Win32 window");
             let attrs = Window::default_attributes()
                 .with_title(WINDOW_TITLE)
                 .with_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h))
                 .with_transparent(true)
-                .with_no_redirection_bitmap(true)
                 .with_visible(false)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_enabled_buttons(WindowButtons::empty())
                 .with_window_level(WindowLevel::AlwaysOnTop)
                 .with_skip_taskbar(true)
+                .with_owner_window(backdrop_hwnd)
                 .with_window_icon(get_app_icon());
             let window = Arc::new(event_loop.create_window(attrs).unwrap());
 
             self.window = Some(window.clone());
+            self.backdrop_window = Some(backdrop_window.clone());
             log::info!(
                 "Window created: {}x{} (base {}x{})",
                 self.geom.os_w,
@@ -77,20 +99,23 @@ impl App {
                     self.geom.win_y
                 );
             }
-            let renderer =
-                match crate::window::d3d::D3DRenderer::new(&window, self.geom.os_w, self.geom.os_h)
-                {
-                    Ok(renderer) => renderer,
-                    Err(error) => {
-                        log::error!("D3D12 renderer initialization failed: {error}");
-                        logger::show_error_message(
-                            &tr("d3d12_unsupported_title"),
-                            &tr("d3d12_unsupported_desc"),
-                        );
-                        event_loop.exit();
-                        return;
-                    }
-                };
+            let renderer = match crate::window::vulkan::VulkanRenderer::new(
+                &window,
+                &backdrop_window,
+                self.geom.os_w,
+                self.geom.os_h,
+            ) {
+                Ok(renderer) => renderer,
+                Err(error) => {
+                    log::error!("Vulkan renderer initialization failed: {error}");
+                    logger::show_error_message(
+                        &tr("vulkan_init_failed_title"),
+                        &format!("{}\n\n{error}", tr("vulkan_init_failed_desc")),
+                    );
+                    event_loop.exit();
+                    return;
+                }
+            };
             self.renderer = Some(renderer);
             let is_light = window.theme() == Some(winit::window::Theme::Light);
             self.is_light_theme = is_light;

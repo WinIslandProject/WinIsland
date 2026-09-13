@@ -62,7 +62,7 @@ fn main() {
             // dispatched, and the pointer is only read during this synchronous callback.
             let message = unsafe { &*message.cast::<MSG>() };
             if message.message == WM_DWMCOMPOSITIONCHANGED {
-                window::d3d::signal_dwm_composition_changed();
+                window::vulkan::signal_dwm_composition_changed();
             }
         }
         false
