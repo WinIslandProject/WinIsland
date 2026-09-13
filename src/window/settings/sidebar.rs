@@ -6,9 +6,10 @@ use crate::utils::color::SettingsTheme;
 use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{SIDEBAR_PAD, SIDEBAR_SEL_RADIUS};
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
+use crate::window::renderer::DrawingContext;
 use skia_safe::{
     Canvas, Color, Data, FilterMode, FontStyle, Image, MipmapMode, Paint, Rect, SamplingOptions,
-    gpu::{DirectContext, Mipmapped},
+    gpu::Mipmapped,
 };
 
 use super::{
@@ -29,15 +30,15 @@ thread_local! {
     static PLUGIN_SETTINGS_ICONS: RefCell<HashMap<u64, Image>> = RefCell::new(HashMap::new());
 }
 
-fn load_sidebar_icon(direct_context: &mut DirectContext, bytes: &[u8]) -> Image {
+fn load_sidebar_icon(drawing_context: &mut DrawingContext<'_>, bytes: &[u8]) -> Image {
     let image = Image::from_encoded(Data::new_copy(bytes)).expect("Failed to load sidebar icon");
-    image
-        .new_texture_image(direct_context, Mipmapped::Yes)
+    drawing_context
+        .prepare_image(image, Mipmapped::Yes)
         .expect("Failed to create mipmapped sidebar icon texture")
 }
 
 fn draw_sidebar_icon(
-    direct_context: &mut DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     canvas: &Canvas,
     index: usize,
     rect: Rect,
@@ -45,7 +46,8 @@ fn draw_sidebar_icon(
     SIDEBAR_ICONS.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.is_none() {
-            *cache = Some(SIDEBAR_ICON_BYTES.map(|bytes| load_sidebar_icon(direct_context, bytes)));
+            *cache =
+                Some(SIDEBAR_ICON_BYTES.map(|bytes| load_sidebar_icon(drawing_context, bytes)));
         }
         let icons = cache.as_ref().expect("Sidebar icon cache was initialized");
         let paint = Paint::default();
@@ -70,21 +72,21 @@ pub(super) fn clear_plugin_settings_icon_cache() {
 }
 
 fn draw_plugin_settings_icon(
-    direct_context: &mut DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     canvas: &Canvas,
     page: &crate::core::plugin_settings::PluginSettingsPage,
     rect: Rect,
 ) {
     if page.icon.is_empty() {
-        draw_sidebar_icon(direct_context, canvas, 3, rect);
+        draw_sidebar_icon(drawing_context, canvas, 3, rect);
         return;
     }
     let image = PLUGIN_SETTINGS_ICONS.with(|cache| {
         if let Some(image) = cache.borrow().get(&page.resource_id) {
             return Some(image.clone());
         }
-        let image = Image::from_encoded(Data::new_copy(&page.icon))?
-            .new_texture_image(direct_context, Mipmapped::Yes)?;
+        let image = Image::from_encoded(Data::new_copy(&page.icon))?;
+        let image = drawing_context.prepare_image(image, Mipmapped::Yes)?;
         cache.borrow_mut().insert(page.resource_id, image.clone());
         Some(image)
     });
@@ -97,7 +99,7 @@ fn draw_plugin_settings_icon(
             &Paint::default(),
         );
     } else {
-        draw_sidebar_icon(direct_context, canvas, 3, rect);
+        draw_sidebar_icon(drawing_context, canvas, 3, rect);
     }
 }
 
@@ -192,7 +194,7 @@ fn draw_window_control(
 impl SettingsApp {
     pub(crate) fn draw_sidebar(
         &self,
-        direct_context: &mut DirectContext,
+        drawing_context: &mut DrawingContext<'_>,
         canvas: &Canvas,
         theme: &SettingsTheme,
     ) {
@@ -262,7 +264,7 @@ impl SettingsApp {
             let row_y = SIDEBAR_START_Y + index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
             let text_color = draw_sidebar_row_background(self, canvas, theme, &mut paint, index);
             let icon_rect = Rect::from_xywh(SIDEBAR_PAD + 7.0, row_y + 6.0, 22.0, 22.0);
-            draw_sidebar_icon(direct_context, canvas, index, icon_rect);
+            draw_sidebar_icon(drawing_context, canvas, index, icon_rect);
             SettingsPainter::new(canvas).text(
                 label,
                 (SIDEBAR_PAD + 36.0, row_y + 22.0),
@@ -277,7 +279,7 @@ impl SettingsApp {
             let row_y = SIDEBAR_START_Y + index as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
             let text_color = draw_sidebar_row_background(self, canvas, theme, &mut paint, index);
             let icon_rect = Rect::from_xywh(SIDEBAR_PAD + 7.0, row_y + 6.0, 22.0, 22.0);
-            draw_plugin_settings_icon(direct_context, canvas, page, icon_rect);
+            draw_plugin_settings_icon(drawing_context, canvas, page, icon_rect);
             let label = ellipsize_text(
                 FontManager::global(),
                 &page.title,

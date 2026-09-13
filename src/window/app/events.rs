@@ -7,7 +7,7 @@ use winit::window::WindowId;
 use crate::core::render::draw_island;
 use crate::utils::blur::calculate_blur_sigmas;
 use crate::utils::mouse::get_global_cursor_pos;
-use crate::window::vulkan::{HostBackdropParams, MAIN_VULKAN_TARGET};
+use crate::window::renderer::HostBackdropParams;
 
 use super::App;
 use super::input::InputSource;
@@ -252,8 +252,9 @@ impl App {
                                 ("", "")
                             };
 
+                        let main_target = renderer.main_target();
                         let host_backdrop = renderer.update_host_backdrop(
-                            MAIN_VULKAN_TARGET,
+                            main_target,
                             HostBackdropParams {
                                 enabled: matches!(
                                     self.config.island_style.as_str(),
@@ -269,9 +270,9 @@ impl App {
                             },
                         );
                         let render_result =
-                            renderer.draw(MAIN_VULKAN_TARGET, |direct_context, surface| {
+                            renderer.draw(main_target, |drawing_context, surface| {
                                 draw_island(
-                                    direct_context,
+                                    drawing_context,
                                     surface,
                                     crate::core::render::DrawIslandParams {
                                         layout: crate::core::render::LayoutParams {

@@ -23,7 +23,7 @@ use crate::utils::shape::continuous_rounded_rect_path;
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
     Canvas, Color, FilterMode, FontStyle, Image, MipmapMode, Paint, Point, RRect, Rect,
-    SamplingOptions, gpu::DirectContext, image_filters,
+    SamplingOptions, image_filters,
 };
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -165,9 +165,9 @@ pub fn get_cached_media_image_with_key(media: &MediaInfo) -> Option<(Image, u64)
     result
 }
 
-pub fn get_media_palette(direct_context: &mut DirectContext, media: &MediaInfo) -> Arc<[Color]> {
+pub fn get_media_palette(media: &MediaInfo) -> Arc<[Color]> {
     if let Some((img, cache_key)) = get_cached_media_image_with_key(media) {
-        get_palette_from_image(direct_context, &img, cache_key)
+        get_palette_from_image(&img, cache_key)
     } else {
         default_media_palette()
     }

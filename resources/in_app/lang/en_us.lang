@@ -172,5 +172,5 @@ update_no_update_title=Check for Updates
 update_no_update_desc=You are already using the latest version of WinIsland.
 update_failed_desc=Failed to check for updates. Please try again later.
 volume=Volume
-vulkan_init_failed_title=Vulkan Initialization Failed
-vulkan_init_failed_desc=WinIsland could not initialize its Vulkan 1.2 renderer. The application will now exit. Details:
+renderer_init_failed_title=Renderer Initialization Failed
+renderer_init_failed_desc=WinIsland could not initialize either Vulkan 1.2 or its software fallback. The application will now exit. Details:

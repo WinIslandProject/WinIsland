@@ -11,7 +11,7 @@ use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
-use crate::window::vulkan::{VulkanRenderer, VulkanTargetId};
+use crate::window::renderer::{Renderer, RendererTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
@@ -182,7 +182,7 @@ pub(crate) enum MarketplaceViewState {
 
 pub struct SettingsApp {
     pub(crate) window: Option<Arc<Window>>,
-    pub(crate) renderer_target: Option<VulkanTargetId>,
+    pub(crate) renderer_target: Option<RendererTargetId>,
     pub(crate) config: AppConfig,
     pub(crate) active_page: usize,
     pub(crate) page_history: Vec<usize>,
@@ -508,11 +508,7 @@ impl SettingsApp {
 }
 
 impl SettingsApp {
-    pub(crate) fn create_window(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        renderer: &mut VulkanRenderer,
-    ) {
+    pub(crate) fn create_window(&mut self, event_loop: &ActiveEventLoop, renderer: &mut Renderer) {
         let attrs = Window::default_attributes()
             .with_title("WinIsland Settings")
             .with_inner_size(LogicalSize::new(WIN_W as f64, WIN_H as f64))
@@ -529,7 +525,7 @@ impl SettingsApp {
         self.renderer_target = match renderer.create_target(&window, size.width, size.height) {
             Ok(target) => Some(target),
             Err(error) => {
-                log::error!("Vulkan settings renderer initialization failed: {error}");
+                log::error!("Settings renderer initialization failed: {error}");
                 self.close_requested = true;
                 return;
             }
@@ -548,7 +544,7 @@ impl SettingsApp {
 
     pub(crate) fn recreate_renderer_target(
         &mut self,
-        renderer: &mut VulkanRenderer,
+        renderer: &mut Renderer,
     ) -> Result<(), String> {
         let Some(window) = self.window.as_ref() else {
             return Ok(());
@@ -559,11 +555,7 @@ impl SettingsApp {
         Ok(())
     }
 
-    pub(crate) fn handle_window_event(
-        &mut self,
-        event: WindowEvent,
-        renderer: &mut VulkanRenderer,
-    ) {
+    pub(crate) fn handle_window_event(&mut self, event: WindowEvent, renderer: &mut Renderer) {
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => self.close_requested = true,
             WindowEvent::Focused(focused) => self.handle_focus_changed(focused),
@@ -630,7 +622,7 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_resized(&mut self, renderer: &mut VulkanRenderer, size: PhysicalSize<u32>) {
+    fn handle_resized(&mut self, renderer: &mut Renderer, size: PhysicalSize<u32>) {
         self.win_w = size.width as f32;
         self.win_h = size.height as f32;
         self.mark_items_dirty();
@@ -638,7 +630,7 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_scale_changed(&mut self, renderer: &mut VulkanRenderer) {
+    fn handle_scale_changed(&mut self, renderer: &mut Renderer) {
         let Some(window) = &self.window else {
             return;
         };
@@ -648,12 +640,12 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn resize_renderer_target(&mut self, renderer: &mut VulkanRenderer, size: PhysicalSize<u32>) {
+    fn resize_renderer_target(&mut self, renderer: &mut Renderer, size: PhysicalSize<u32>) {
         let Some(target) = self.renderer_target else {
             return;
         };
         if let Err(error) = renderer.resize(target, size.width, size.height) {
-            log::error!("Vulkan settings renderer resize failed: {error}");
+            log::error!("Settings renderer resize failed: {error}");
             self.close_requested = true;
         }
     }
@@ -1104,7 +1096,7 @@ impl SettingsApp {
         self.close_requested
     }
 
-    pub(crate) fn close(&mut self) -> Option<VulkanTargetId> {
+    pub(crate) fn close(&mut self) -> Option<RendererTargetId> {
         self.commit_number_input();
         self.popup = None;
         self.widget_dragging = None;

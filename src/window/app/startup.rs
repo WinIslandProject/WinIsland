@@ -100,7 +100,7 @@ impl App {
                     self.geom.win_y
                 );
             }
-            let renderer = match crate::window::vulkan::VulkanRenderer::new(
+            let renderer = match crate::window::renderer::Renderer::new(
                 &window,
                 &backdrop_window,
                 self.geom.os_w,
@@ -108,10 +108,10 @@ impl App {
             ) {
                 Ok(renderer) => renderer,
                 Err(error) => {
-                    log::error!("Vulkan renderer initialization failed: {error}");
+                    log::error!("Renderer initialization failed: {error}");
                     logger::show_error_message(
-                        &tr("vulkan_init_failed_title"),
-                        &format!("{}\n\n{error}", tr("vulkan_init_failed_desc")),
+                        &tr("renderer_init_failed_title"),
+                        &format!("{}\n\n{error}", tr("renderer_init_failed_desc")),
                     );
                     event_loop.exit();
                     return;

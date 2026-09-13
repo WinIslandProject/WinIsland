@@ -1,14 +1,14 @@
 use skia_safe::{
     Canvas, ClipOp, Color, FilterMode, MipmapMode, Paint, Path, Rect, SamplingOptions,
-    gpu::DirectContext,
 };
 
 use crate::core::smtc::MediaInfo;
 use crate::utils::backdrop::get_blurred_cover_background;
+use crate::window::renderer::DrawingContext;
 
-pub(super) struct BackgroundParams<'a> {
+pub(super) struct BackgroundParams<'a, 'context> {
     pub(super) canvas: &'a Canvas,
-    pub(super) direct_context: &'a mut DirectContext,
+    pub(super) drawing_context: &'a mut DrawingContext<'context>,
     pub(super) rect: Rect,
     pub(super) island_path: &'a Path,
     pub(super) island_style: &'a str,
@@ -33,10 +33,10 @@ fn draw_host_glass(canvas: &Canvas, path: &Path) {
     draw_solid(canvas, path, Color::from_argb(150, 10, 10, 14));
 }
 
-pub(super) fn draw_background(params: BackgroundParams<'_>) {
+pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
     let BackgroundParams {
         canvas,
-        direct_context,
+        drawing_context,
         rect,
         island_path,
         island_style,
@@ -51,13 +51,15 @@ pub(super) fn draw_background(params: BackgroundParams<'_>) {
     match island_style {
         "glass" => {
             if host_backdrop {
-                draw_host_glass(canvas, island_path);
+                if drawing_context.is_hardware() {
+                    draw_host_glass(canvas, island_path);
+                }
             } else {
                 draw_solid(canvas, island_path, fallback_color);
             }
         }
         "dynamic" => {
-            if let Some(blurred_cover) = get_blurred_cover_background(direct_context, media) {
+            if let Some(blurred_cover) = get_blurred_cover_background(drawing_context, media) {
                 draw_effect_base(canvas, rect);
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -105,7 +107,9 @@ pub(super) fn draw_background(params: BackgroundParams<'_>) {
                 paint.set_color(Color::from_argb(120, 20, 20, 24));
                 canvas.draw_rect(rect, &paint);
             } else if host_backdrop {
-                draw_host_glass(canvas, island_path);
+                if drawing_context.is_hardware() {
+                    draw_host_glass(canvas, island_path);
+                }
             } else {
                 draw_solid(canvas, island_path, fallback_color);
             }

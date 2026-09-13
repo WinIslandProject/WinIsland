@@ -1,7 +1,5 @@
-use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -10,31 +8,9 @@ use skia_safe::{
     ColorType, Surface,
     gpu::{self, BackendRenderTarget, ContextOptions, DirectContext, SurfaceOrigin, surfaces},
 };
-use windows::{
-    System::DispatcherQueueController,
-    UI::Composition::Desktop::DesktopWindowTarget,
-    UI::Composition::{
-        CompositionGeometricClip, CompositionRoundedRectangleGeometry, Compositor, ContainerVisual,
-        SpriteVisual,
-    },
-    Win32::{
-        Foundation::HWND,
-        System::WinRT::{
-            Composition::ICompositorDesktopInterop, CreateDispatcherQueueController,
-            DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
-        },
-        UI::WindowsAndMessaging::{
-            SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-            SetWindowPos,
-        },
-    },
-    core::Interface,
-};
-use windows_numerics::{Vector2, Vector3};
-use winit::{
-    raw_window_handle::{HasWindowHandle, RawWindowHandle},
-    window::Window,
-};
+use winit::window::Window;
+
+use super::renderer::DrawingContext;
 
 mod device;
 use device::{VulkanDevice, VulkanInstance};
@@ -45,7 +21,6 @@ const INITIALIZATION_ATTEMPTS: usize = 3;
 const INITIALIZATION_RETRY_DELAY: Duration = Duration::from_millis(500);
 const RESOURCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
 const RESOURCE_MAX_IDLE_AGE: Duration = Duration::from_secs(10);
-const HOST_BACKDROP_INSET: f32 = 1.0;
 
 static DWM_COMPOSITION_CHANGED: AtomicBool = AtomicBool::new(false);
 
@@ -78,55 +53,20 @@ struct VulkanTarget {
     swapchain: SwapchainResources,
 }
 
-struct BackdropCompositionContext {
-    _dispatcher_queue: DispatcherQueueController,
-    compositor: Compositor,
-}
-
-struct HostBackdropTarget {
-    _window: Arc<Window>,
-    main_hwnd: HWND,
-    backdrop_hwnd: HWND,
-    target: DesktopWindowTarget,
-    _root: ContainerVisual,
-    visual: SpriteVisual,
-    _clip: CompositionGeometricClip,
-    geometry: CompositionRoundedRectangleGeometry,
-}
-
-pub(crate) struct HostBackdropParams {
-    pub(crate) enabled: bool,
-    pub(crate) screen_x: f32,
-    pub(crate) screen_y: f32,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) radius: f32,
-}
-
-thread_local! {
-    static BACKDROP_COMPOSITION: OnceCell<Option<BackdropCompositionContext>> = const { OnceCell::new() };
-}
-
 pub(crate) struct VulkanRenderer {
     targets: HashMap<VulkanTargetId, VulkanTarget>,
     direct_context: DirectContext,
     device: Rc<VulkanDevice>,
-    host_backdrop: Option<HostBackdropTarget>,
     next_target_id: u64,
     last_resource_cleanup: Instant,
     failure: Option<String>,
 }
 
 impl VulkanRenderer {
-    pub(crate) fn new(
-        window: &Window,
-        backdrop_window: &Arc<Window>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
+    pub(crate) fn new(window: &Window, width: u32, height: u32) -> Result<Self, String> {
         let mut last_error = None;
         for attempt in 0..INITIALIZATION_ATTEMPTS {
-            match Self::new_once(window, backdrop_window, width, height) {
+            match Self::new_once(window, width, height) {
                 Ok(renderer) => return Ok(renderer),
                 Err(error) => {
                     if attempt + 1 < INITIALIZATION_ATTEMPTS {
@@ -145,21 +85,11 @@ impl VulkanRenderer {
         Err(last_error.unwrap_or_else(|| "Vulkan renderer initialization failed".to_string()))
     }
 
-    pub(crate) fn try_new(
-        window: &Window,
-        backdrop_window: &Arc<Window>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
-        Self::new_once(window, backdrop_window, width, height)
+    pub(crate) fn try_new(window: &Window, width: u32, height: u32) -> Result<Self, String> {
+        Self::new_once(window, width, height)
     }
 
-    fn new_once(
-        window: &Window,
-        backdrop_window: &Arc<Window>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
+    fn new_once(window: &Window, width: u32, height: u32) -> Result<Self, String> {
         let instance = VulkanInstance::new()?;
         let surface = instance.create_surface(window)?;
         let device = match instance.device_for_surface(surface) {
@@ -182,20 +112,10 @@ impl VulkanRenderer {
             }
         };
         direct_context.set_resource_cache_limit(GPU_RESOURCE_CACHE_LIMIT);
-        let host_backdrop = backdrop_compositor().and_then(|compositor| {
-            match create_host_backdrop_target(&compositor, window, backdrop_window) {
-                Ok(target) => Some(target),
-                Err(error) => {
-                    log::warn!("Host backdrop is unavailable: {error}");
-                    None
-                }
-            }
-        });
         let mut renderer = Self {
             targets: HashMap::new(),
             direct_context,
             device,
-            host_backdrop,
             next_target_id: 0,
             last_resource_cleanup: Instant::now(),
             failure: None,
@@ -255,7 +175,7 @@ impl VulkanRenderer {
     pub(crate) fn draw<T>(
         &mut self,
         target_id: VulkanTargetId,
-        draw: impl FnOnce(&mut DirectContext, &mut Surface) -> T,
+        draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
     ) -> Result<T, String> {
         match self.draw_inner(target_id, draw) {
             Ok((output, suboptimal)) => {
@@ -274,7 +194,7 @@ impl VulkanRenderer {
     fn draw_inner<T>(
         &mut self,
         target_id: VulkanTargetId,
-        draw: impl FnOnce(&mut DirectContext, &mut Surface) -> T,
+        draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
     ) -> Result<(T, bool), String> {
         self.check_context("before drawing")?;
         let target = self
@@ -311,7 +231,8 @@ impl VulkanRenderer {
             .images
             .get_mut(image_index as usize)
             .ok_or_else(|| "Vulkan returned an invalid swapchain image index".to_string())?;
-        let output = draw(&mut self.direct_context, &mut image.surface);
+        let mut context = DrawingContext::vulkan(&mut self.direct_context);
+        let output = draw(&mut context, &mut image.surface);
         let present_state = gpu::vk::mutable_texture_states::new_vulkan(
             gpu::vk::ImageLayout::PRESENT_SRC_KHR,
             self.device.queue_family,
@@ -405,31 +326,6 @@ impl VulkanRenderer {
         self.failure.take()
     }
 
-    pub(crate) fn update_host_backdrop(
-        &mut self,
-        target_id: VulkanTargetId,
-        params: HostBackdropParams,
-    ) -> bool {
-        if target_id != MAIN_VULKAN_TARGET {
-            return false;
-        }
-        let Some(host_backdrop) = self.host_backdrop.as_ref() else {
-            return false;
-        };
-        if let Err(error) = host_backdrop.update(params) {
-            log::warn!("Host backdrop update failed: {error}");
-            self.host_backdrop = None;
-            return false;
-        }
-        true
-    }
-
-    pub(crate) fn hide_host_backdrop(&self) {
-        if let Some(host_backdrop) = self.host_backdrop.as_ref() {
-            host_backdrop.hide();
-        }
-    }
-
     pub(crate) fn abandon(&mut self) {
         if self.device.wait_idle().is_ok() && !self.direct_context.is_device_lost() {
             self.direct_context.release_resources_and_abandon();
@@ -470,180 +366,6 @@ impl VulkanRenderer {
             return Err(format!("Skia Vulkan allocation failed {stage}"));
         }
         Ok(())
-    }
-}
-
-impl HostBackdropTarget {
-    fn update(&self, params: HostBackdropParams) -> windows::core::Result<()> {
-        let enabled = params.enabled && params.width > 0.0 && params.height > 0.0;
-        if !enabled {
-            self.hide();
-            return Ok(());
-        }
-
-        let window_width = params.width.ceil().max(1.0) as i32;
-        let window_height = params.height.ceil().max(1.0) as i32;
-        let width = (params.width - HOST_BACKDROP_INSET * 2.0).max(0.0);
-        let height = (params.height - HOST_BACKDROP_INSET * 2.0).max(0.0);
-        let radius = (params.radius - HOST_BACKDROP_INSET).max(0.0);
-        self.visual.SetOffset(Vector3 {
-            X: HOST_BACKDROP_INSET,
-            Y: HOST_BACKDROP_INSET,
-            Z: 0.0,
-        })?;
-        self.visual.SetSize(Vector2 {
-            X: width,
-            Y: height,
-        })?;
-        self.geometry.SetSize(Vector2 {
-            X: width,
-            Y: height,
-        })?;
-        self.geometry.SetCornerRadius(Vector2 {
-            X: radius,
-            Y: radius,
-        })?;
-        self.visual.SetIsVisible(true)?;
-        // SAFETY: Both HWND values belong to live windows on this thread. Placing the backdrop
-        // immediately behind the owned Vulkan window preserves their z-order without activation.
-        unsafe {
-            SetWindowPos(
-                self.backdrop_hwnd,
-                Some(self.main_hwnd),
-                params.screen_x.floor() as i32,
-                params.screen_y.floor() as i32,
-                window_width,
-                window_height,
-                SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            )?;
-        }
-        Ok(())
-    }
-
-    fn hide(&self) {
-        let _ = self.visual.SetIsVisible(false);
-        // SAFETY: The backdrop HWND remains owned by `_window`; this only hides it.
-        unsafe {
-            let _ = SetWindowPos(
-                self.backdrop_hwnd,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
-            );
-        }
-    }
-}
-
-impl Drop for HostBackdropTarget {
-    fn drop(&mut self) {
-        self.hide();
-        let _ = self.target.Close();
-    }
-}
-
-fn backdrop_compositor() -> Option<Compositor> {
-    BACKDROP_COMPOSITION.with(|cell| {
-        cell.get_or_init(|| match create_backdrop_composition_context() {
-            Ok(context) => Some(context),
-            Err(error) => {
-                log::warn!("Windows host backdrop initialization failed: {error}");
-                None
-            }
-        })
-        .as_ref()
-        .map(|context| context.compositor.clone())
-    })
-}
-
-fn create_backdrop_composition_context() -> Result<BackdropCompositionContext, String> {
-    let options = DispatcherQueueOptions {
-        dwSize: size_of::<DispatcherQueueOptions>() as u32,
-        threadType: DQTYPE_THREAD_CURRENT,
-        apartmentType: DQTAT_COM_NONE,
-    };
-    let dispatcher_queue = unsafe {
-        // SAFETY: winit initializes the main thread's STA before renderer creation. The options
-        // attach a dispatcher queue to that current thread without changing its COM apartment.
-        CreateDispatcherQueueController(options)
-    }
-    .map_err(|error| format!("CreateDispatcherQueueController failed: {error}"))?;
-    let compositor = Compositor::new().map_err(|error| format!("Compositor failed: {error}"))?;
-    Ok(BackdropCompositionContext {
-        _dispatcher_queue: dispatcher_queue,
-        compositor,
-    })
-}
-
-fn create_host_backdrop_target(
-    compositor: &Compositor,
-    main_window: &Window,
-    backdrop_window: &Arc<Window>,
-) -> Result<HostBackdropTarget, String> {
-    let main_hwnd = window_hwnd(main_window)?;
-    let backdrop_hwnd = window_hwnd(backdrop_window)?;
-    if !crate::utils::win32::enable_host_backdrop(backdrop_hwnd) {
-        return Err("DWM host backdrop support could not be enabled".to_string());
-    }
-    let interop: ICompositorDesktopInterop = compositor
-        .cast()
-        .map_err(|error| format!("ICompositorDesktopInterop is unavailable: {error}"))?;
-    let target = unsafe {
-        // SAFETY: backdrop_hwnd belongs to the companion window and has no other composition tree.
-        interop.CreateDesktopWindowTarget(backdrop_hwnd, false)
-    }
-    .map_err(|error| format!("CreateDesktopWindowTarget failed: {error}"))?;
-    let root = compositor
-        .CreateContainerVisual()
-        .map_err(|error| format!("CreateContainerVisual failed: {error}"))?;
-    let visual = compositor
-        .CreateSpriteVisual()
-        .map_err(|error| format!("CreateSpriteVisual failed: {error}"))?;
-    let geometry = compositor
-        .CreateRoundedRectangleGeometry()
-        .map_err(|error| format!("CreateRoundedRectangleGeometry failed: {error}"))?;
-    let clip = compositor
-        .CreateGeometricClipWithGeometry(&geometry)
-        .map_err(|error| format!("CreateGeometricClipWithGeometry failed: {error}"))?;
-    let brush = compositor
-        .CreateHostBackdropBrush()
-        .map_err(|error| format!("CreateHostBackdropBrush failed: {error}"))?;
-    visual
-        .SetBrush(&brush)
-        .map_err(|error| format!("Host backdrop brush assignment failed: {error}"))?;
-    visual
-        .SetClip(&clip)
-        .map_err(|error| format!("Host backdrop clip assignment failed: {error}"))?;
-    visual
-        .SetIsVisible(false)
-        .map_err(|error| format!("Host backdrop visibility setup failed: {error}"))?;
-    root.Children()
-        .and_then(|children| children.InsertAtTop(&visual))
-        .map_err(|error| format!("Host backdrop visual insertion failed: {error}"))?;
-    target
-        .SetRoot(&root)
-        .map_err(|error| format!("Host backdrop root assignment failed: {error}"))?;
-    Ok(HostBackdropTarget {
-        _window: backdrop_window.clone(),
-        main_hwnd,
-        backdrop_hwnd,
-        target,
-        _root: root,
-        visual,
-        _clip: clip,
-        geometry,
-    })
-}
-
-fn window_hwnd(window: &Window) -> Result<HWND, String> {
-    let handle = window
-        .window_handle()
-        .map_err(|error| format!("Window handle unavailable: {error}"))?;
-    match handle.as_raw() {
-        RawWindowHandle::Win32(handle) => Ok(HWND(handle.hwnd.get() as _)),
-        _ => Err("Vulkan rendering requires a Win32 window".to_string()),
     }
 }
 

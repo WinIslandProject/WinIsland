@@ -12,6 +12,7 @@ use crate::utils::color::SettingsTheme;
 use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{CONTENT_PADDING, SettingsItem};
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
+use crate::window::renderer::DrawingContext;
 
 use super::super::{
     MarketplaceViewState, PLUGIN_DETAIL_KEY, PluginPageTab, PluginSettingsRequest,
@@ -90,7 +91,7 @@ impl SettingsApp {
 
     pub(crate) fn draw_plugins_page(
         &mut self,
-        direct_context: &mut skia_safe::gpu::DirectContext,
+        drawing_context: &mut DrawingContext<'_>,
         canvas: &Canvas,
         theme: &SettingsTheme,
         width: f32,
@@ -111,10 +112,10 @@ impl SettingsApp {
         canvas.translate((SIDEBAR_W, -self.scroll_y));
         match self.plugin_page_tab {
             PluginPageTab::Installed => {
-                self.draw_installed_plugins(direct_context, canvas, theme, content_width)
+                self.draw_installed_plugins(drawing_context, canvas, theme, content_width)
             }
             PluginPageTab::Marketplace => {
-                self.draw_marketplace_plugins(direct_context, canvas, theme, content_width)
+                self.draw_marketplace_plugins(drawing_context, canvas, theme, content_width)
             }
         }
         canvas.restore();
@@ -124,7 +125,7 @@ impl SettingsApp {
         let detail_progress = self.anim.get(PLUGIN_DETAIL_KEY);
         if detail_progress > 0.005 {
             self.draw_plugin_detail(
-                direct_context,
+                drawing_context,
                 canvas,
                 theme,
                 width,
@@ -136,7 +137,7 @@ impl SettingsApp {
 
     fn draw_installed_plugins(
         &self,
-        direct_context: &mut skia_safe::gpu::DirectContext,
+        drawing_context: &mut DrawingContext<'_>,
         canvas: &Canvas,
         theme: &SettingsTheme,
         width: f32,
@@ -150,7 +151,7 @@ impl SettingsApp {
                 let card = plugin_card(width, y);
                 draw_card_background(canvas, theme, card, self.card_hovered(card));
                 draw_plugin_icon(
-                    direct_context,
+                    drawing_context,
                     canvas,
                     plugin,
                     Rect::from_xywh(card.left + 12.0, card.top + 12.0, 52.0, 52.0),
@@ -178,7 +179,7 @@ impl SettingsApp {
 
     fn draw_marketplace_plugins(
         &self,
-        direct_context: &mut skia_safe::gpu::DirectContext,
+        drawing_context: &mut DrawingContext<'_>,
         canvas: &Canvas,
         theme: &SettingsTheme,
         width: f32,
@@ -224,7 +225,7 @@ impl SettingsApp {
                     let card = plugin_card(width, y);
                     draw_card_background(canvas, theme, card, self.card_hovered(card));
                     draw_plugin_icon_data(
-                        direct_context,
+                        drawing_context,
                         canvas,
                         &plugin.id,
                         &plugin.name,
@@ -769,13 +770,13 @@ fn draw_toggle(canvas: &Canvas, theme: &SettingsTheme, enabled: bool, x: f32, y:
 }
 
 pub(super) fn draw_plugin_icon(
-    direct_context: &mut skia_safe::gpu::DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     canvas: &Canvas,
     plugin: &InstalledPlugin,
     rect: Rect,
 ) {
     draw_plugin_icon_data(
-        direct_context,
+        drawing_context,
         canvas,
         &plugin.id,
         &plugin.name,
@@ -785,7 +786,7 @@ pub(super) fn draw_plugin_icon(
 }
 
 pub(super) fn draw_plugin_icon_data(
-    direct_context: &mut skia_safe::gpu::DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     canvas: &Canvas,
     id: &str,
     name: &str,
@@ -797,8 +798,8 @@ pub(super) fn draw_plugin_icon_data(
             if let Some(image) = cache.borrow().get(id) {
                 return Some(image.clone());
             }
-            let image = Image::from_encoded(Data::new_copy(bytes))?
-                .new_texture_image(direct_context, skia_safe::gpu::Mipmapped::Yes)?;
+            let image = Image::from_encoded(Data::new_copy(bytes))?;
+            let image = drawing_context.prepare_image(image, skia_safe::gpu::Mipmapped::Yes)?;
             cache.borrow_mut().insert(id.to_string(), image.clone());
             Some(image)
         })

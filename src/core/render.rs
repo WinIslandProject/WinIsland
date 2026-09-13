@@ -18,7 +18,8 @@ use crate::core::smtc::MediaInfo;
 use crate::ui::compact::CompactOverlay;
 use crate::ui::expanded::music_view::{default_media_palette, get_media_palette};
 use crate::utils::shape::continuous_rounded_rect_path;
-use skia_safe::{ClipOp, Color, Paint, Rect, Surface, gpu::DirectContext, image_filters};
+use crate::window::renderer::DrawingContext;
+use skia_safe::{ClipOp, Color, Paint, Rect, Surface, image_filters};
 
 pub struct LayoutParams {
     pub current_w: f32,
@@ -88,7 +89,7 @@ pub struct DrawIslandParams<'a> {
 }
 
 pub fn draw_island(
-    direct_context: &mut DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     surface: &mut Surface,
     params: DrawIslandParams<'_>,
 ) -> bool {
@@ -108,7 +109,7 @@ pub fn draw_island(
         None
     };
     draw_expanded_shadow(canvas, &params, &island_path);
-    draw_background_layer(canvas, direct_context, &params, rect, &island_path);
+    draw_background_layer(canvas, drawing_context, &params, rect, &island_path);
     canvas.save();
     canvas.clip_path(&island_path, ClipOp::Intersect, true);
 
@@ -125,7 +126,7 @@ pub fn draw_island(
             * (1.0 - layout.hide_progress)
     };
     let palette = if expanded_alpha > MIN_VISIBLE_OPACITY || mini_alpha > MIN_VISIBLE_OPACITY {
-        get_media_palette(direct_context, params.media.media)
+        get_media_palette(params.media.media)
     } else {
         default_media_palette()
     };
@@ -195,14 +196,14 @@ fn draw_expanded_shadow(
 
 fn draw_background_layer(
     canvas: &skia_safe::Canvas,
-    direct_context: &mut DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     params: &DrawIslandParams<'_>,
     rect: Rect,
     island_path: &skia_safe::Path,
 ) {
     draw_background(BackgroundParams {
         canvas,
-        direct_context,
+        drawing_context,
         rect,
         island_path,
         island_style: params.style.island_style,

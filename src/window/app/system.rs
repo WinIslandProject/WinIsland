@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use windows::ApplicationModel::Package;
@@ -13,7 +13,6 @@ use crate::core::persistence::{get_config_path, load_config};
 use crate::plugin::marketplace::{self, MarketplacePlugin};
 use crate::plugin::zip_loader;
 use crate::window::tray::TrayAction;
-use crate::window::vulkan::MAIN_VULKAN_TARGET;
 
 use super::App;
 
@@ -97,7 +96,7 @@ impl App {
     pub(super) fn invalidate_renderer(&mut self, reason: &str, now: Instant) {
         let mut renderer = self.renderer.take();
         if renderer.is_some() {
-            log::warn!("Vulkan renderer invalidated: {reason}");
+            log::warn!("Renderer invalidated: {reason}");
         }
         if let Some(settings) = self.settings.as_mut() {
             settings.invalidate_renderer_target();
@@ -114,7 +113,7 @@ impl App {
 
     pub(super) fn recover_renderer(
         &mut self,
-        window: &Window,
+        window: &Arc<Window>,
         now: Instant,
         retry_interval: Duration,
     ) {
@@ -131,7 +130,7 @@ impl App {
             self.next_frame_deadline = now + retry_interval;
             return;
         };
-        match crate::window::vulkan::VulkanRenderer::try_new(
+        match crate::window::renderer::Renderer::try_new(
             window,
             &backdrop_window,
             self.geom.os_w,
@@ -141,7 +140,7 @@ impl App {
                 if let Some(settings) = self.settings.as_mut()
                     && let Err(error) = settings.recreate_renderer_target(&mut renderer)
                 {
-                    log::warn!("Vulkan settings renderer recovery failed: {error}");
+                    log::warn!("Settings renderer recovery failed: {error}");
                     self.renderer_retry_at = Some(now + retry_interval);
                     self.next_frame_deadline = now + retry_interval;
                     return;
@@ -150,10 +149,10 @@ impl App {
                 self.renderer_retry_at = None;
                 self.last_render_time = now;
                 window.request_redraw();
-                log::info!("Vulkan renderer recovered");
+                log::info!("Renderer recovered");
             }
             Err(error) => {
-                log::warn!("Vulkan renderer recovery failed: {error}");
+                log::warn!("Renderer recovery failed: {error}");
                 self.renderer_retry_at = Some(now + retry_interval);
                 self.next_frame_deadline = now + retry_interval;
             }
@@ -481,11 +480,13 @@ impl App {
                         self.geom.os_h = window_size.height;
                         let _ = window
                             .request_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h));
-                        if let Some(renderer) = self.renderer.as_mut()
-                            && let Err(error) =
-                                renderer.resize(MAIN_VULKAN_TARGET, self.geom.os_w, self.geom.os_h)
-                        {
-                            log::error!("Vulkan renderer resize failed: {error}");
+                        if let Some(renderer) = self.renderer.as_mut() {
+                            let target = renderer.main_target();
+                            if let Err(error) =
+                                renderer.resize(target, self.geom.os_w, self.geom.os_h)
+                            {
+                                log::error!("Renderer resize failed: {error}");
+                            }
                         }
                     }
 

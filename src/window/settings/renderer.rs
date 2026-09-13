@@ -8,7 +8,7 @@ use crate::utils::settings_ui::{
     ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
     settings_paint, widget_grid_geom, widget_source_span,
 };
-use crate::window::vulkan::VulkanRenderer;
+use crate::window::renderer::Renderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 
 use super::{
@@ -18,7 +18,7 @@ use super::{
 };
 
 impl SettingsApp {
-    pub(crate) fn draw(&mut self, renderer: &mut VulkanRenderer) {
+    pub(crate) fn draw(&mut self, renderer: &mut Renderer) {
         let Some(win) = self.window.as_ref() else {
             return;
         };
@@ -43,7 +43,7 @@ impl SettingsApp {
             Some(target) => target,
             None => return,
         };
-        let render_result = renderer.draw(target, |direct_context, sk_surface| {
+        let render_result = renderer.draw(target, |drawing_context, sk_surface| {
             let canvas = sk_surface.canvas();
             canvas.reset_matrix();
             canvas.clear(Color::TRANSPARENT);
@@ -58,7 +58,7 @@ impl SettingsApp {
             let bg_paint = settings_paint(theme.win_bg);
             canvas.draw_rect(win_rect, &bg_paint);
 
-            self.draw_sidebar(direct_context, canvas, &theme);
+            self.draw_sidebar(drawing_context, canvas, &theme);
             self.draw_page_navigation(canvas, &theme);
             self.draw_page_header(canvas, &theme, win_w);
             self.draw_widget_mode_control(canvas, &theme);
@@ -142,7 +142,7 @@ impl SettingsApp {
             }
 
             if self.active_page == PLUGINS_PAGE_INDEX {
-                self.draw_plugins_page(direct_context, canvas, &theme, win_w, win_h);
+                self.draw_plugins_page(drawing_context, canvas, &theme, win_w, win_h);
             }
 
             self.draw_popup(canvas, &theme);
@@ -160,7 +160,7 @@ impl SettingsApp {
             canvas.draw_rrect(border_rrect, &border_paint);
         });
         if let Err(error) = render_result {
-            log::error!("Vulkan settings rendering failed: {error}");
+            log::error!("Settings rendering failed: {error}");
             self.close_requested = true;
         } else if rebuilt_items {
             self.memory_trim_pending = true;

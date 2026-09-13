@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use skia_safe::{
     AlphaType, Color, ColorType, FilterMode, ISize, Image, ImageInfo, MipmapMode, Paint, Rect,
-    SamplingOptions,
-    gpu::{Budgeted, DirectContext, SurfaceOrigin, SyncCpu, surfaces},
+    SamplingOptions, surfaces,
 };
 
 const PALETTE_SAMPLE_SIZE: i32 = 8;
@@ -14,11 +13,7 @@ thread_local! {
     static COLOR_CACHE: RefCell<HashMap<u64, Arc<[Color]>>> = RefCell::new(HashMap::new());
 }
 
-pub(super) fn get_palette_from_image(
-    direct_context: &mut DirectContext,
-    img: &Image,
-    cache_key: u64,
-) -> Arc<[Color]> {
+pub(super) fn get_palette_from_image(img: &Image, cache_key: u64) -> Arc<[Color]> {
     COLOR_CACHE.with(|cache| {
         let mut cache_mut = cache.borrow_mut();
         if cache_mut.len() > 50
@@ -30,7 +25,7 @@ pub(super) fn get_palette_from_image(
             return palette.clone();
         }
         let mut palette = Vec::with_capacity(3);
-        if let Some((r_avg, g_avg, b_avg)) = average_image_color(direct_context, img) {
+        if let Some((r_avg, g_avg, b_avg)) = average_image_color(img) {
             let brighten = |r: f32, g: f32, b: f32, factor: f32| -> Color {
                 let mut r = r * factor;
                 let mut g = g * factor;
@@ -63,10 +58,7 @@ pub(super) fn get_palette_from_image(
     })
 }
 
-fn average_image_color(
-    direct_context: &mut DirectContext,
-    image: &Image,
-) -> Option<(f32, f32, f32)> {
+fn average_image_color(image: &Image) -> Option<(f32, f32, f32)> {
     if image.width() <= 0 || image.height() <= 0 {
         return None;
     }
@@ -76,16 +68,7 @@ fn average_image_color(
         AlphaType::Premul,
         None,
     );
-    let mut surface = surfaces::render_target(
-        direct_context,
-        Budgeted::Yes,
-        &info,
-        None,
-        Some(SurfaceOrigin::TopLeft),
-        None,
-        Some(false),
-        Some(false),
-    )?;
+    let mut surface = surfaces::raster(&info, None, None)?;
     let paint = Paint::default();
     surface.canvas().draw_image_rect_with_sampling_options(
         image,
@@ -94,8 +77,6 @@ fn average_image_color(
         SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
         &paint,
     );
-    direct_context.flush_and_submit_surface(&mut surface, Some(SyncCpu::Yes));
-
     let mut pixels = [0u8; (PALETTE_SAMPLE_SIZE as usize).pow(2) * 4];
     if !surface.read_pixels(&info, &mut pixels, info.min_row_bytes(), (0, 0)) {
         return None;

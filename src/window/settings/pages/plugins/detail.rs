@@ -236,7 +236,7 @@ impl SettingsApp {
 
     pub(super) fn draw_plugin_detail(
         &mut self,
-        direct_context: &mut skia_safe::gpu::DirectContext,
+        drawing_context: &mut crate::window::renderer::DrawingContext<'_>,
         canvas: &Canvas,
         theme: &SettingsTheme,
         win_w: f32,
@@ -269,7 +269,7 @@ impl SettingsApp {
         let y = DETAIL_HEADER_Y;
         match &plugin {
             DetailPlugin::Installed(installed) => draw_plugin_icon(
-                direct_context,
+                drawing_context,
                 canvas,
                 installed,
                 Rect::from_xywh(
@@ -280,7 +280,7 @@ impl SettingsApp {
                 ),
             ),
             DetailPlugin::Marketplace(marketplace) => draw_plugin_icon_data(
-                direct_context,
+                drawing_context,
                 canvas,
                 &marketplace.id,
                 &marketplace.name,

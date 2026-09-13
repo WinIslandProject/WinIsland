@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 
 use skia_safe::{
-    FilterMode, Image, ImageInfo, MipmapMode, Paint, Rect, SamplingOptions, TileMode,
-    gpu::{self, Budgeted, DirectContext, SurfaceOrigin},
-    image_filters,
+    FilterMode, Image, ImageInfo, MipmapMode, Paint, Rect, SamplingOptions, TileMode, image_filters,
 };
 
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::get_cached_media_image_with_key;
+use crate::window::renderer::DrawingContext;
 
 thread_local! {
     static BLURRED_COVER_CACHE: RefCell<Option<BlurredCoverCache>> = const { RefCell::new(None) };
@@ -19,7 +18,7 @@ struct BlurredCoverCache {
 }
 
 pub fn get_blurred_cover_background(
-    direct_context: &mut DirectContext,
+    drawing_context: &mut DrawingContext<'_>,
     media: &MediaInfo,
 ) -> Option<Image> {
     if media.title.is_empty() {
@@ -39,16 +38,7 @@ pub fn get_blurred_cover_background(
     }
 
     let info = ImageInfo::new_n32_premul((64, 64), None);
-    let mut downscaled_surface = gpu::surfaces::render_target(
-        direct_context,
-        Budgeted::Yes,
-        &info,
-        None,
-        Some(SurfaceOrigin::TopLeft),
-        None,
-        Some(false),
-        Some(false),
-    )?;
+    let mut downscaled_surface = drawing_context.render_surface(&info)?;
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
     downscaled_surface
@@ -60,19 +50,10 @@ pub fn get_blurred_cover_background(
             SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
             &paint,
         );
-    direct_context.flush_and_submit_surface(&mut downscaled_surface, None);
+    drawing_context.finish_surface(&mut downscaled_surface);
     let downscaled = downscaled_surface.image_snapshot();
 
-    let mut blur_surface = gpu::surfaces::render_target(
-        direct_context,
-        Budgeted::Yes,
-        &info,
-        None,
-        Some(SurfaceOrigin::TopLeft),
-        None,
-        Some(false),
-        Some(false),
-    )?;
+    let mut blur_surface = drawing_context.render_surface(&info)?;
     let mut blur_paint = Paint::default();
     blur_paint.set_anti_alias(true);
     if let Some(filter) = image_filters::blur((8.0, 8.0), Some(TileMode::Clamp), None, None) {
@@ -81,9 +62,8 @@ pub fn get_blurred_cover_background(
     blur_surface
         .canvas()
         .draw_image(&downscaled, (0, 0), Some(&blur_paint));
-    direct_context.flush_and_submit_surface(&mut blur_surface, None);
+    drawing_context.finish_surface(&mut blur_surface);
     let blurred_image = blur_surface.image_snapshot();
-    gpu::images::get_backend_texture_from_image(&blurred_image, false)?;
 
     BLURRED_COVER_CACHE.with(|cell| {
         *cell.borrow_mut() = Some(BlurredCoverCache {

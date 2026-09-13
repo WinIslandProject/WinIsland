@@ -36,11 +36,11 @@ impl App {
         if let Some(error) = self
             .renderer
             .as_mut()
-            .and_then(crate::window::vulkan::VulkanRenderer::take_failure)
+            .and_then(crate::window::renderer::Renderer::take_failure)
         {
             self.invalidate_renderer(&error, now);
         }
-        if crate::window::vulkan::take_dwm_composition_changed() {
+        if crate::window::renderer::take_dwm_composition_changed() {
             self.invalidate_renderer("DWM composition changed", now);
         }
         self.recover_renderer(&window, now, RENDERER_RECOVERY_INTERVAL);
@@ -158,6 +158,9 @@ impl App {
             let _ = window.set_cursor_hittest(false);
         } else {
             let _ = window.set_cursor_hittest(is_hovering_visible || is_on_hidden_reveal);
+        }
+        if let Some(renderer) = self.renderer.as_ref() {
+            renderer.ensure_window_style(&window);
         }
 
         let compact_overlay_visible = self.update_compact_and_auto_hide(
