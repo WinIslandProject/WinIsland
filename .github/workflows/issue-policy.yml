@@ -1,0 +1,110 @@
+name: Issue Policy
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  moderate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce issue template policy
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const exemptAssociations = new Set([
+              "OWNER",
+              "MEMBER",
+              "COLLABORATOR",
+              "CONTRIBUTOR",
+            ]);
+
+            if (exemptAssociations.has(issue.author_association)) {
+              return;
+            }
+
+            const body = issue.body ?? "";
+            const labels = new Set(
+              issue.labels.map((label) =>
+                typeof label === "string" ? label : label.name,
+              ),
+            );
+            const templateLabels = [
+              "bug",
+              "enhancement",
+              "improvement",
+              "documentation",
+            ];
+            const templateSignatures = [
+              ["### Problem description", "### Steps to reproduce", "### Actual behavior"],
+              ["### Summary", "### Motivation", "### Expected outcome"],
+              ["### Current behavior", "### Proposed change", "### Benefit"],
+              ["### Documentation update", "### Reason"],
+            ];
+            const usedTemplate =
+              templateLabels.some((label) => labels.has(label)) ||
+              templateSignatures.some((signature) =>
+                signature.every((heading) => body.includes(heading)),
+              );
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = issue.number;
+            const invalidChecklistMarker =
+              "<!-- winisland-issue-policy:invalid-checklist -->";
+            const blankIssueMarker =
+              "<!-- winisland-issue-policy:blank-issue -->";
+
+            async function hasComment(marker) {
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                { owner, repo, issue_number, per_page: 100 },
+              );
+              return comments.some((comment) => comment.body?.includes(marker));
+            }
+
+            if (!usedTemplate) {
+              if (!(await hasComment(blankIssueMarker))) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body: `${blankIssueMarker}\nThanks for opening this issue. Please use one of the repository's issue templates whenever possible so that the maintainers receive the information needed to investigate it.`,
+                });
+              }
+              return;
+            }
+
+            const invalidChecklistPattern =
+              /^\s*-\s*\[[xX]\]\s*I confirm that I have not read these checkboxes and therefore I just ticked them all\.\s*$/m;
+            const automaticClosurePattern =
+              /^\s*-\s*\[[xX]\]\s*I am well aware that if the issue is not filled out correctly and completely, it will simply be closed without any response or reason\.\s*$/m;
+            if (
+              !invalidChecklistPattern.test(body) ||
+              !automaticClosurePattern.test(body)
+            ) {
+              return;
+            }
+
+            if (!(await hasComment(invalidChecklistMarker))) {
+              await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body: `${invalidChecklistMarker}\nThis issue has been closed automatically because both the unread-checklist and automatic-closure confirmations were selected. Please read each checklist item carefully before opening a new issue.`,
+                });
+            }
+
+            if (issue.state !== "closed") {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number,
+                state: "closed",
+                state_reason: "not_planned",
+              });
+            }
