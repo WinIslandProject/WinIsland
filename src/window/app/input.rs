@@ -31,8 +31,7 @@ impl App {
         py: i32,
         source: InputSource,
     ) {
-        let fullscreen_suppressed = self.is_fullscreen_suppressed
-            && (!self.hide.fullscreen_reveal_override || self.is_hidden());
+        let fullscreen_suppressed = self.is_fullscreen_suppressed && self.is_hidden();
         if fullscreen_suppressed || (source == InputSource::Mouse && self.is_cursor_suppressed) {
             return;
         }
@@ -51,7 +50,7 @@ impl App {
         if !self.config.right_click_drag
             || self.expanded
             || self.is_cursor_suppressed
-            || self.is_fullscreen_suppressed
+            || (self.is_fullscreen_suppressed && self.is_hidden())
         {
             return;
         }

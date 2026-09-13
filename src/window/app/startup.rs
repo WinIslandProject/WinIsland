@@ -35,6 +35,7 @@ impl App {
                 .with_window_level(WindowLevel::AlwaysOnTop)
                 .with_skip_taskbar(true);
             let backdrop_window = Arc::new(event_loop.create_window(backdrop_attrs).unwrap());
+            let _ = backdrop_window.set_cursor_hittest(false);
             let backdrop_hwnd = backdrop_window
                 .window_handle()
                 .ok()
