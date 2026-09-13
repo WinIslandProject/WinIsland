@@ -2,6 +2,20 @@
 
 This changelog lists published `winisland-plugin-api` releases only. Release notes are added when a version is published; there is no `Unreleased` section.
 
+## 0.7.0 - Sep 13, 2026
+
+Added:
+
+- `CAPABILITY_SETTINGS` and the `SettingsApiV1` host service
+- Declarative plugin settings pages with custom sidebar icons
+- Section, group, label, switch, select, stepper, and button setting items
+- Synchronous change callbacks with rejection errors and controlled value updates
+
+Changed:
+
+- Plugin settings pages are added to the settings sidebar and removed automatically during unload
+- Settings resources participate in token ownership, resource limits, and callback-safe shutdown
+
 ## 0.6.0 - Aug 24, 2026
 
 Added:
