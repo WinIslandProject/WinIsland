@@ -10,6 +10,7 @@ use crate::utils::mouse::get_global_cursor_pos;
 use crate::window::d3d::{HostBackdropParams, MAIN_D3D_TARGET};
 
 use super::App;
+use super::input::InputSource;
 
 impl App {
     pub(super) fn on_window_event(
@@ -69,7 +70,7 @@ impl App {
                 WindowEvent::MouseInput { state, button, .. } => {
                     let (px, py) = get_global_cursor_pos();
                     if button == MouseButton::Left {
-                        self.handle_input(event_loop, state, px, py);
+                        self.handle_input(event_loop, state, px, py, InputSource::Mouse);
                     } else if button == MouseButton::Right {
                         self.handle_right_input(state, px, py);
                     }
@@ -79,19 +80,35 @@ impl App {
                         (touch.location.x + self.geom.win_x as f64) as i32,
                         (touch.location.y + self.geom.win_y as f64) as i32,
                     );
-                    self.touch_pos = touch.location;
                     match touch.phase {
-                        TouchPhase::Started => {
+                        TouchPhase::Started if self.touch_id.is_none() => {
+                            self.touch_pos = touch.location;
                             self.touch_id = Some(touch.id);
-                            self.handle_input(event_loop, ElementState::Pressed, px, py);
+                            self.handle_input(
+                                event_loop,
+                                ElementState::Pressed,
+                                px,
+                                py,
+                                InputSource::Touch,
+                            );
                         }
-                        TouchPhase::Moved => {
-                            self.touch_id = Some(touch.id);
+                        TouchPhase::Moved if self.touch_id == Some(touch.id) => {
+                            self.touch_pos = touch.location;
                         }
-                        TouchPhase::Ended | TouchPhase::Cancelled => {
-                            self.handle_input(event_loop, ElementState::Released, px, py);
+                        TouchPhase::Ended | TouchPhase::Cancelled
+                            if self.touch_id == Some(touch.id) =>
+                        {
+                            self.touch_pos = touch.location;
+                            self.handle_input(
+                                event_loop,
+                                ElementState::Released,
+                                px,
+                                py,
+                                InputSource::Touch,
+                            );
                             self.touch_id = None;
                         }
+                        _ => {}
                     }
                 }
                 WindowEvent::RedrawRequested => {

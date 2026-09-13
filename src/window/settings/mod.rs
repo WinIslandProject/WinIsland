@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
 use winit::platform::windows::WindowAttributesExtWindows;
@@ -193,6 +193,7 @@ pub struct SettingsApp {
     pub(crate) anim: AnimPool,
     pub(crate) logical_mouse_pos: (f32, f32),
     pub(crate) last_hover_mouse_pos: (f32, f32),
+    touch_id: Option<u64>,
     pub(crate) frame_count: u64,
     pub(crate) scroll_y: f32,
     pub(crate) target_scroll_y: f32,
@@ -305,6 +306,7 @@ impl SettingsApp {
             anim: AnimPool::new(),
             logical_mouse_pos: (0.0, 0.0),
             last_hover_mouse_pos: (-1.0, -1.0),
+            touch_id: None,
             frame_count: 0,
             scroll_y: 0.0,
             target_scroll_y: 0.0,
@@ -600,6 +602,7 @@ impl SettingsApp {
                 button: MouseButton::Left,
                 ..
             } => self.handle_left_mouse_released(),
+            WindowEvent::Touch(touch) => self.handle_touch(touch),
             WindowEvent::RedrawRequested => self.draw(renderer),
             _ => (),
         }
@@ -700,6 +703,25 @@ impl SettingsApp {
         };
         if let Some(window) = &self.window {
             window.set_cursor(cursor);
+        }
+    }
+
+    fn handle_touch(&mut self, touch: Touch) {
+        match touch.phase {
+            TouchPhase::Started if self.touch_id.is_none() => {
+                self.touch_id = Some(touch.id);
+                self.handle_cursor_moved(touch.location);
+                self.handle_left_mouse_pressed();
+            }
+            TouchPhase::Moved if self.touch_id == Some(touch.id) => {
+                self.handle_cursor_moved(touch.location);
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
+                self.handle_cursor_moved(touch.location);
+                self.handle_left_mouse_released();
+                self.touch_id = None;
+            }
+            _ => {}
         }
     }
 

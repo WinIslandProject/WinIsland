@@ -133,7 +133,9 @@ impl App {
         let fullscreen_interaction_active = self.is_fullscreen_suppressed
             && self.hide.fullscreen_reveal_override
             && !self.is_hidden();
-        let interaction_suppressed = (self.is_cursor_suppressed || self.is_fullscreen_suppressed)
+        let cursor_interaction_suppressed = self.is_cursor_suppressed && self.touch_id.is_none();
+        let interaction_suppressed = (cursor_interaction_suppressed
+            || self.is_fullscreen_suppressed)
             && !fullscreen_interaction_active;
         let is_hovering_visible = !interaction_suppressed && is_hovering_island;
         let is_on_hidden_reveal = !interaction_suppressed

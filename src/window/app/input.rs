@@ -16,6 +16,12 @@ use crate::utils::mouse::{
 
 use super::{App, IslandLayout, should_show_widget_view};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum InputSource {
+    Mouse,
+    Touch,
+}
+
 impl App {
     pub(super) fn handle_input(
         &mut self,
@@ -23,8 +29,11 @@ impl App {
         state: ElementState,
         px: i32,
         py: i32,
+        source: InputSource,
     ) {
-        if self.is_cursor_suppressed || self.is_fullscreen_suppressed {
+        let fullscreen_suppressed = self.is_fullscreen_suppressed
+            && (!self.hide.fullscreen_reveal_override || self.is_hidden());
+        if fullscreen_suppressed || (source == InputSource::Mouse && self.is_cursor_suppressed) {
             return;
         }
         let rel_x = px - self.geom.win_x;

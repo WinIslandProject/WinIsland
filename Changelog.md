@@ -2,6 +2,7 @@
 
 ### v1.3.5
 - Fixed some auto-hide issues
+- Fixed touchscreen input not working
 - Fixed known issues
 - Improved the widget settings UI and animations
 - Improved the music progress bar UI
