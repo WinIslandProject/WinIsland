@@ -98,8 +98,10 @@ impl App {
         };
         self.update_right_drag(&window, px, py);
 
+        let (music_active, media_is_playing) = self.poll_media_info(&window);
+
         if now.duration_since(self.last_fullscreen_check) >= Duration::from_millis(100) {
-            self.update_fullscreen_suppression(&window, now);
+            self.update_fullscreen_suppression(&window, now, media_is_playing);
         }
 
         let rel_x = px - self.geom.win_x;
@@ -161,8 +163,6 @@ impl App {
         } else {
             let _ = window.set_cursor_hittest(is_hovering_visible || is_on_hidden_reveal);
         }
-
-        let (music_active, media_is_playing) = self.poll_media_info(&window);
 
         let compact_overlay_visible = self.update_compact_and_auto_hide(
             &window,
@@ -343,7 +343,12 @@ impl App {
         window.request_redraw();
     }
 
-    fn update_fullscreen_suppression(&mut self, window: &Window, now: Instant) {
+    fn update_fullscreen_suppression(
+        &mut self,
+        window: &Window,
+        now: Instant,
+        media_is_playing: bool,
+    ) {
         self.last_fullscreen_check = now;
         let prev_fullscreen = self.is_fullscreen_suppressed;
         self.is_fullscreen_suppressed = is_foreground_fullscreen(
@@ -355,6 +360,7 @@ impl App {
         self.is_cursor_suppressed = is_cursor_hidden();
         let should_hide_for_fullscreen = self.config.auto_hide
             && self.is_fullscreen_suppressed
+            && !media_is_playing
             && !self.hide.fullscreen_reveal_override;
         if should_hide_for_fullscreen != self.hide.fullscreen {
             if should_hide_for_fullscreen {
