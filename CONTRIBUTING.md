@@ -82,11 +82,21 @@ cargo clippy --workspace -- -D warnings
 
 ### 4.1 Branch Naming
 
-- `feat/feature-name` — new feature
-- `fix/issue-description` — bug fix
-- `refactor/task-description` — refactoring
-- `chore/task-description` — chores (dependency updates, build config, etc.)
-- `docs/documentation-description` — documentation updates
+- `feat/` — new feature
+- `fix/` — bug fix
+- `hotfix/` — urgent bug fix
+- `refactor/` — refactoring
+- `chore/` — chores (dependency updates, build config, etc.)
+- `docs/` — documentation updates
+- `test/` — tests
+- `ci/` — CI changes
+- `build/` — build system changes
+- `perf/` — performance improvements
+- `style/` — code style changes
+- `revert/` — revert changes
+- `release/` — release branches
+- `deps/` — dependency updates
+- `security/` — security fixes
 
 ### 4.2 Commit Conventions
 
