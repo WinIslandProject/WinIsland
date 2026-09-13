@@ -825,14 +825,23 @@ impl App {
             || pacing.compact_overlay_visible
             || pacing.passive_reveal_active
             || self.right_press_cursor.is_some();
+        let settings_active = self
+            .settings
+            .as_ref()
+            .is_some_and(|settings| !settings.is_idle());
+        let settings_became_idle = self.settings_active_last_frame && !settings_active;
+        let settings_requested_trim = self
+            .settings
+            .as_mut()
+            .is_some_and(crate::window::settings::SettingsApp::take_idle_memory_trim_request);
+        self.settings_active_last_frame = settings_active;
 
         if !animation_active
             && !interactive_active
-            && self
-                .settings
-                .as_ref()
-                .is_none_or(crate::window::settings::SettingsApp::is_idle)
-            && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL
+            && (settings_became_idle
+                || settings_requested_trim
+                || (!settings_active
+                    && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL))
         {
             crate::utils::win32::trim_process_working_set();
             self.last_working_set_trim = now;

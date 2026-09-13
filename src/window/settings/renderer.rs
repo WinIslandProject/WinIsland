@@ -34,6 +34,7 @@ impl SettingsApp {
             return;
         }
 
+        let rebuilt_items = self.items_dirty;
         self.ensure_items_cache();
         let theme = self.theme();
         let win_w = self.win_w / scale;
@@ -161,6 +162,8 @@ impl SettingsApp {
         if let Err(error) = render_result {
             log::error!("Vulkan settings rendering failed: {error}");
             self.close_requested = true;
+        } else if rebuilt_items {
+            self.memory_trim_pending = true;
         }
     }
 

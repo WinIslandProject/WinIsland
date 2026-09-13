@@ -350,6 +350,7 @@ impl App {
             drop(settings);
             crate::utils::win32::trim_process_working_set();
             self.last_working_set_trim = Instant::now();
+            self.settings_active_last_frame = false;
             log::info!("Settings window closed and resources released");
         }
     }

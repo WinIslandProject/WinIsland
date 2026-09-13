@@ -199,6 +199,7 @@ pub struct SettingsApp {
     pub(crate) scroll_vel_y: f32,
     pub(crate) last_frame_time: Instant,
     pub(crate) next_frame_deadline: Instant,
+    memory_trim_pending: bool,
     pub(crate) detected_apps: Vec<String>,
     detected_apps_rx: Option<mpsc::Receiver<Vec<String>>>,
     pub(crate) sidebar_hover: i32,
@@ -312,6 +313,7 @@ impl SettingsApp {
             scroll_vel_y: 0.0,
             last_frame_time: Instant::now(),
             next_frame_deadline: Instant::now(),
+            memory_trim_pending: false,
             detected_apps,
             detected_apps_rx: None,
             sidebar_hover: -1,
@@ -1015,6 +1017,15 @@ impl SettingsApp {
             && (self.target_scroll_y - self.scroll_y).abs() <= 0.1
             && !self.widget_drag_active()
             && self.number_input.is_none()
+    }
+
+    pub(crate) fn take_idle_memory_trim_request(&mut self) -> bool {
+        if self.memory_trim_pending && self.is_idle() {
+            self.memory_trim_pending = false;
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
