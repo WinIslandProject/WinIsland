@@ -34,116 +34,124 @@ impl SettingsApp {
             MusicAction::SmtcEnabled,
         );
         page.group_end();
-        page.section(tr("section_lyrics"));
-        page.group_start();
-        page.row_source(
-            tr("lyrics_mode"),
-            vec![
-                (
-                    tr("lyrics_mode_online"),
-                    self.config.lyrics_mode == "online",
-                ),
-                (tr("lyrics_mode_lrc"), self.config.lyrics_mode == "lrc"),
-            ],
-            true,
-            MusicAction::LyricsMode,
-        );
-        if self.config.lyrics_mode == "lrc" {
-            page.row_folder(
-                tr("lyrics_local_dir"),
-                tr("folder_select"),
-                self.config
-                    .lyrics_local_dir
-                    .as_ref()
-                    .filter(|path| !path.is_empty())
-                    .map(|_| tr("folder_clear")),
-                self.config
-                    .lyrics_local_dir
-                    .clone()
-                    .filter(|path| !path.is_empty()),
-                true,
-                MusicAction::LyricsFolder,
-            );
-            page.row_switch(
-                tr("show_secondary_lyrics"),
-                self.config.show_secondary_lyrics,
-                true,
-                MusicAction::ShowSecondaryLyrics,
-            );
-        } else {
-            page.row_switch(
-                tr("show_lyrics"),
-                show_lyrics,
-                true,
-                MusicAction::ShowLyrics,
-            );
-            page.row_switch(
-                tr("show_secondary_lyrics"),
-                show_lyrics && self.config.show_secondary_lyrics,
-                show_lyrics,
-                MusicAction::ShowSecondaryLyrics,
-            );
+
+        if self.config.smtc_enabled {
+            page.section(tr("section_lyrics"));
+            page.group_start();
             page.row_source(
-                tr("lyrics_source"),
+                tr("lyrics_mode"),
                 vec![
-                    (tr("lyrics_source_163"), self.config.lyrics_source == "163"),
-                    (tr("lyrics_source_qq"), self.config.lyrics_source == "qq"),
                     (
-                        tr("lyrics_source_kugou"),
-                        self.config.lyrics_source == "kugou",
+                        tr("lyrics_mode_online"),
+                        self.config.lyrics_mode == "online",
                     ),
-                    (
-                        tr("lyrics_source_lrclib"),
-                        self.config.lyrics_source == "lrclib",
-                    ),
-                    ("AMLL".to_string(), self.config.lyrics_source == "amll"),
+                    (tr("lyrics_mode_lrc"), self.config.lyrics_mode == "lrc"),
                 ],
-                show_lyrics,
-                MusicAction::LyricsSource,
+                true,
+                MusicAction::LyricsMode,
             );
-            page.row_stepper(
-                tr("lyrics_delay"),
-                format!("{:.1}", self.config.lyrics_delay),
-                show_lyrics,
-                MusicAction::LyricsDelay,
-            );
-            page.row_switch(
-                tr("lyrics_scroll"),
-                show_lyrics && self.config.lyrics_scroll,
-                show_lyrics,
-                MusicAction::LyricsScroll,
-            );
-            if show_lyrics && self.config.lyrics_scroll {
-                page.row_stepper(
-                    tr("lyrics_scroll_max_width"),
-                    (self.config.lyrics_scroll_max_width as i32).to_string(),
+            if self.config.lyrics_mode == "lrc" {
+                page.row_folder(
+                    tr("lyrics_local_dir"),
+                    tr("folder_select"),
+                    self.config
+                        .lyrics_local_dir
+                        .as_ref()
+                        .filter(|path| !path.is_empty())
+                        .map(|_| tr("folder_clear")),
+                    self.config
+                        .lyrics_local_dir
+                        .clone()
+                        .filter(|path| !path.is_empty()),
+                    true,
+                    MusicAction::LyricsFolder,
+                );
+                page.row_switch(
+                    tr("show_secondary_lyrics"),
+                    self.config.show_secondary_lyrics,
+                    true,
+                    MusicAction::ShowSecondaryLyrics,
+                );
+            } else {
+                page.row_switch(
+                    tr("show_lyrics"),
                     show_lyrics,
-                    MusicAction::LyricsScrollWidth,
+                    true,
+                    MusicAction::ShowLyrics,
+                );
+                if show_lyrics {
+                    page.row_switch(
+                        tr("show_secondary_lyrics"),
+                        self.config.show_secondary_lyrics,
+                        true,
+                        MusicAction::ShowSecondaryLyrics,
+                    );
+                    page.row_source(
+                        tr("lyrics_source"),
+                        vec![
+                            (tr("lyrics_source_163"), self.config.lyrics_source == "163"),
+                            (tr("lyrics_source_qq"), self.config.lyrics_source == "qq"),
+                            (
+                                tr("lyrics_source_kugou"),
+                                self.config.lyrics_source == "kugou",
+                            ),
+                            (
+                                tr("lyrics_source_lrclib"),
+                                self.config.lyrics_source == "lrclib",
+                            ),
+                            ("AMLL".to_string(), self.config.lyrics_source == "amll"),
+                        ],
+                        true,
+                        MusicAction::LyricsSource,
+                    );
+                    page.row_stepper(
+                        tr("lyrics_delay"),
+                        format!("{:.1}", self.config.lyrics_delay),
+                        true,
+                        MusicAction::LyricsDelay,
+                    );
+                    page.row_switch(
+                        tr("lyrics_scroll"),
+                        self.config.lyrics_scroll,
+                        true,
+                        MusicAction::LyricsScroll,
+                    );
+                    if self.config.lyrics_scroll {
+                        page.row_stepper(
+                            tr("lyrics_scroll_max_width"),
+                            (self.config.lyrics_scroll_max_width as i32).to_string(),
+                            true,
+                            MusicAction::LyricsScrollWidth,
+                        );
+                    }
+                }
+            }
+            if show_lyrics {
+                page.row_source(
+                    tr("lyrics_transition_animation"),
+                    lyric_transition_options(self.config.lyrics_transition_animation),
+                    true,
+                    MusicAction::LyricsTransitionAnimation,
                 );
             }
-        }
-        page.row_source(
-            tr("lyrics_transition_animation"),
-            lyric_transition_options(self.config.lyrics_transition_animation),
-            show_lyrics,
-            MusicAction::LyricsTransitionAnimation,
-        );
-        page.group_end();
-        page.section(tr("media_apps"));
-        page.group_start();
-        if self.detected_apps.is_empty() {
-            page.row_label(tr("no_sessions"));
-        } else {
-            for app in &self.detected_apps {
-                page.row_app(
-                    app.split('!').next().unwrap_or(app).to_string(),
-                    self.config.smtc_apps.contains(app),
-                    self.config.smtc_enabled,
-                    MusicAction::App(app.clone()),
-                );
+            page.group_end();
+
+            page.section(tr("media_apps"));
+            page.group_start();
+            if self.detected_apps.is_empty() {
+                page.row_label(tr("no_sessions"));
+            } else {
+                for app in &self.detected_apps {
+                    page.row_app(
+                        app.split('!').next().unwrap_or(app).to_string(),
+                        self.config.smtc_apps.contains(app),
+                        true,
+                        MusicAction::App(app.clone()),
+                    );
+                }
             }
+            page.group_end();
         }
-        page.group_end();
         page
     }
 

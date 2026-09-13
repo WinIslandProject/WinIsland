@@ -4,6 +4,7 @@
 - Fixed some auto-hide issues
 - Fixed touchscreen input not working
 - Fixed known issues
+- Improved the settings hierarchy by hiding dependent options when their parent setting is disabled
 - Improved the widget settings UI and animations
 - Improved the music progress bar UI
 
