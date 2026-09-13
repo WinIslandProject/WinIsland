@@ -347,6 +347,9 @@ impl App {
             {
                 renderer.remove_target(target);
             }
+            drop(settings);
+            crate::utils::win32::trim_process_working_set();
+            self.last_working_set_trim = Instant::now();
             log::info!("Settings window closed and resources released");
         }
     }

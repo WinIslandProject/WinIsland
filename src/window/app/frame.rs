@@ -828,7 +828,10 @@ impl App {
 
         if !animation_active
             && !interactive_active
-            && self.settings.is_none()
+            && self
+                .settings
+                .as_ref()
+                .is_none_or(crate::window::settings::SettingsApp::is_idle)
             && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL
         {
             crate::utils::win32::trim_process_working_set();

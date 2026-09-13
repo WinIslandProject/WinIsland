@@ -1007,6 +1007,16 @@ impl SettingsApp {
         }
     }
 
+    pub(crate) fn is_idle(&self) -> bool {
+        !self.switch_anim.is_animating()
+            && !self.anim.is_animating()
+            && !self.widget_interaction_animating()
+            && self.popup.is_none()
+            && (self.target_scroll_y - self.scroll_y).abs() <= 0.1
+            && !self.widget_drag_active()
+            && self.number_input.is_none()
+    }
+
     pub(crate) fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
         if self.cached_max_scroll <= 0.0 {
             return None;
