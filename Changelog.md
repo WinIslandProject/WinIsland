@@ -1,5 +1,11 @@
 # Changelog
 
+### v1.3.7
+- Replaced Vulkan and the softbuffer fallback with a rewritten D3D12 renderer
+- Improved frame clearing and final animation redraws to address ghosting when expanding the island
+- Improved rendering resource synchronization during window resizing and shutdown
+- Kept the settings window open while recovering from rendering failures
+
 ### v1.3.6
 - Migrated hardware rendering from D3D12 to Vulkan 1.2
 - Added software rendering as a fallback when Vulkan is unavailable or incompatible
