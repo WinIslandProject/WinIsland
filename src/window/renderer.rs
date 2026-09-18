@@ -1,89 +1,71 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use skia_safe::{Image, ImageInfo, Surface, gpu};
+use skia_safe::{Color, Image, ImageInfo, Surface, gpu};
 use winit::window::Window;
 
 use super::backdrop::HostBackdrop;
-use super::software::{SoftwareRenderer, SoftwareTargetId};
-use super::vulkan::{VulkanRenderer, VulkanTargetId};
+use super::d3d::{D3DDevice, RenderTarget};
+
+pub(crate) use super::backdrop::HostBackdropParams;
+
+const MAIN_TARGET: RendererTargetId = RendererTargetId(0);
+const RESOURCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
+const RESOURCE_MAX_IDLE_AGE: Duration = Duration::from_secs(10);
+
+static DWM_COMPOSITION_CHANGED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn signal_dwm_composition_changed() {
-    super::vulkan::signal_dwm_composition_changed();
+    DWM_COMPOSITION_CHANGED.store(true, Ordering::Release);
 }
 
 pub(crate) fn take_dwm_composition_changed() -> bool {
-    super::vulkan::take_dwm_composition_changed()
+    DWM_COMPOSITION_CHANGED.swap(false, Ordering::AcqRel)
 }
 
 pub(crate) struct DrawingContext<'a> {
-    direct_context: Option<&'a mut gpu::DirectContext>,
+    direct_context: &'a mut gpu::DirectContext,
 }
 
-impl<'a> DrawingContext<'a> {
-    pub(super) fn vulkan(direct_context: &'a mut gpu::DirectContext) -> Self {
-        Self {
-            direct_context: Some(direct_context),
-        }
-    }
-
-    pub(super) fn software() -> Self {
-        Self {
-            direct_context: None,
-        }
-    }
-
-    pub(crate) fn is_hardware(&self) -> bool {
-        self.direct_context.is_some()
-    }
-
+impl DrawingContext<'_> {
     pub(crate) fn prepare_image(
         &mut self,
         image: Image,
         mipmapped: gpu::Mipmapped,
     ) -> Option<Image> {
-        match self.direct_context.as_deref_mut() {
-            Some(context) => image.new_texture_image(context, mipmapped),
-            None => Some(image),
-        }
+        image.new_texture_image(self.direct_context, mipmapped)
     }
 
     pub(crate) fn render_surface(&mut self, info: &ImageInfo) -> Option<Surface> {
-        match self.direct_context.as_deref_mut() {
-            Some(context) => gpu::surfaces::render_target(
-                context,
-                gpu::Budgeted::Yes,
-                info,
-                None,
-                Some(gpu::SurfaceOrigin::TopLeft),
-                None,
-                Some(false),
-                Some(false),
-            ),
-            None => skia_safe::surfaces::raster(info, None, None),
-        }
+        gpu::surfaces::render_target(
+            self.direct_context,
+            gpu::Budgeted::Yes,
+            info,
+            None,
+            Some(gpu::SurfaceOrigin::TopLeft),
+            None,
+            Some(false),
+            Some(false),
+        )
     }
 
     pub(crate) fn finish_surface(&mut self, surface: &mut Surface) {
-        if let Some(context) = self.direct_context.as_deref_mut() {
-            context.flush_and_submit_surface(surface, None);
-        }
+        self.direct_context.flush_surface(surface);
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum RendererTargetId {
-    Vulkan(VulkanTargetId),
-    Software(SoftwareTargetId),
-}
-
-enum RendererBackend {
-    Vulkan(VulkanRenderer),
-    Software(SoftwareRenderer),
-}
+pub(crate) struct RendererTargetId(u64);
 
 pub(crate) struct Renderer {
-    backend: RendererBackend,
+    targets: HashMap<RendererTargetId, RenderTarget>,
     host_backdrop: Option<HostBackdrop>,
+    device: D3DDevice,
+    next_target_id: u64,
+    last_resource_cleanup: Instant,
+    failure: Option<String>,
 }
 
 impl Renderer {
@@ -93,25 +75,22 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<Self, String> {
-        crate::utils::win32::disable_software_transparency(window);
-        let backend = select_backend(window, width, height, false)?;
+        let mut device = D3DDevice::new()?;
+        let target = device.create_target(window, width, height)?;
+        let host_backdrop = match HostBackdrop::new(window, backdrop_window) {
+            Ok(backdrop) => Some(backdrop),
+            Err(error) => {
+                log::warn!("Host backdrop is unavailable: {error}");
+                None
+            }
+        };
         Ok(Self {
-            backend,
-            host_backdrop: create_host_backdrop(window, backdrop_window),
-        })
-    }
-
-    pub(crate) fn try_new(
-        window: &Arc<Window>,
-        backdrop_window: &Arc<Window>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
-        crate::utils::win32::disable_software_transparency(window);
-        let backend = select_backend(window, width, height, true)?;
-        Ok(Self {
-            backend,
-            host_backdrop: create_host_backdrop(window, backdrop_window),
+            targets: HashMap::from([(MAIN_TARGET, target)]),
+            host_backdrop,
+            device,
+            next_target_id: 1,
+            last_resource_cleanup: Instant::now(),
+            failure: None,
         })
     }
 
@@ -121,28 +100,17 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<RendererTargetId, String> {
-        match &mut self.backend {
-            RendererBackend::Vulkan(renderer) => {
-                crate::utils::win32::disable_software_transparency(window);
-                renderer
-                    .create_target(window, width, height)
-                    .map(RendererTargetId::Vulkan)
-            }
-            RendererBackend::Software(renderer) => renderer
-                .create_target(window, width, height)
-                .map(RendererTargetId::Software),
-        }
+        self.check_ready()?;
+        let target = self.device.create_target(window, width, height);
+        let target = self.record_result(target)?;
+        let id = RendererTargetId(self.next_target_id);
+        self.next_target_id += 1;
+        self.targets.insert(id, target);
+        Ok(id)
     }
 
     pub(crate) fn main_target(&self) -> RendererTargetId {
-        match &self.backend {
-            RendererBackend::Vulkan(_) => {
-                RendererTargetId::Vulkan(super::vulkan::MAIN_VULKAN_TARGET)
-            }
-            RendererBackend::Software(_) => {
-                RendererTargetId::Software(super::software::MAIN_SOFTWARE_TARGET)
-            }
-        }
+        MAIN_TARGET
     }
 
     pub(crate) fn draw<T>(
@@ -150,15 +118,50 @@ impl Renderer {
         target_id: RendererTargetId,
         draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
     ) -> Result<T, String> {
-        match (&mut self.backend, target_id) {
-            (RendererBackend::Vulkan(renderer), RendererTargetId::Vulkan(target)) => {
-                renderer.draw(target, draw)
-            }
-            (RendererBackend::Software(renderer), RendererTargetId::Software(target)) => {
-                renderer.draw(target, draw)
-            }
-            _ => Err("Renderer target belongs to a different backend".to_string()),
+        let result = self.draw_inner(target_id, draw);
+        self.record_result(result)
+    }
+
+    fn draw_inner<T>(
+        &mut self,
+        target_id: RendererTargetId,
+        draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
+    ) -> Result<T, String> {
+        self.check_ready()?;
+        let target = self
+            .targets
+            .get_mut(&target_id)
+            .ok_or_else(|| "D3D12 render target is unavailable".to_string())?;
+        let surface = target.current_surface()?;
+        let canvas = surface.canvas();
+        canvas.restore_to_count(1);
+        canvas.reset_matrix();
+        canvas.clear(Color::TRANSPARENT);
+        canvas.save();
+        let output = draw(
+            &mut DrawingContext {
+                direct_context: &mut self.device.context,
+            },
+            surface,
+        );
+        surface.canvas().restore_to_count(1);
+        self.device.context.flush_surface_with_access(
+            surface,
+            skia_safe::surfaces::BackendSurfaceAccess::Present,
+            &gpu::FlushInfo::default(),
+        );
+        self.device.submit(gpu::SyncCpu::No)?;
+        let present_result = target.present();
+        self.device.check_health()?;
+        present_result?;
+        if self.last_resource_cleanup.elapsed() >= RESOURCE_CLEANUP_INTERVAL {
+            self.device.context.perform_deferred_cleanup(
+                RESOURCE_MAX_IDLE_AGE,
+                Some(gpu::PurgeResourceOptions::AllResources),
+            );
+            self.last_resource_cleanup = Instant::now();
         }
+        Ok(output)
     }
 
     pub(crate) fn resize(
@@ -167,22 +170,26 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<(), String> {
-        match (&mut self.backend, target_id) {
-            (RendererBackend::Vulkan(renderer), RendererTargetId::Vulkan(target)) => {
-                renderer.resize(target, width, height)
-            }
-            (RendererBackend::Software(renderer), RendererTargetId::Software(target)) => {
-                renderer.resize(target, width, height)
-            }
-            _ => Err("Renderer target belongs to a different backend".to_string()),
-        }
+        let result = self.resize_inner(target_id, width, height);
+        self.record_result(result)
+    }
+
+    fn resize_inner(
+        &mut self,
+        target_id: RendererTargetId,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        self.check_ready()?;
+        let target = self
+            .targets
+            .get_mut(&target_id)
+            .ok_or_else(|| "D3D12 render target is unavailable".to_string())?;
+        self.device.resize_target(target, width, height)
     }
 
     pub(crate) fn take_failure(&mut self) -> Option<String> {
-        match &mut self.backend {
-            RendererBackend::Vulkan(renderer) => renderer.take_failure(),
-            RendererBackend::Software(renderer) => renderer.take_failure(),
-        }
+        self.failure.take()
     }
 
     pub(crate) fn update_host_backdrop(
@@ -190,7 +197,7 @@ impl Renderer {
         target_id: RendererTargetId,
         params: HostBackdropParams,
     ) -> bool {
-        if !self.is_main_target(target_id) {
+        if target_id != MAIN_TARGET {
             return false;
         }
         let Some(host_backdrop) = self.host_backdrop.as_ref() else {
@@ -210,81 +217,42 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn ensure_window_style(&self, window: &Window) {
-        if matches!(self.backend, RendererBackend::Software(_))
-            && let Err(error) = crate::utils::win32::enable_software_transparency(window)
-        {
-            log::warn!("Software transparency refresh failed: {error}");
-        }
-    }
-
-    pub(crate) fn abandon(&mut self) {
-        if let RendererBackend::Vulkan(renderer) = &mut self.backend {
-            renderer.abandon();
-        }
-    }
-
     pub(crate) fn remove_target(&mut self, target_id: RendererTargetId) {
-        match (&mut self.backend, target_id) {
-            (RendererBackend::Vulkan(renderer), RendererTargetId::Vulkan(target)) => {
-                renderer.remove_target(target);
-            }
-            (RendererBackend::Software(renderer), RendererTargetId::Software(target)) => {
-                renderer.remove_target(target);
-            }
-            _ => {}
+        if !self.targets.contains_key(&target_id) {
+            return;
         }
+        let result = self.device.synchronize();
+        if let Err(error) = self.record_result(result) {
+            log::warn!("D3D12 target cleanup failed: {error}");
+            self.device.context.abandon();
+        }
+        self.targets.remove(&target_id);
+        self.device
+            .context
+            .purge_unlocked_resources(gpu::PurgeResourceOptions::AllResources);
     }
 
-    fn is_main_target(&self, target_id: RendererTargetId) -> bool {
-        matches!(
-            target_id,
-            RendererTargetId::Vulkan(super::vulkan::MAIN_VULKAN_TARGET)
-                | RendererTargetId::Software(super::software::MAIN_SOFTWARE_TARGET)
-        )
+    fn check_ready(&mut self) -> Result<(), String> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
+        self.device.check_health()
+    }
+
+    fn record_result<T>(&mut self, result: Result<T, String>) -> Result<T, String> {
+        if let Err(error) = &result {
+            self.failure.get_or_insert_with(|| error.clone());
+        }
+        result
     }
 }
 
-fn create_host_backdrop(window: &Window, backdrop_window: &Arc<Window>) -> Option<HostBackdrop> {
-    match HostBackdrop::new(window, backdrop_window) {
-        Ok(backdrop) => Some(backdrop),
-        Err(error) => {
-            log::warn!("Host backdrop is unavailable: {error}");
-            None
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        self.host_backdrop.take();
+        if self.device.synchronize().is_err() {
+            self.device.context.abandon();
         }
+        self.targets.clear();
     }
 }
-
-fn select_backend(
-    window: &Arc<Window>,
-    width: u32,
-    height: u32,
-    recovery: bool,
-) -> Result<RendererBackend, String> {
-    if std::env::var("WINISLAND_RENDERER").is_ok_and(|value| value.eq_ignore_ascii_case("software"))
-    {
-        log::info!("Software renderer forced by WINISLAND_RENDERER");
-        return SoftwareRenderer::new(window, width, height).map(RendererBackend::Software);
-    }
-
-    let vulkan = if recovery {
-        VulkanRenderer::try_new(window, width, height)
-    } else {
-        VulkanRenderer::new(window, width, height)
-    };
-    match vulkan {
-        Ok(renderer) => Ok(RendererBackend::Vulkan(renderer)),
-        Err(vulkan_error) => {
-            log::warn!("Vulkan renderer unavailable; using software fallback: {vulkan_error}");
-            SoftwareRenderer::new(window, width, height)
-                .map(RendererBackend::Software)
-                .map_err(|error| {
-                    format!(
-                        "Vulkan initialization failed: {vulkan_error}; software fallback failed: {error}"
-                    )
-                })
-        }
-    }
-}
-
-pub(crate) use super::backdrop::HostBackdropParams;

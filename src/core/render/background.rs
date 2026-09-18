@@ -51,9 +51,7 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
     match island_style {
         "glass" => {
             if host_backdrop {
-                if drawing_context.is_hardware() {
-                    draw_host_glass(canvas, island_path);
-                }
+                draw_host_glass(canvas, island_path);
             } else {
                 draw_solid(canvas, island_path, fallback_color);
             }
@@ -107,9 +105,7 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
                 paint.set_color(Color::from_argb(120, 20, 20, 24));
                 canvas.draw_rect(rect, &paint);
             } else if host_backdrop {
-                if drawing_context.is_hardware() {
-                    draw_host_glass(canvas, island_path);
-                }
+                draw_host_glass(canvas, island_path);
             } else {
                 draw_solid(canvas, island_path, fallback_color);
             }

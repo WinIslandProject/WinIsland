@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::{
-    COLORREF, CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HWND, LPARAM,
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HWND, LPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
 use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
@@ -20,10 +20,10 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowW, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetWindow, GetWindowLongPtrW,
-    GetWindowThreadProcessId, HWND_TOPMOST, IsWindowVisible, LWA_COLORKEY, SW_RESTORE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_APPWINDOW,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_THICKFRAME,
+    GetWindowThreadProcessId, HWND_TOPMOST, IsWindowVisible, SW_RESTORE, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX,
+    WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR, s, w};
 
@@ -175,35 +175,6 @@ pub fn enforce_overlay_window_styles(hwnd: HWND) {
         WS_MAXIMIZEBOX.0 as isize | WS_THICKFRAME.0 as isize,
     );
     set_window_topmost(hwnd);
-}
-
-pub fn enable_software_transparency(window: &winit::window::Window) -> Result<(), String> {
-    let hwnd = window_hwnd(window)?;
-    modify_window_ex_style(hwnd, WS_EX_LAYERED.0 as isize, 0);
-    unsafe {
-        // SAFETY: hwnd belongs to the live WinIsland window. The color key matches the software
-        // renderer's XRGB clear value and the call retains no pointers.
-        SetLayeredWindowAttributes(hwnd, COLORREF(0x0001_0001), u8::MAX, LWA_COLORKEY)
-    }
-    .map_err(|error| format!("Software transparency setup failed: {error}"))
-}
-
-pub fn disable_software_transparency(window: &winit::window::Window) {
-    if let Ok(hwnd) = window_hwnd(window) {
-        modify_window_ex_style(hwnd, 0, WS_EX_LAYERED.0 as isize);
-    }
-}
-
-fn window_hwnd(window: &winit::window::Window) -> Result<HWND, String> {
-    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    let handle = window
-        .window_handle()
-        .map_err(|error| format!("Window handle unavailable: {error}"))?;
-    match handle.as_raw() {
-        RawWindowHandle::Win32(handle) => Ok(HWND(handle.hwnd.get() as _)),
-        _ => Err("Software rendering requires a Win32 window".to_string()),
-    }
 }
 
 // SAFETY: SetWindowPos is called on a validated HWND with flags that preserve

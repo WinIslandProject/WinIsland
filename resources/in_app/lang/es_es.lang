@@ -173,4 +173,4 @@ update_no_update_desc=Ya está utilizando la última versión de WinIsland.
 update_failed_desc=Error al comprobar las actualizaciones. Por favor, inténtelo de nuevo más tarde.
 volume=Volumen
 renderer_init_failed_title=Error de inicialización del renderizador
-renderer_init_failed_desc=WinIsland no pudo inicializar Vulkan 1.2 ni el modo de software alternativo. La aplicación se cerrará ahora. Detalles:
+renderer_init_failed_desc=WinIsland no pudo inicializar el renderizador Direct3D 12. La aplicación se cerrará ahora. Detalles:

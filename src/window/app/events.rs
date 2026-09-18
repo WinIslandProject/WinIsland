@@ -41,6 +41,17 @@ impl App {
                 WindowEvent::Resized(_) if win.is_maximized() => {
                     win.set_maximized(false);
                 }
+                WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                    self.geom.os_w = size.width;
+                    self.geom.os_h = size.height;
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        let target = renderer.main_target();
+                        if let Err(error) = renderer.resize(target, size.width, size.height) {
+                            log::error!("Renderer resize failed: {error}");
+                        }
+                    }
+                    win.request_redraw();
+                }
                 WindowEvent::Moved(position) => {
                     self.geom.win_x = position.x;
                     self.geom.win_y = position.y;

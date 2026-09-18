@@ -94,7 +94,7 @@ impl App {
     }
 
     pub(super) fn invalidate_renderer(&mut self, reason: &str, now: Instant) {
-        let mut renderer = self.renderer.take();
+        let renderer = self.renderer.take();
         if renderer.is_some() {
             log::warn!("Renderer invalidated: {reason}");
         }
@@ -103,9 +103,6 @@ impl App {
         }
         crate::utils::backdrop::clear_blurred_cover_cache();
         crate::ui::expanded::music_view::clear_cover_cache();
-        if let Some(renderer) = renderer.as_mut() {
-            renderer.abandon();
-        }
         drop(renderer);
         self.renderer_retry_at = Some(now);
         self.next_frame_deadline = now;
@@ -130,7 +127,7 @@ impl App {
             self.next_frame_deadline = now + retry_interval;
             return;
         };
-        match crate::window::renderer::Renderer::try_new(
+        match crate::window::renderer::Renderer::new(
             window,
             &backdrop_window,
             self.geom.os_w,
@@ -327,7 +324,7 @@ impl App {
             plugin_settings_pages,
         );
         let Some(renderer) = self.renderer.as_mut() else {
-            log::error!("Cannot open settings without the shared Vulkan renderer");
+            log::error!("Cannot open settings without the shared D3D12 renderer");
             return;
         };
         settings.create_window(event_loop, renderer);

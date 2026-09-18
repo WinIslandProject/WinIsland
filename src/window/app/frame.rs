@@ -159,9 +159,6 @@ impl App {
         } else {
             let _ = window.set_cursor_hittest(is_hovering_visible || is_on_hidden_reveal);
         }
-        if let Some(renderer) = self.renderer.as_ref() {
-            renderer.ensure_window_style(&window);
-        }
 
         let compact_overlay_visible = self.update_compact_and_auto_hide(
             &window,
@@ -709,6 +706,7 @@ impl App {
         is_paused: bool,
         dt: f32,
     ) {
+        let was_animating = self.springs.any_animating();
         let lyric_target_w = self.compute_lyric_target_width(window, music_active, is_paused, dt);
         let preserve_compact_widget_width = !self.is_width_hiding()
             || !crate::ui::widget::compact::hide_fade_complete(self.springs.hide.value);
@@ -780,6 +778,9 @@ impl App {
         self.springs.h.update_dt(target_h, 0.10, 0.68, dt);
         self.springs.r.update_dt(target_r, 0.10, 0.68, dt);
         self.springs.view.update_dt(target_view, 0.12, 0.68, dt);
+        if was_animating && !self.springs.any_animating() {
+            window.request_redraw();
+        }
     }
 
     fn update_compact_widget_refresh(&mut self, window: &Window, now: Instant) {

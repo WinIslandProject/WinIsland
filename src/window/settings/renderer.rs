@@ -45,8 +45,6 @@ impl SettingsApp {
         };
         let render_result = renderer.draw(target, |drawing_context, sk_surface| {
             let canvas = sk_surface.canvas();
-            canvas.reset_matrix();
-            canvas.clear(Color::TRANSPARENT);
             canvas.scale((scale, scale));
 
             let win_rect = Rect::from_xywh(0.0, 0.0, win_w, win_h);
@@ -161,7 +159,6 @@ impl SettingsApp {
         });
         if let Err(error) = render_result {
             log::error!("Settings rendering failed: {error}");
-            self.close_requested = true;
         } else if rebuilt_items {
             self.memory_trim_pending = true;
         }

@@ -4,8 +4,8 @@
 
 WinIsland is a Windows desktop application that creates a Dynamic Island overlay — a translucent, always-on-top island that displays media playback info, lyrics, and audio visualization. Built entirely in Rust with Skia rendering.
 
-- **Window system**: winit + Win32 Vulkan WSI, with a companion Windows Composition backdrop window
-- **Rendering**: Vulkan 1.2 Ganesh by default, with Skia raster + softbuffer fallback
+- **Window system**: winit + DirectComposition, with a companion Windows Composition backdrop window
+- **Rendering**: Skia Ganesh on D3D12, with premultiplied-alpha DXGI composition swap chains
 - **Media integration**: Windows SMTC (System Media Transport Controls) via COM
 - **Audio visualization**: cpal (loopback capture) + realfft (6-band spectrum)
 - **Plugin system**: Native C ABI DLLs loaded via libloading
@@ -51,9 +51,9 @@ src/
 └── window/
     ├── app.rs         Main App struct — event loop, state, input, orchestration
     ├── backdrop.rs    Shared Windows Composition host-backdrop window
-    ├── renderer.rs    Backend selection and shared drawing context
-    ├── software.rs    Skia raster + softbuffer fallback
-    ├── vulkan.rs      Vulkan 1.2 WSI and Skia Ganesh backend
+    ├── renderer.rs    Shared drawing context, frame isolation, and target lifecycle
+    ├── d3d.rs         D3D12 device, Skia context, and GPU synchronization
+    ├── d3d/target.rs  DXGI swap chains and DirectComposition targets
     ├── tray.rs        System tray icon + context menu
     └── settings/      Separate settings window
 ```
@@ -66,9 +66,8 @@ The application uses winit's `ApplicationHandler` and `WaitUntil` scheduling in 
 
 ```
 resumed() → create foreground and backdrop windows (transparent, topmost, skip-taskbar)
-           → try Vulkan 1.2 with a shared Skia DirectContext
-           → fall back to Skia raster + softbuffer if Vulkan initialization fails
-           → create matching targets for the island and settings windows
+           → create a hardware D3D12 device and shared Skia DirectContext
+           → create independent composition swap chains for the island and settings windows
 
 about_to_wait() [display refresh rate while active, throttled while idle]:
   1. Enforce topmost position
@@ -91,7 +90,7 @@ RedrawRequested → draw_island():
   7. Draw spectrum visualizer bars
   8. Draw progress bar
   9. Draw mini controls (play/pause/prev/next)
-  10. Present through the active Vulkan or softbuffer target
+  10. Flush with Present access, submit on the shared D3D12 queue, and present through DXGI
 ```
 
 Each style draws its background differently:
@@ -99,10 +98,10 @@ Each style draws its background differently:
 - **dynamic**: Cached blurred album art rendered by the active Skia backend
 - **default**: Solid black
 
-Vulkan is always attempted first. If its loader, device, required extensions, surface format, or
-transparent composition mode is unavailable, the renderer falls back to a Skia raster surface
-presented through softbuffer. The Win32 software path uses a color-keyed layered foreground window
-so transparent pixels continue to reveal the companion backdrop window.
+D3D12 is the only rendering backend. Each frame starts with an unclipped transparent clear and
+isolates the drawing callback's canvas state. Resizing waits for GPU work and releases back-buffer
+references before calling ResizeBuffers. Renderer failures invalidate both windows' GPU caches
+and recreate their targets together. The companion backdrop window remains independent.
 
 ---
 
@@ -169,7 +168,7 @@ bounded staging extraction and backup/rollback directory activation.
 | COM | `CoInitializeEx`, `CoUninitialize` |
 | Audio | `IMMDeviceEnumerator`, `IAudioMeterInformation` |
 | Window | `SetWindowPos` (topmost), extended styles (WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT) |
-| Rendering | Vulkan 1.2 + Skia Ganesh; Skia raster + softbuffer compatibility fallback |
+| Rendering | D3D12 + Skia Ganesh; DXGI + DirectComposition presentation |
 | GDI | `GetDC`, `CreateCompatibleDC`, `BitBlt`, `GetDIBits`, `StretchBlt` |
 | DWM | `DwmEnableBlurBehindWindow` (deprecated), `DwmSetWindowAttribute` |
 | IME | `ImmGetContext`, `ImmSetCompositionWindow` |

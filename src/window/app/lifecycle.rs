@@ -19,6 +19,10 @@ impl ApplicationHandler for App {
             .and_then(super::super::settings::SettingsApp::window_id)
             == Some(id)
         {
+            if matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed) {
+                self.close_settings();
+                return;
+            }
             if let (Some(settings), Some(renderer)) =
                 (self.settings.as_mut(), self.renderer.as_mut())
             {

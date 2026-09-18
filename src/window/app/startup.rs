@@ -48,6 +48,7 @@ impl App {
                 .with_title(WINDOW_TITLE)
                 .with_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h))
                 .with_transparent(true)
+                .with_no_redirection_bitmap(true)
                 .with_visible(false)
                 .with_decorations(false)
                 .with_resizable(true)

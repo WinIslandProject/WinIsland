@@ -94,7 +94,6 @@ pub fn draw_island(
     params: DrawIslandParams<'_>,
 ) -> bool {
     let canvas = surface.canvas();
-    canvas.clear(Color::TRANSPARENT);
     let layout = &params.layout;
     let rect = Rect::from_xywh(
         layout.island_x,

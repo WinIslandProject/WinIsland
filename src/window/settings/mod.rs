@@ -20,6 +20,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
+use winit::platform::windows::WindowAttributesExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowButtons, WindowId};
 
@@ -516,6 +517,7 @@ impl SettingsApp {
             .with_enabled_buttons(WindowButtons::CLOSE | WindowButtons::MINIMIZE)
             .with_decorations(false)
             .with_transparent(true)
+            .with_no_redirection_bitmap(true)
             .with_window_icon(get_app_icon());
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.window = Some(window.clone());
@@ -646,7 +648,6 @@ impl SettingsApp {
         };
         if let Err(error) = renderer.resize(target, size.width, size.height) {
             log::error!("Settings renderer resize failed: {error}");
-            self.close_requested = true;
         }
     }
 
