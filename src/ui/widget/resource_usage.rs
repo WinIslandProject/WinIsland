@@ -7,6 +7,46 @@ use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTAT
 use windows::Win32::System::Threading::GetSystemTimes;
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
+const TRANSITION_DURATION: Duration = Duration::from_millis(400);
+
+#[derive(Default)]
+struct AnimatedUsage {
+    from: f32,
+    target: Option<f32>,
+    started: Option<Instant>,
+}
+
+impl AnimatedUsage {
+    fn value(&self, now: Instant) -> Option<f32> {
+        self.target.map(|target| {
+            let t = self.started.map_or(1.0, |started| {
+                (now.saturating_duration_since(started).as_secs_f32()
+                    / TRANSITION_DURATION.as_secs_f32())
+                .min(1.0)
+            });
+            let eased = t * t * (3.0 - 2.0 * t);
+            self.from + (target - self.from) * eased
+        })
+    }
+
+    fn set_target(&mut self, target: Option<f32>, now: Instant) {
+        if self.target == target {
+            return;
+        }
+        let current = self.value(now);
+        self.from = current.or(target).unwrap_or_default();
+        self.target = target;
+        self.started = current.map(|_| now);
+    }
+
+    fn is_animating(&self, now: Instant) -> bool {
+        self.started
+            .is_some_and(|started| now.saturating_duration_since(started) < TRANSITION_DURATION)
+            && self
+                .target
+                .is_some_and(|target| (target - self.from).abs() > f32::EPSILON)
+    }
+}
 pub(crate) const CPU_COLOR: Color = Color::from_rgb(50, 190, 246);
 pub(crate) const RAM_COLOR: Color = Color::from_rgb(175, 82, 222);
 const WARNING_COLOR: Color = Color::from_rgb(255, 159, 10);
@@ -24,6 +64,8 @@ struct ResourceUsageCache {
     previous_cpu: Option<CpuTimes>,
     cpu: Option<f32>,
     ram: Option<f32>,
+    animated_cpu: AnimatedUsage,
+    animated_ram: AnimatedUsage,
     cpu_text: String,
     ram_text: String,
 }
@@ -36,7 +78,8 @@ impl ResourceUsageCache {
         {
             return;
         }
-        self.sampled_at = Some(Instant::now());
+        let now = Instant::now();
+        self.sampled_at = Some(now);
 
         if let Some(current) = read_cpu_times() {
             if let Some(previous) = self.previous_cpu {
@@ -53,6 +96,8 @@ impl ResourceUsageCache {
         }
         update_percent_text(&mut self.cpu_text, self.cpu);
         update_percent_text(&mut self.ram_text, self.ram);
+        self.animated_cpu.set_target(self.cpu, now);
+        self.animated_ram.set_target(self.ram, now);
     }
 
     fn next_refresh_delay(&self) -> Duration {
@@ -77,9 +122,10 @@ pub(crate) fn with_resource_usage<R>(draw: impl FnOnce(ResourceUsage<'_>) -> R) 
     RESOURCE_USAGE.with(|cell| {
         let mut cache = cell.borrow_mut();
         cache.refresh_if_due();
+        let now = Instant::now();
         draw(ResourceUsage {
-            cpu: cache.cpu,
-            ram: cache.ram,
+            cpu: cache.animated_cpu.value(now),
+            ram: cache.animated_ram.value(now),
             cpu_text: &cache.cpu_text,
             ram_text: &cache.ram_text,
         })
@@ -88,6 +134,14 @@ pub(crate) fn with_resource_usage<R>(draw: impl FnOnce(ResourceUsage<'_>) -> R) 
 
 pub(crate) fn next_refresh_delay() -> Duration {
     RESOURCE_USAGE.with(|cell| cell.borrow().next_refresh_delay())
+}
+
+pub(crate) fn is_animating() -> bool {
+    RESOURCE_USAGE.with(|cell| {
+        let cache = cell.borrow();
+        let now = Instant::now();
+        cache.animated_cpu.is_animating(now) || cache.animated_ram.is_animating(now)
+    })
 }
 
 pub(crate) fn alpha_color(color: Color, alpha: u8) -> Color {

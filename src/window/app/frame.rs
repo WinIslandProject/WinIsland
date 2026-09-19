@@ -834,6 +834,7 @@ impl App {
     ) {
         let should_periodic_redraw = self.periodic_effect_redraw_due();
         let animation_active = self.springs.any_animating()
+            || self.resource_usage_animating()
             || self.compact_overlay.is_volume_dragging()
             || self.lyrics.transition < 1.0
             || self.is_dragging
@@ -884,6 +885,27 @@ impl App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
     }
 
+    fn resource_usage_animating(&self) -> bool {
+        use crate::core::config::{CompactWidgetKind, WidgetKind};
+
+        if self.is_hidden() || self.compact_overlay.is_visible() {
+            return false;
+        }
+        let visible = if self.expanded {
+            (!self.music_page_available || self.springs.view.value > 0.0)
+                && self
+                    .config
+                    .widget_layout
+                    .iter()
+                    .any(|slot| slot.widget == Some(WidgetKind::ResourceUsage))
+        } else {
+            self.config
+                .compact_widget_layout
+                .iter()
+                .any(|slot| slot.widget == Some(CompactWidgetKind::ResourceUsage))
+        };
+        visible && crate::ui::widget::resource_usage::is_animating()
+    }
 }
 
 struct FramePacing {
