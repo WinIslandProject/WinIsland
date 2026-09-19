@@ -1,0 +1,16 @@
+name: Add PR to Project Board
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  add-to-project:
+    name: Add PR to project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add To GitHub projects
+        uses: actions/add-to-project@v2.0.0
+        with:
+          project-url: https://github.com/orgs/WinIslandProject/projects/2
+          github-token: ${{ secrets.PROJECT_TOKEN }}
