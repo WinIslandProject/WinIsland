@@ -16,6 +16,7 @@ enum MusicAction {
     LyricsDelay,
     LyricsScroll,
     LyricsScrollWidth,
+    LyricsSideGap,
     LyricsTransitionAnimation,
     LyricsFolder,
     App(String),
@@ -127,6 +128,12 @@ impl SettingsApp {
                 }
             }
             if show_lyrics {
+                page.row_stepper(
+                    tr("lyrics_side_gap"),
+                    (self.config.lyrics_side_gap as i32).to_string(),
+                    true,
+                    MusicAction::LyricsSideGap,
+                );
                 page.row_source(
                     tr("lyrics_transition_animation"),
                     lyric_transition_options(self.config.lyrics_transition_animation),
@@ -174,6 +181,10 @@ impl SettingsApp {
                 MusicAction::LyricsScrollWidth => (
                     (self.config.lyrics_scroll_max_width as i32).to_string(),
                     set_lyrics_scroll_width,
+                ),
+                MusicAction::LyricsSideGap => (
+                    (self.config.lyrics_side_gap as i32).to_string(),
+                    set_lyrics_side_gap,
                 ),
                 _ => return,
             };
@@ -223,6 +234,14 @@ impl SettingsApp {
                     100.0,
                     500.0,
                 );
+                true
+            }
+            (MusicAction::LyricsSideGap, _) => {
+                let Some(direction) = result.step_direction() else {
+                    return;
+                };
+                self.config.lyrics_side_gap =
+                    step(self.config.lyrics_side_gap, direction, 1.0, 0.0, 32.0);
                 true
             }
             (MusicAction::LyricsFolder, ClickResult::FolderSelect(_)) => {
@@ -371,5 +390,13 @@ fn set_lyrics_delay(app: &mut SettingsApp, value: &str) {
 fn set_lyrics_scroll_width(app: &mut SettingsApp, value: &str) {
     if let Ok(value) = value.parse::<f32>() {
         app.config.lyrics_scroll_max_width = value.clamp(100.0, 500.0);
+    }
+}
+
+fn set_lyrics_side_gap(app: &mut SettingsApp, value: &str) {
+    if let Ok(value) = value.parse::<f32>()
+        && value.is_finite()
+    {
+        app.config.lyrics_side_gap = value.round().clamp(0.0, 32.0);
     }
 }

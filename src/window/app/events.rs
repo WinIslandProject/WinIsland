@@ -322,6 +322,7 @@ impl App {
                                                 .lyrics
                                                 .transition_animation,
                                             lyric_scroll_offset: self.lyrics.scroll_offset,
+                                            lyric_side_gap: self.config.lyrics_side_gap,
                                         },
                                         style: crate::core::render::StyleParams {
                                             island_style: &self.config.island_style,

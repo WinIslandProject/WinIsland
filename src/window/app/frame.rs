@@ -83,6 +83,7 @@ impl App {
         self.last_update_time = now;
 
         if !self.visible {
+            self.compact_overlay.finish_volume_drag();
             self.audio.set_gate_override(false);
             self.next_frame_deadline = now + HIDDEN_FRAME_INTERVAL;
             event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
@@ -157,7 +158,11 @@ impl App {
         if interaction_suppressed {
             let _ = window.set_cursor_hittest(false);
         } else {
-            let _ = window.set_cursor_hittest(is_hovering_visible || is_on_hidden_reveal);
+            let _ = window.set_cursor_hittest(
+                is_hovering_visible
+                    || is_on_hidden_reveal
+                    || self.compact_overlay.is_volume_dragging(),
+            );
         }
 
         let compact_overlay_visible = self.update_compact_and_auto_hide(
@@ -166,6 +171,15 @@ impl App {
             music_active,
             media_is_playing,
         );
+
+        if self.compact_overlay.is_volume_dragging() {
+            if (is_left_button_pressed() || self.touch_id.is_some()) && !interaction_suppressed {
+                self.update_volume_drag_position(rel_x, &layout);
+            } else {
+                self.compact_overlay.finish_volume_drag();
+            }
+            window.request_redraw();
+        }
 
         self.update_seeking_input(&window, rel_x);
         self.update_progress_hover(rel_x, rel_y, offset_x, island_y, music_active);
@@ -820,6 +834,8 @@ impl App {
     ) {
         let should_periodic_redraw = self.periodic_effect_redraw_due();
         let animation_active = self.springs.any_animating()
+            || self.resource_usage_animating()
+            || self.compact_overlay.is_volume_dragging()
             || self.lyrics.transition < 1.0
             || self.is_dragging
             || self.seek.active
@@ -867,6 +883,28 @@ impl App {
             window.request_redraw();
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
+    }
+
+    fn resource_usage_animating(&self) -> bool {
+        use crate::core::config::{CompactWidgetKind, WidgetKind};
+
+        if self.is_hidden() || self.compact_overlay.is_visible() {
+            return false;
+        }
+        let visible = if self.expanded {
+            (!self.music_page_available || self.springs.view.value > 0.0)
+                && self
+                    .config
+                    .widget_layout
+                    .iter()
+                    .any(|slot| slot.widget == Some(WidgetKind::ResourceUsage))
+        } else {
+            self.config
+                .compact_widget_layout
+                .iter()
+                .any(|slot| slot.widget == Some(CompactWidgetKind::ResourceUsage))
+        };
+        visible && crate::ui::widget::resource_usage::is_animating()
     }
 }
 

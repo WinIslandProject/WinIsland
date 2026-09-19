@@ -55,6 +55,8 @@ const PROGRESS_TIME_IDLE_ALPHA: f32 = 0.5;
 const PROGRESS_TRACK_ALPHA: f32 = 0.12;
 const PLAYBACK_CONTROLS_TOP_GAP: f32 = 42.0;
 const SKIP_BUTTON_GAP: f32 = 75.0;
+const SKIP_BUTTON_WIDTH: f32 = 64.0;
+const SKIP_BUTTON_HEIGHT: f32 = 40.0;
 const SKIP_ANIMATION_DURATION_SECS: f32 = 0.5;
 const PLAY_STATE_RESPONSE: f32 = 0.18;
 pub(super) const PAUSE_CONTROL_PRESS_VELOCITY: f32 = -0.18;
@@ -465,7 +467,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
         canvas.restore();
 
         let btn_cx = ox + w / 2.0;
-        let btn_cy = bar_center_y + bar_h / 2.0 + PLAYBACK_CONTROLS_TOP_GAP * scale;
+        let btn_cy = bar_center_y + PLAYBACK_CONTROLS_TOP_GAP * scale;
         let skip_gap = SKIP_BUTTON_GAP * scale;
 
         let prev_t = PREV_SKIP_ANIM.with(|cell| {
@@ -887,6 +889,26 @@ fn draw_skip_button(
     use_blur: bool,
     text_color: Color,
 ) {
+    let pressed = anim_t.map_or(0.0, |t| (1.0 - t / 0.5).max(0.0));
+    let mut background = Paint::default();
+    background.set_anti_alias(true);
+    background.set_color(Color::from_argb(
+        (alpha as f32 * (0.10 + 0.06 * pressed)) as u8,
+        text_color.r(),
+        text_color.g(),
+        text_color.b(),
+    ));
+    canvas.draw_round_rect(
+        Rect::from_xywh(
+            cx - SKIP_BUTTON_WIDTH * scale / 2.0,
+            cy - SKIP_BUTTON_HEIGHT * scale / 2.0,
+            SKIP_BUTTON_WIDTH * scale,
+            SKIP_BUTTON_HEIGHT * scale,
+        ),
+        12.0 * scale,
+        12.0 * scale,
+        &background,
+    );
     canvas.save();
     canvas.translate((cx, cy));
     if mirror {

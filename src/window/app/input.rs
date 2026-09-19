@@ -42,6 +42,7 @@ impl App {
         if state == ElementState::Pressed {
             self.handle_press(event_loop, rel_x, rel_y, &layout);
         } else if state == ElementState::Released {
+            self.update_volume_drag_position(rel_x, &layout);
             self.handle_release(py);
         }
     }
@@ -123,6 +124,24 @@ impl App {
                 layout.hidden_reveal_w,
                 layout.hidden_reveal_h,
             );
+
+        if !self.expanded
+            && is_hovering_visible
+            && self.compact_overlay.begin_volume_drag(
+                rel_x as f32,
+                rel_y as f32,
+                skia_safe::Rect::from_xywh(
+                    current_island_x as f32,
+                    current_island_y as f32,
+                    self.springs.w.value,
+                    self.springs.h.value,
+                ),
+                self.config.compact_scale,
+            )
+        {
+            self.idle_timer = Instant::now();
+            return;
+        }
 
         if !self.expanded && self.compact_overlay.is_notification_visible() && is_hovering_visible {
             self.dismissing_notification = true;
@@ -329,6 +348,9 @@ impl App {
     }
 
     pub(super) fn handle_release(&mut self, py: i32) {
+        if self.compact_overlay.finish_volume_drag() {
+            return;
+        }
         if self.finish_seek() {
             return;
         }
@@ -363,6 +385,19 @@ impl App {
                 }
             }
         }
+    }
+
+    pub(super) fn update_volume_drag_position(&mut self, rel_x: i32, layout: &IslandLayout) {
+        self.compact_overlay.update_volume_drag(
+            rel_x as f32,
+            skia_safe::Rect::from_xywh(
+                layout.current_island_x as f32,
+                layout.current_island_y as f32,
+                self.springs.w.value,
+                self.springs.h.value,
+            ),
+            self.config.compact_scale,
+        );
     }
 
     fn expand(&mut self) {
