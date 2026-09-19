@@ -99,6 +99,30 @@ impl CompactOverlay {
         self.active().is_some()
     }
 
+    pub fn begin_volume_drag(&mut self, x: f32, y: f32, rect: Rect, scale: f32) -> bool {
+        if !self.volume_monitor.can_set_level()
+            || !self.volume_indicator.begin_drag(x, y, rect, scale)
+        {
+            return false;
+        }
+        self.update_volume_drag(x, rect, scale);
+        true
+    }
+
+    pub fn update_volume_drag(&mut self, x: f32, rect: Rect, scale: f32) {
+        if let Some(level) = self.volume_indicator.drag_to(x, rect, scale) {
+            self.volume_monitor.set_level(level);
+        }
+    }
+
+    pub fn finish_volume_drag(&mut self) -> bool {
+        self.volume_indicator.finish_drag()
+    }
+
+    pub fn is_volume_dragging(&self) -> bool {
+        self.volume_indicator.is_dragging()
+    }
+
     pub fn is_notification_visible(&self) -> bool {
         self.notification_indicator.is_visible()
     }

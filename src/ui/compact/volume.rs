@@ -33,12 +33,14 @@ const NOTIFIER_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const DISPLAY_DURATION: Duration = Duration::from_millis(1600);
 const FADE_DURATION: Duration = Duration::from_millis(240);
 const VOLUME_CHANGE_THRESHOLD: f32 = 0.002;
+const PREVIEW_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy)]
 enum VolumeCommand {
     StepUp,
     StepDown,
     ToggleMute,
+    SetLevel(f32),
 }
 
 struct VolumeKeyHandler {
@@ -58,6 +60,7 @@ pub(super) struct VolumeSnapshot {
 
 struct SharedVolumeState {
     snapshot: Mutex<VolumeSnapshot>,
+    pending_level: Mutex<Option<f32>>,
 }
 
 pub(super) struct VolumeMonitor {
@@ -72,6 +75,7 @@ pub(super) struct VolumeMonitor {
 impl VolumeMonitor {
     pub(super) fn new(replace_native_volume_flyout: bool) -> Self {
         let state = Arc::new(SharedVolumeState {
+            pending_level: Mutex::new(None),
             snapshot: Mutex::new(VolumeSnapshot {
                 level: 0.0,
                 muted: false,
@@ -110,6 +114,20 @@ impl VolumeMonitor {
 
     pub(super) fn set_key_handling_enabled(&self, enabled: bool) {
         self.display_enabled.store(enabled, Ordering::Release);
+    }
+
+    pub(super) fn can_set_level(&self) -> bool {
+        self.endpoint_ready.load(Ordering::Acquire)
+    }
+
+    pub(super) fn set_level(&self, level: f32) {
+        if self.can_set_level() && level.is_finite() {
+            *self
+                .state
+                .pending_level
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(level.clamp(0.0, 1.0));
+        }
     }
 
     pub(super) fn set_native_flyout_replacement_enabled(&mut self, enabled: bool) {
@@ -282,7 +300,15 @@ fn spawn_volume_monitor(
             }
 
             let mut command_handled = false;
-            while let Ok(command) = command_receiver.try_recv() {
+            let pending_level = state
+                .pending_level
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            for command in command_receiver
+                .try_iter()
+                .chain(pending_level.map(VolumeCommand::SetLevel))
+            {
                 if endpoint
                     .as_ref()
                     .is_some_and(|endpoint| apply_volume_command(endpoint, command))
@@ -328,6 +354,9 @@ fn apply_volume_command(endpoint: &IAudioEndpointVolume, command: VolumeCommand)
             VolumeCommand::ToggleMute => endpoint
                 .GetMute()
                 .and_then(|muted| endpoint.SetMute(!muted.as_bool(), std::ptr::null())),
+            VolumeCommand::SetLevel(level) => endpoint
+                .SetMasterVolumeLevelScalar(level, std::ptr::null())
+                .and_then(|()| endpoint.SetMute(level <= 0.0, std::ptr::null())),
         }
         .is_ok()
     }
@@ -479,6 +508,8 @@ pub(super) struct VolumeIndicator {
     seen_revision: u64,
     pending: bool,
     display_until: Option<Instant>,
+    dragging: bool,
+    preview: Option<(f32, Instant)>,
 }
 
 impl Default for VolumeIndicator {
@@ -493,6 +524,8 @@ impl Default for VolumeIndicator {
             seen_revision: 0,
             pending: false,
             display_until: None,
+            dragging: false,
+            preview: None,
         }
     }
 }
@@ -504,8 +537,19 @@ impl VolumeIndicator {
             self.seen_revision = snapshot.revision;
             self.snapshot = snapshot;
         }
+        if !self.dragging
+            && self.preview.is_some_and(|(level, until)| {
+                Instant::now() >= until
+                    || ((self.snapshot.level - level).abs() <= VOLUME_CHANGE_THRESHOLD
+                        && self.snapshot.muted == (level <= 0.0))
+            })
+        {
+            self.preview = None;
+        }
 
         if !matches!(state, CompactOverlayState::Present) {
+            self.dragging = false;
+            self.preview = None;
             if matches!(state, CompactOverlayState::Defer) && changed {
                 self.pending = true;
             } else if matches!(state, CompactOverlayState::Discard) {
@@ -526,8 +570,65 @@ impl VolumeIndicator {
     }
 
     pub(super) fn is_visible(&self) -> bool {
-        self.display_until
-            .is_some_and(|until| until + FADE_DURATION > Instant::now())
+        self.dragging
+            || self
+                .display_until
+                .is_some_and(|until| until + FADE_DURATION > Instant::now())
+    }
+
+    pub(super) fn is_dragging(&self) -> bool {
+        self.dragging
+    }
+
+    pub(super) fn begin_drag(&mut self, x: f32, y: f32, rect: Rect, scale: f32) -> bool {
+        let track = self.track_rect(rect, scale);
+        if !self.is_visible()
+            || x < track.left() - 4.0 * scale
+            || x > track.right() + 4.0 * scale
+            || (y - track.center_y()).abs() > 12.0 * scale
+        {
+            return false;
+        }
+        self.dragging = true;
+        true
+    }
+
+    pub(super) fn drag_to(&mut self, x: f32, rect: Rect, scale: f32) -> Option<f32> {
+        if !self.dragging {
+            return None;
+        }
+        let track = self.track_rect(rect, scale);
+        let level = ((x - track.left()) / track.width()).clamp(0.0, 1.0);
+        let changed = self
+            .preview
+            .is_none_or(|(last, _)| (last - level).abs() > f32::EPSILON);
+        self.preview = Some((level, Instant::now() + PREVIEW_TIMEOUT));
+        self.display_until = Some(Instant::now() + DISPLAY_DURATION);
+        changed.then_some(level)
+    }
+
+    pub(super) fn finish_drag(&mut self) -> bool {
+        if !self.dragging {
+            return false;
+        }
+        self.dragging = false;
+        self.display_until = Some(Instant::now() + DISPLAY_DURATION);
+        true
+    }
+
+    fn track_rect(&self, rect: Rect, scale: f32) -> Rect {
+        let label_width = FontManager::global().measure_text_cached(
+            &self.label,
+            12.0 * scale,
+            FontStyle::normal(),
+        );
+        let left = rect.left() + (37.0 + 26.0) * scale + label_width;
+        Rect::from_xywh(
+            left,
+            rect.center_y() - 2.0 * scale,
+            (rect.right() - 14.0 * scale - left).max(1.0),
+            4.0 * scale,
+        )
     }
 
     pub(super) fn target_size(base_width: f32, base_height: f32, scale: f32) -> CompactSize {
@@ -546,20 +647,22 @@ impl VolumeIndicator {
         let center_y = rect.center_y();
         let icon_size = 20.0 * scale;
         let icon_center = skia_safe::Point::new(rect.left() + 21.0 * scale, center_y);
-        let muted = self.snapshot.muted || self.snapshot.level <= VOLUME_CHANGE_THRESHOLD;
+        let level = self.preview.map_or(self.snapshot.level, |(level, _)| level);
+        let muted = self
+            .preview
+            .map_or(self.snapshot.muted, |(level, _)| level <= 0.0)
+            || level <= VOLUME_CHANGE_THRESHOLD;
         draw_volume_icon(
             canvas,
             icon_center,
             icon_size,
             alpha,
-            if muted { 0.0 } else { self.snapshot.level },
+            if muted { 0.0 } else { level },
             Color::WHITE,
         );
 
         let label_size = 12.0 * scale;
         let label_x = rect.left() + 37.0 * scale;
-        let label_width =
-            FontManager::global().measure_text_cached(&self.label, label_size, FontStyle::normal());
         let mut label_paint = Paint::default();
         label_paint.set_anti_alias(true);
         label_paint.set_color(Color::from_argb((alpha as f32 * 0.9) as u8, 255, 255, 255));
@@ -573,12 +676,12 @@ impl VolumeIndicator {
             paint: &label_paint,
         });
 
-        let track_left = label_x + label_width + 26.0 * scale;
-        let track_right = rect.right() - 14.0 * scale;
-        let track_width = (track_right - track_left).max(1.0);
-        let track_height = 4.0 * scale;
-        let track_top = center_y - track_height / 2.0;
-        let thumb_x = track_left + track_width * self.snapshot.level;
+        let track = self.track_rect(rect, scale);
+        let track_left = track.left();
+        let track_width = track.width();
+        let track_height = track.height();
+        let track_top = track.top();
+        let thumb_x = track_left + track_width * level;
 
         let mut track_paint = Paint::default();
         track_paint.set_anti_alias(true);
@@ -604,6 +707,9 @@ impl VolumeIndicator {
     }
 
     fn opacity(&self) -> f32 {
+        if self.dragging {
+            return 1.0;
+        }
         let Some(until) = self.display_until else {
             return 0.0;
         };
