@@ -449,18 +449,26 @@ impl App {
                     || (!self.lyrics.old_text.is_empty() && self.lyrics.transition < 1.0));
 
             if has_visible_lyrics {
+                let (left_inset, right_inset) =
+                    crate::core::render::mini_lyric_insets(self.config.lyrics_side_gap);
+                let horizontal_insets = left_inset + right_inset;
                 if self.config.lyrics_scroll {
                     let (primary, secondary) = self.displayed_lyric_texts();
                     let primary_w = self.measure_lyric_text_width(primary);
                     let text_w = primary_w.max(self.measure_lyric_text_width(secondary));
-                    let natural_w = 60.0 + text_w;
-                    let max_w = self.config.lyrics_scroll_max_width;
+                    let natural_w = horizontal_insets + text_w;
+                    let max_w = self
+                        .config
+                        .lyrics_scroll_max_width
+                        .max(horizontal_insets + 32.0);
                     if natural_w > max_w {
                         let fixed_w = max_w;
-                        let available_text_w = (fixed_w - 59.0) * self.config.compact_scale;
+                        let available_text_w =
+                            (fixed_w - horizontal_insets) * self.config.compact_scale;
                         let full_primary_w = primary_w * self.config.compact_scale;
                         let overflow = full_primary_w - available_text_w;
                         if overflow > 0.0 && self.lyrics.transition >= 1.0 && !is_paused {
+                            self.lyrics.scroll_offset = self.lyrics.scroll_offset.min(overflow);
                             if self.lyrics.scroll_offset < overflow {
                                 if self.lyrics.scroll_pause > 0.0 {
                                     self.lyrics.scroll_pause -= dt / 60.0;
@@ -486,7 +494,7 @@ impl App {
                     let text_w = self.measure_lyric_pair_width(primary, secondary);
                     self.lyrics.scroll_offset = 0.0;
                     let min_w = self.config.base_width + 35.0;
-                    let w: f32 = 60.0 + text_w;
+                    let w = horizontal_insets + text_w;
                     w.clamp(min_w.min(MAX_LYRIC_WIDTH), MAX_LYRIC_WIDTH)
                 }
             } else {

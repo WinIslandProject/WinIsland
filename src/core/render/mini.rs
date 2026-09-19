@@ -25,8 +25,6 @@ const MINI_COVER_RADIUS: f32 = 5.0;
 const MINI_VISUALIZER_RIGHT_INSET: f32 = 17.0;
 const MINI_VISUALIZER_WIDTH_SCALE: f32 = 0.55;
 const MINI_VISUALIZER_SMOOTHING: (f32, f32) = (0.6, 0.08);
-const LYRIC_LEFT_INSET: f32 = 30.0;
-const LYRIC_RIGHT_INSET: f32 = 29.0;
 const LYRIC_EXPANSION_FADE_RATE: f32 = 2.5;
 const LYRIC_TRANSITION_BLUR_SIGMA: f32 = 6.0;
 const LYRIC_TRANSITION_BLUR_X_SCALE: f32 = 0.25;
@@ -46,6 +44,13 @@ pub(crate) fn lyric_font_size(font_size: f32, global_scale: f32) -> f32 {
     } else {
         12.0 * global_scale
     }
+}
+
+pub(crate) fn lyric_insets(side_gap: f32) -> (f32, f32) {
+    (
+        MINI_COVER_LEFT_INSET + MINI_COVER_SIZE + side_gap,
+        MINI_VISUALIZER_RIGHT_INSET + 15.0 * MINI_VISUALIZER_WIDTH_SCALE + side_gap,
+    )
 }
 
 pub(crate) fn lyric_pair_height(font_size: f32, global_scale: f32) -> f32 {
@@ -73,6 +78,7 @@ pub(super) struct MiniContentParams<'a> {
     pub(super) expansion_progress: f32,
     pub(super) font_size: f32,
     pub(super) lyric_scroll_offset: f32,
+    pub(super) lyric_side_gap: f32,
     pub(super) lyric_transition: f32,
     pub(super) lyric_transition_animation: LyricTransitionAnimation,
     pub(super) text_color: Color,
@@ -173,9 +179,13 @@ fn draw_mini_lyrics(params: &MiniContentParams<'_>, alpha: u8) {
         return;
     }
 
-    let space_left = params.offset_x + LYRIC_LEFT_INSET * params.global_scale;
-    let space_right = params.offset_x + params.current_w - LYRIC_RIGHT_INSET * params.global_scale;
+    let (left_inset, right_inset) = lyric_insets(params.lyric_side_gap);
+    let space_left = params.offset_x + left_inset * params.global_scale;
+    let space_right = params.offset_x + params.current_w - right_inset * params.global_scale;
     let available_width = space_right - space_left;
+    if available_width <= 0.0 {
+        return;
+    }
     let scrolling = params.lyric_scroll_offset > 0.0;
     let center_x = space_left + available_width / 2.0;
     let layout = LyricLayout {

@@ -140,6 +140,7 @@ lyrics_source_lrclib=LRCLIB
 lyrics_delay=Lyrics Delay (s)
 lyrics_scroll=Lyrics Scroll
 lyrics_scroll_max_width=Scroll Width
+lyrics_side_gap=Minimum Lyric Gap to Cover and Spectrum
 lyrics_local_dir=LRC Folder
 lyrics_transition_animation=Lyric Transition
 lyrics_transition_random=Random

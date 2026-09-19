@@ -336,6 +336,8 @@ pub struct AppConfig {
     pub lyrics_scroll: bool,
     #[serde(default = "default_lyrics_scroll_max_width")]
     pub lyrics_scroll_max_width: f32,
+    #[serde(default = "default_lyrics_side_gap")]
+    pub lyrics_side_gap: f32,
     #[serde(default)]
     pub lyrics_transition_animation: LyricTransitionMode,
     #[serde(default)]
@@ -395,6 +397,7 @@ defaults! {
     default_language: String = "auto".to_string(),
     default_lyrics_source: String = "163".to_string(),
     default_lyrics_scroll_max_width: f32 = 300.0,
+    default_lyrics_side_gap: f32 = 6.0,
     default_settings_theme: String = "system".to_string(),
     default_mini_cover_shape: String = "square".to_string(),
     default_expanded_cover_shape: String = "square".to_string(),
@@ -813,6 +816,7 @@ impl Default for AppConfig {
             lyrics_delay: 0.0,
             lyrics_scroll: false,
             lyrics_scroll_max_width: default_lyrics_scroll_max_width(),
+            lyrics_side_gap: default_lyrics_side_gap(),
             lyrics_transition_animation: LyricTransitionMode::default(),
             position_x_offset: 0,
             position_y_offset: 0,

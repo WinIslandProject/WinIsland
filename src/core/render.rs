@@ -3,7 +3,8 @@ mod expanded;
 mod mini;
 
 pub(crate) use mini::{
-    lyric_font_size as mini_lyric_font_size, lyric_pair_height as mini_lyric_pair_height,
+    lyric_font_size as mini_lyric_font_size, lyric_insets as mini_lyric_insets,
+    lyric_pair_height as mini_lyric_pair_height,
 };
 
 use self::background::{BackgroundParams, draw_background};
@@ -53,6 +54,7 @@ pub struct LyricsParams<'a> {
     pub lyric_transition: f32,
     pub lyric_transition_animation: LyricTransitionAnimation,
     pub lyric_scroll_offset: f32,
+    pub lyric_side_gap: f32,
 }
 
 pub struct StyleParams<'a> {
@@ -296,6 +298,7 @@ fn draw_compact_layer(
         expansion_progress: layout.expansion_progress,
         font_size: style.font_size,
         lyric_scroll_offset: lyrics.lyric_scroll_offset,
+        lyric_side_gap: lyrics.lyric_side_gap,
         lyric_transition: lyrics.lyric_transition,
         lyric_transition_animation: lyrics.lyric_transition_animation,
         text_color: Color::WHITE,

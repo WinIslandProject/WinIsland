@@ -140,6 +140,7 @@ lyrics_source_lrclib=LRCLIB
 lyrics_delay=歌词延迟 (s)
 lyrics_scroll=歌词滚动
 lyrics_scroll_max_width=滚动宽度
+lyrics_side_gap=歌词与封面、频谱的最小间距
 lyrics_local_dir=LRC 文件夹
 lyrics_transition_animation=歌词切换动画
 lyrics_transition_random=随机
