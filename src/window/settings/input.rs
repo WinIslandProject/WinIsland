@@ -4,9 +4,9 @@ use winit::keyboard::{Key, NamedKey};
 
 use super::pages::PageInput;
 use super::{
-    NumberInput, NumberInputHandler, PAGE_NAV_GAP, PAGE_NAV_SIZE, PAGE_NAV_X, PAGE_NAV_Y,
-    PLUGINS_PAGE_INDEX, POPUP_OPACITY_KEY, PageNavigation, SETTINGS_HEADER_H, SIDEBAR_ROW_GAP,
-    SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
+    NumberInput, NumberInputHandler, PAGE_NAV_GAP, PAGE_NAV_HEIGHT, PAGE_NAV_WIDTH, PAGE_NAV_X,
+    PAGE_NAV_Y, PLUGINS_PAGE_INDEX, POPUP_OPACITY_KEY, PageNavigation, SETTINGS_HEADER_H,
+    SIDEBAR_ROW_GAP, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,
 };
 
 impl SettingsApp {
@@ -165,16 +165,16 @@ impl SettingsApp {
     }
 
     pub(super) fn page_navigation_at(mouse_x: f32, mouse_y: f32) -> Option<PageNavigation> {
-        if !(PAGE_NAV_Y..=PAGE_NAV_Y + PAGE_NAV_SIZE).contains(&mouse_y) {
+        if !(PAGE_NAV_Y..=PAGE_NAV_Y + PAGE_NAV_HEIGHT).contains(&mouse_y) {
             return None;
         }
 
-        if (PAGE_NAV_X..=PAGE_NAV_X + PAGE_NAV_SIZE).contains(&mouse_x) {
+        if (PAGE_NAV_X..=PAGE_NAV_X + PAGE_NAV_WIDTH).contains(&mouse_x) {
             return Some(PageNavigation::Back);
         }
 
-        let forward_x = PAGE_NAV_X + PAGE_NAV_SIZE + PAGE_NAV_GAP;
-        if (forward_x..=forward_x + PAGE_NAV_SIZE).contains(&mouse_x) {
+        let forward_x = PAGE_NAV_X + PAGE_NAV_WIDTH + PAGE_NAV_GAP;
+        if (forward_x..=forward_x + PAGE_NAV_WIDTH).contains(&mouse_x) {
             return Some(PageNavigation::Forward);
         }
 
