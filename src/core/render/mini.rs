@@ -321,6 +321,21 @@ fn lyric_paint(color: Color, alpha: u8, blur_sigma: f32) -> Paint {
     paint
 }
 
+/// Horizontal position of one line of plugin text.
+///
+/// Plugin content is centred in the compact island, matching the default
+/// alignment of the built-in compact widgets. A line wider than the island keeps
+/// the left inset so its leading characters stay readable.
+fn plugin_text_x(text: &str, size: f32, bold: bool, text_x: f32, text_width: f32) -> f32 {
+    let style = if bold {
+        skia_safe::FontStyle::bold()
+    } else {
+        skia_safe::FontStyle::normal()
+    };
+    let measured = FontManager::global().measure_text_cached(text, size, style);
+    text_x + ((text_width - measured) * 0.5).max(0.0)
+}
+
 fn draw_plugin_content(
     params: &MiniContentParams<'_>,
     context: &crate::core::context::PluginContext,
@@ -351,7 +366,7 @@ fn draw_plugin_content(
     draw_text_cached(DrawTextCachedParams {
         canvas: params.canvas,
         text,
-        x: text_x,
+        x: plugin_text_x(text, font_size, true, text_x, text_width),
         y: text_y,
         size: font_size,
         bold: true,
@@ -366,7 +381,13 @@ fn draw_plugin_content(
         draw_text_cached(DrawTextCachedParams {
             canvas: params.canvas,
             text: &context.body,
-            x: text_x,
+            x: plugin_text_x(
+                &context.body,
+                font_size * PLUGIN_SECONDARY_FONT_SCALE,
+                false,
+                text_x,
+                text_width,
+            ),
             y: text_y + font_size * PLUGIN_SECONDARY_LINE_SPACING,
             size: font_size * PLUGIN_SECONDARY_FONT_SCALE,
             bold: false,
