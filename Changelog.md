@@ -1,5 +1,13 @@
 # Changelog
 
+### v1.3.8
+- Added configurable side spacing for compact lyrics
+- Added mouse dragging to the compact volume slider
+- Added smoother progress animations for CPU and memory widgets
+- Centered plugin text in the compact island
+- Added a segmented pill-style back/forward control to Settings, with enabled, hover, and disabled feedback
+- Restored the original media skip controls and corrected their placement and hit areas
+
 ### v1.3.7
 - Replaced Vulkan and the softbuffer fallback with a rewritten D3D12 renderer
 - Improved frame clearing and final animation redraws to address ghosting when expanding the island
