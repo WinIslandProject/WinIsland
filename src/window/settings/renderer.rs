@@ -9,7 +9,7 @@ use crate::utils::settings_ui::{
     settings_paint, widget_grid_geom, widget_source_span,
 };
 use crate::window::renderer::Renderer;
-use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
+use skia_safe::{Canvas, Color, Contains, Paint, Point, RRect, Rect};
 
 use super::{
     PAGE_NAV_GAP, PAGE_NAV_HEIGHT, PAGE_NAV_WIDTH, PAGE_NAV_X, PAGE_NAV_Y, PLUGINS_PAGE_INDEX,
@@ -271,14 +271,33 @@ impl SettingsApp {
         let center_y = PAGE_NAV_Y + PAGE_NAV_HEIGHT / 2.0;
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
 
-        for (x, enabled) in [
-            (PAGE_NAV_X, self.can_navigate_back()),
+        for (x, enabled, is_back) in [
+            (PAGE_NAV_X, self.can_navigate_back(), true),
             (
                 PAGE_NAV_X + PAGE_NAV_WIDTH + PAGE_NAV_GAP,
                 self.can_navigate_forward(),
+                false,
             ),
         ] {
             let rect = Rect::from_xywh(x, PAGE_NAV_Y, PAGE_NAV_WIDTH, PAGE_NAV_HEIGHT);
+            let outer_radius = PAGE_NAV_HEIGHT / 2.0;
+            let inner_radius = 3.0;
+            let radii = if is_back {
+                [
+                    Point::new(outer_radius, outer_radius),
+                    Point::new(inner_radius, inner_radius),
+                    Point::new(inner_radius, inner_radius),
+                    Point::new(outer_radius, outer_radius),
+                ]
+            } else {
+                [
+                    Point::new(inner_radius, inner_radius),
+                    Point::new(outer_radius, outer_radius),
+                    Point::new(outer_radius, outer_radius),
+                    Point::new(inner_radius, inner_radius),
+                ]
+            };
+            let shape = RRect::new_rect_radii(rect, &radii);
             let hovered = enabled && rect.contains(Point::new(mouse_x, mouse_y));
             let fill = if !enabled {
                 theme.control_disabled
@@ -287,17 +306,12 @@ impl SettingsApp {
             } else {
                 theme.control_bg
             };
-            canvas.draw_round_rect(
-                rect,
-                PAGE_NAV_HEIGHT / 2.0,
-                PAGE_NAV_HEIGHT / 2.0,
-                &settings_paint(fill),
-            );
+            canvas.draw_rrect(shape, &settings_paint(fill));
 
             let mut border = settings_paint(theme.control_border);
             border.set_style(skia_safe::paint::Style::Stroke);
             border.set_stroke_width(0.75);
-            canvas.draw_round_rect(rect, PAGE_NAV_HEIGHT / 2.0, PAGE_NAV_HEIGHT / 2.0, &border);
+            canvas.draw_rrect(shape, &border);
         }
 
         paint.set_color(if self.can_navigate_back() {
