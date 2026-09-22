@@ -10,8 +10,8 @@ use crate::utils::settings_ui::{
     CompactWidgetPreviewHit, WidgetDropAnimation, WidgetDropTarget, WidgetEditorHover,
     WidgetEditorSlot, WidgetPreviewHit, WidgetSource, compact_widget_grid_geom,
     compact_widget_library_items, compact_widget_preview_height, compact_widget_preview_hit_test,
-    widget_delete_button_hit, widget_grid_geom, widget_library_items, widget_preview_height,
-    widget_preview_hit_test,
+    widget_delete_button_hit, widget_edit_button_hit, widget_grid_geom, widget_library_items,
+    widget_preview_height, widget_preview_hit_test,
 };
 
 use super::super::{SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WIDGETS_PAGE_INDEX};
@@ -326,6 +326,15 @@ impl SettingsApp {
                 {
                     return false;
                 }
+                if matches!(source, WidgetSource::BuiltIn(WidgetKind::ResourceUsage))
+                    && widget_edit_button_hit(
+                        context.pointer,
+                        (x, y, width, height),
+                        geometry.cap_scale,
+                    )
+                {
+                    return false;
+                }
                 source
             }
             WidgetPreviewHit::None => return false,
@@ -371,6 +380,15 @@ impl SettingsApp {
                     (x, y, width, height),
                     geometry.cap_scale,
                 ) {
+                    return false;
+                }
+                if widget == crate::core::config::CompactWidgetKind::ResourceUsage
+                    && widget_edit_button_hit(
+                        context.pointer,
+                        (x, y, width, height),
+                        geometry.cap_scale,
+                    )
+                {
                     return false;
                 }
                 widget
@@ -467,6 +485,22 @@ impl SettingsApp {
             self.config.expanded_height,
         );
 
+        let resource_edit = self.config.widget_layout.iter().any(|entry| {
+            let Some(WidgetKind::ResourceUsage) = entry.widget else {
+                return false;
+            };
+            let (x, y, width, height) =
+                geometry.footprint_rect(WidgetKind::ResourceUsage.span(), entry.slot);
+            widget_edit_button_hit(context.pointer, (x, y, width, height), geometry.cap_scale)
+        });
+        if resource_edit {
+            self.resource_editor_open = true;
+            self.set_widget_hover_target(None);
+            self.set_active_widget_preview_hover_slot(None);
+            self.request_redraw();
+            return true;
+        }
+
         let built_in_anchor = self.config.widget_layout.iter().find_map(|entry| {
             let widget = entry.widget?;
             if widget == WidgetKind::Settings {
@@ -513,6 +547,22 @@ impl SettingsApp {
             &self.config.compact_widget_layout,
             self.compact_widget_dragging,
         );
+        let resource_edit = self.config.compact_widget_layout.iter().any(|entry| {
+            if entry.widget != Some(crate::core::config::CompactWidgetKind::ResourceUsage) {
+                return false;
+            }
+            let Some((x, y, width, height)) = geometry.slot_rect(entry.position()) else {
+                return false;
+            };
+            widget_edit_button_hit(context.pointer, (x, y, width, height), geometry.cap_scale)
+        });
+        if resource_edit {
+            self.resource_editor_open = true;
+            self.set_widget_hover_target(None);
+            self.set_active_widget_preview_hover_slot(None);
+            self.request_redraw();
+            return true;
+        }
         let position = self.config.compact_widget_layout.iter().find_map(|entry| {
             entry.widget?;
             let (x, y, width, height) = geometry.slot_rect(entry.position())?;

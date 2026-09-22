@@ -1,5 +1,6 @@
 use crate::utils::settings_ui::hover_test;
 use crate::utils::settings_ui::items::SIDEBAR_PAD;
+use skia_safe::Contains;
 use winit::keyboard::{Key, NamedKey};
 
 use super::pages::PageInput;
@@ -34,6 +35,11 @@ impl SettingsApp {
                 self.pending_plugin_setting = None;
                 self.request_redraw();
             }
+            return;
+        }
+
+        if self.resource_editor_open {
+            self.handle_resource_editor_click(mouse_x, mouse_y);
             return;
         }
 
@@ -99,6 +105,16 @@ impl SettingsApp {
 
     pub(super) fn get_hover_state(&mut self) -> bool {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
+        if self.resource_editor_open {
+            if let Some(popup) = &self.popup
+                && popup
+                    .menu_rect()
+                    .contains(skia_safe::Point::new(mouse_x, mouse_y))
+            {
+                return true;
+            }
+            return self.resource_editor_control_at(mouse_x, mouse_y);
+        }
         if self.scroll_dragging
             || self
                 .scrollbar_geometry()

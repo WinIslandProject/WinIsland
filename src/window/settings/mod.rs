@@ -29,6 +29,7 @@ pub mod items;
 pub mod pages;
 mod popup;
 pub mod renderer;
+mod resource_editor;
 pub mod sidebar;
 
 pub(crate) use popup::PopupState;
@@ -228,6 +229,7 @@ pub struct SettingsApp {
     pub(crate) widget_hover_progress: f32,
     pub(crate) widget_drag_lift_progress: f32,
     pub(crate) widget_drop_animation: Option<WidgetDropAnimation>,
+    pub(crate) resource_editor_open: bool,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
     pub(crate) plugins: Vec<InstalledPlugin>,
     plugin_inventory_rx: Option<mpsc::Receiver<Vec<InstalledPlugin>>>,
@@ -294,6 +296,14 @@ impl SettingsApp {
         plugin_widgets: Vec<PluginWidget>,
         plugin_settings_pages: Vec<PluginSettingsPage>,
     ) -> Self {
+        crate::ui::widget::resource_usage::set_configs(
+            &config.resource_metrics,
+            &config.compact_resource_metrics,
+        );
+        crate::core::config::set_resource_widget_span(
+            config.resource_widget_columns,
+            config.resource_widget_rows,
+        );
         let switch_anim = SwitchAnimator::new(&[]);
         let detected_apps = config.smtc_known_apps.clone();
         Self {
@@ -342,6 +352,7 @@ impl SettingsApp {
             widget_hover_progress: 0.0,
             widget_drag_lift_progress: 0.0,
             widget_drop_animation: None,
+            resource_editor_open: false,
             plugin_widgets,
             plugins,
             plugin_inventory_rx: None,
@@ -653,6 +664,17 @@ impl SettingsApp {
     }
 
     fn handle_pressed_key(&mut self, key: &Key) {
+        if self.resource_editor_open {
+            if matches!(key, Key::Named(NamedKey::Escape)) {
+                if self.popup.take().is_some() {
+                    self.anim.set_with_speed(POPUP_OPACITY_KEY, 0.0, 0.3);
+                } else {
+                    self.resource_editor_open = false;
+                }
+                self.request_redraw();
+            }
+            return;
+        }
         if self.handle_number_input_key(key) {
             return;
         }
@@ -724,6 +746,9 @@ impl SettingsApp {
     }
 
     fn update_widget_hover(&mut self) -> bool {
+        if self.resource_editor_open {
+            return self.set_widget_hover_target(None);
+        }
         if self.widget_drag_active() {
             let hover_changed = self.set_widget_hover_target(None);
             let new_slot = self.widget_preview_slot_at_mouse();
@@ -812,6 +837,9 @@ impl SettingsApp {
     }
 
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        if self.resource_editor_open {
+            return;
+        }
         if self.popup.is_some() {
             self.popup = None;
             self.pending_plugin_setting = None;
@@ -835,6 +863,10 @@ impl SettingsApp {
 
     fn handle_left_mouse_pressed(&mut self) {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
+        if self.resource_editor_open {
+            self.handle_click();
+            return;
+        }
         if self.begin_scroll_drag(mouse_x, mouse_y) {
             self.request_redraw();
             return;
@@ -863,6 +895,9 @@ impl SettingsApp {
     }
 
     fn is_window_drag_region(&self, mouse_x: f32, mouse_y: f32) -> bool {
+        if self.resource_editor_open {
+            return false;
+        }
         let in_sidebar_title = mouse_x < SIDEBAR_W && mouse_y < SIDEBAR_TITLE_HEIGHT;
         let in_content_title = mouse_x >= SIDEBAR_W
             && mouse_y < SETTINGS_HEADER_H

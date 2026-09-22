@@ -420,6 +420,14 @@ impl App {
 
                     log::info!("Config changed, reloaded");
                     self.config = current_config;
+                    crate::ui::widget::resource_usage::set_configs(
+                        &self.config.resource_metrics,
+                        &self.config.compact_resource_metrics,
+                    );
+                    crate::core::config::set_resource_widget_span(
+                        self.config.resource_widget_columns,
+                        self.config.resource_widget_rows,
+                    );
                     if let Some(monitor) =
                         Self::get_target_monitor(window, self.config.monitor_index)
                     {

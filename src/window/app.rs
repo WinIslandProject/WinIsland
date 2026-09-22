@@ -113,6 +113,14 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         let config = load_config();
+        crate::ui::widget::resource_usage::set_configs(
+            &config.resource_metrics,
+            &config.compact_resource_metrics,
+        );
+        crate::core::config::set_resource_widget_span(
+            config.resource_widget_columns,
+            config.resource_widget_rows,
+        );
         let last_config_modified = std::fs::metadata(get_config_path())
             .and_then(|metadata| metadata.modified())
             .ok();

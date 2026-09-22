@@ -36,6 +36,14 @@ impl SettingsApp {
 
         let rebuilt_items = self.items_dirty;
         self.ensure_items_cache();
+        crate::ui::widget::resource_usage::set_configs(
+            &self.config.resource_metrics,
+            &self.config.compact_resource_metrics,
+        );
+        crate::core::config::set_resource_widget_span(
+            self.config.resource_widget_columns,
+            self.config.resource_widget_rows,
+        );
         let theme = self.theme();
         let win_w = self.win_w / scale;
         let win_h = self.win_h / scale;
@@ -143,8 +151,9 @@ impl SettingsApp {
                 self.draw_plugins_page(drawing_context, canvas, &theme, win_w, win_h);
             }
 
-            self.draw_popup(canvas, &theme);
             self.draw_widget_drag_overlay(canvas, win_w, win_h);
+            self.draw_resource_editor(canvas, &theme, win_w, win_h);
+            self.draw_popup(canvas, &theme);
             canvas.restore();
 
             // Draw a subtle rounded border around the window
