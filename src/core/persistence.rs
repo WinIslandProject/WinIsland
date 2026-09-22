@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::config::{
     AppConfig, MAX_HIDDEN_WIDTH, MIN_HIDDEN_WIDTH, WIDGET_GRID_SLOTS, ensure_settings_widget,
-    normalize_compact_widget_layout,
+    normalize_compact_widget_layout, normalize_resource_metrics, set_resource_widget_span,
 };
 
 static NEXT_CONFIG_WRITE_ID: AtomicU64 = AtomicU64::new(1);
@@ -99,6 +99,10 @@ pub fn load_config() -> AppConfig {
                 }
             }
         }
+        if !table.contains_key("compact_resource_metrics") {
+            config.compact_resource_metrics = config.resource_metrics.clone();
+            migrated = true;
+        }
     }
     config.compact_scale = config.compact_scale.clamp(0.5, 5.0);
     config.expanded_scale = config.expanded_scale.clamp(0.5, 5.0);
@@ -111,6 +115,13 @@ pub fn load_config() -> AppConfig {
     };
     config.expanded_width = config.expanded_width.clamp(200.0, 2000.0);
     config.expanded_height = config.expanded_height.clamp(100.0, 1000.0);
+    let resource_span =
+        set_resource_widget_span(config.resource_widget_columns, config.resource_widget_rows);
+    if (config.resource_widget_columns, config.resource_widget_rows) != resource_span {
+        config.resource_widget_columns = resource_span.0;
+        config.resource_widget_rows = resource_span.1;
+        migrated = true;
+    }
     if config.island_style == "mica" {
         config.island_style = "default".to_string();
         migrated = true;
@@ -134,6 +145,12 @@ pub fn load_config() -> AppConfig {
         migrated = true;
     }
     if normalize_compact_widget_layout(&mut config.compact_widget_layout) {
+        migrated = true;
+    }
+    if normalize_resource_metrics(&mut config.resource_metrics) {
+        migrated = true;
+    }
+    if normalize_resource_metrics(&mut config.compact_resource_metrics) {
         migrated = true;
     }
     let plugin_layout_len = config.plugin_widget_layout.len();

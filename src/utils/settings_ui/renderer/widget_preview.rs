@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use skia_safe::{
-    Canvas, Color, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
+    Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
 };
 
 use crate::core::config::{
@@ -24,8 +24,8 @@ use super::super::input::{
     WIDGET_LIBRARY_HEADER_H, WIDGET_PANEL_GAP, WidgetDropAnimation, WidgetDropTarget,
     WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetGridGeom, WidgetSource,
     compact_widget_grid_geom, compact_widget_library_items, compact_widget_preview_height,
-    widget_delete_button_center, widget_grid_geom, widget_library_items, widget_source_rect,
-    widget_source_span,
+    widget_delete_button_center, widget_edit_button_center, widget_grid_geom, widget_library_items,
+    widget_source_rect, widget_source_span,
 };
 use super::super::items::{CONTENT_PADDING, GROUP_INNER_PAD};
 
@@ -198,6 +198,9 @@ struct PreviewBackgroundKey {
 
 thread_local! {
     static PREVIEW_BACKGROUNDS: RefCell<VecDeque<(PreviewBackgroundKey, Image)>> = const { RefCell::new(VecDeque::new()) };
+    static PENCIL_ICON: Option<Image> = Image::from_encoded(Data::new_copy(include_bytes!(
+        "../../../../resources/in_app/settings/pencil.png"
+    )));
 }
 
 fn draw_island_background(
@@ -382,6 +385,32 @@ fn draw_compact_delete_button(canvas: &Canvas, x: f32, y: f32, scale: f32) {
     let stroke_width = (0.9 * scale).max(1.0);
     let arm = (1.35 * scale).max(1.5);
     draw_delete_button_with_metrics(canvas, x, y, radius, stroke_width, arm);
+}
+
+fn draw_edit_button(canvas: &Canvas, x: f32, y: f32, scale: f32, compact: bool) {
+    let radius = if compact {
+        (3.75 * scale).max(4.0)
+    } else {
+        (8.0 * scale).max(7.0)
+    };
+    canvas.draw_circle(
+        (x, y),
+        radius,
+        &settings_paint(Color::from_rgb(10, 132, 255)),
+    );
+    let size = radius * 1.18;
+    PENCIL_ICON.with(|image| {
+        let Some(image) = image else {
+            return;
+        };
+        canvas.draw_image_rect_with_sampling_options(
+            image,
+            None,
+            Rect::from_xywh(x - size / 2.0, y - size / 2.0, size, size),
+            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
+            &Paint::default(),
+        );
+    });
 }
 
 fn draw_delete_button_with_metrics(
@@ -687,6 +716,11 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
             draw_delete_button(canvas, button_x, button_y, geometry.cap_scale);
+            if kind == WidgetKind::ResourceUsage && hovered && !dragging {
+                let (edit_x, edit_y) =
+                    widget_edit_button_center(x, y, width, height, geometry.cap_scale);
+                draw_edit_button(canvas, edit_x, edit_y, geometry.cap_scale, false);
+            }
         }
     }
 
@@ -981,6 +1015,11 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
             draw_compact_delete_button(canvas, button_x, button_y, geometry.cap_scale);
+            if widget == CompactWidgetKind::ResourceUsage {
+                let (edit_x, edit_y) =
+                    widget_edit_button_center(x, y, width, height, geometry.cap_scale);
+                draw_edit_button(canvas, edit_x, edit_y, geometry.cap_scale, true);
+            }
         }
     }
 

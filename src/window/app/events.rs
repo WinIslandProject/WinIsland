@@ -264,6 +264,14 @@ impl App {
                             };
 
                         let main_target = renderer.main_target();
+                        crate::ui::widget::resource_usage::set_configs(
+                            &self.config.resource_metrics,
+                            &self.config.compact_resource_metrics,
+                        );
+                        crate::core::config::set_resource_widget_span(
+                            self.config.resource_widget_columns,
+                            self.config.resource_widget_rows,
+                        );
                         let host_backdrop = renderer.update_host_backdrop(
                             main_target,
                             HostBackdropParams {

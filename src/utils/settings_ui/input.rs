@@ -288,6 +288,19 @@ pub fn widget_delete_button_center(x: f32, y: f32, w: f32, h: f32, scale: f32) -
     (x + w - corner_inset, y + corner_inset)
 }
 
+pub fn widget_edit_button_center(x: f32, y: f32, w: f32, h: f32, scale: f32) -> (f32, f32) {
+    let corner_inset = widget_corner_radius(w, h, scale) * (1.0 - std::f32::consts::FRAC_1_SQRT_2);
+    (x + corner_inset, y + corner_inset)
+}
+
+pub fn widget_edit_button_hit(mouse: (f32, f32), rect: (f32, f32, f32, f32), scale: f32) -> bool {
+    let (mx, my) = mouse;
+    let (x, y, w, h) = rect;
+    let (cx, cy) = widget_edit_button_center(x, y, w, h, scale);
+    let radius = (7.0 * scale).max(6.0);
+    (mx - cx).powi(2) + (my - cy).powi(2) <= radius.powi(2)
+}
+
 pub fn widget_delete_button_hit(mouse: (f32, f32), rect: (f32, f32, f32, f32), scale: f32) -> bool {
     let (mx, my) = mouse;
     let (x, y, w, h) = rect;

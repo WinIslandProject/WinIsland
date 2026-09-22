@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU8, Ordering};
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const APP_AUTHOR: &str = "Eatgrapes";
 pub const APP_HOMEPAGE: &str = "https://github.com/WinIslandProject/WinIsland";
@@ -163,9 +164,10 @@ pub enum WidgetKind {
 }
 
 impl WidgetKind {
-    pub const fn span(self) -> (usize, usize) {
+    pub fn span(self) -> (usize, usize) {
         match self {
-            Self::Clock | Self::ResourceUsage => (2, 1),
+            Self::Clock => (2, 1),
+            Self::ResourceUsage => resource_widget_span(),
             Self::Calendar => (2, 2),
             Self::Settings => (1, 1),
         }
@@ -184,6 +186,114 @@ pub struct WidgetSlot {
 pub enum CompactWidgetKind {
     Time,
     ResourceUsage,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceMetricKind {
+    Cpu,
+    Ram,
+    Gpu,
+    Network,
+    Disk,
+}
+
+impl ResourceMetricKind {
+    pub const ALL: [Self; 5] = [Self::Cpu, Self::Ram, Self::Gpu, Self::Network, Self::Disk];
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Cpu => 0,
+            Self::Ram => 1,
+            Self::Gpu => 2,
+            Self::Network => 3,
+            Self::Disk => 4,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Ram => "RAM",
+            Self::Gpu => "GPU",
+            Self::Network => "NET",
+            Self::Disk => "DISK",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceMetricStyle {
+    #[default]
+    Bar,
+    Ring,
+}
+
+static RESOURCE_WIDGET_SPAN: AtomicU8 = AtomicU8::new((2 << 4) | 1);
+
+pub fn set_resource_widget_span(columns: usize, rows: usize) -> (usize, usize) {
+    let columns = columns.clamp(1, 3);
+    let rows = rows.clamp(1, 3).min(6 / columns);
+    RESOURCE_WIDGET_SPAN.store(((columns as u8) << 4) | rows as u8, Ordering::Relaxed);
+    (columns, rows)
+}
+
+pub fn resource_widget_span() -> (usize, usize) {
+    let encoded = RESOURCE_WIDGET_SPAN.load(Ordering::Relaxed);
+    ((encoded >> 4) as usize, (encoded & 0x0f) as usize)
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ResourceMetricConfig {
+    pub kind: ResourceMetricKind,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub style: ResourceMetricStyle,
+    pub color: u32,
+}
+
+pub fn default_resource_metrics() -> Vec<ResourceMetricConfig> {
+    [
+        (ResourceMetricKind::Cpu, 0x32bef6, true),
+        (ResourceMetricKind::Ram, 0xaf52de, true),
+        (ResourceMetricKind::Gpu, 0x30d158, false),
+        (ResourceMetricKind::Network, 0x0a84ff, false),
+        (ResourceMetricKind::Disk, 0xff9f0a, false),
+    ]
+    .into_iter()
+    .map(|(kind, color, enabled)| ResourceMetricConfig {
+        kind,
+        enabled,
+        style: ResourceMetricStyle::Bar,
+        color,
+    })
+    .collect()
+}
+
+pub fn normalize_resource_metrics(metrics: &mut Vec<ResourceMetricConfig>) -> bool {
+    let original = metrics.clone();
+    let defaults = default_resource_metrics();
+    let mut normalized = Vec::with_capacity(ResourceMetricKind::ALL.len());
+    for metric in metrics.drain(..) {
+        if !normalized
+            .iter()
+            .any(|entry: &ResourceMetricConfig| entry.kind == metric.kind)
+        {
+            normalized.push(ResourceMetricConfig {
+                color: metric.color & 0x00ff_ffff,
+                ..metric
+            });
+        }
+    }
+    for default in defaults {
+        if !normalized.iter().any(|entry| entry.kind == default.kind) {
+            normalized.push(default);
+        }
+    }
+    *metrics = normalized;
+    *metrics != original
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -376,6 +486,14 @@ pub struct AppConfig {
     pub plugin_widget_layout: Vec<PluginWidgetSlot>,
     #[serde(default)]
     pub compact_widget_layout: Vec<CompactWidgetSlot>,
+    #[serde(default = "default_resource_metrics")]
+    pub resource_metrics: Vec<ResourceMetricConfig>,
+    #[serde(default = "default_resource_metrics")]
+    pub compact_resource_metrics: Vec<ResourceMetricConfig>,
+    #[serde(default = "default_resource_widget_columns")]
+    pub resource_widget_columns: usize,
+    #[serde(default = "default_resource_widget_rows")]
+    pub resource_widget_rows: usize,
 }
 
 macro_rules! defaults {
@@ -385,6 +503,9 @@ macro_rules! defaults {
 }
 
 defaults! {
+    default_true: bool = true,
+    default_resource_widget_columns: usize = 2,
+    default_resource_widget_rows: usize = 1,
     default_expanded_scale: f32 = 1.0,
     default_replace_native_volume_flyout: bool = true,
     default_island_style: String = "default".to_string(),
@@ -834,6 +955,10 @@ impl Default for AppConfig {
             widget_layout: default_widget_layout(),
             plugin_widget_layout: Vec::new(),
             compact_widget_layout: Vec::new(),
+            resource_metrics: default_resource_metrics(),
+            compact_resource_metrics: default_resource_metrics(),
+            resource_widget_columns: default_resource_widget_columns(),
+            resource_widget_rows: default_resource_widget_rows(),
         }
     }
 }
