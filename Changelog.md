@@ -1,5 +1,18 @@
 # Changelog
 
+### v1.3.9
+- Separated inactivity and fullscreen auto-hide. Fullscreen hiding blocks manual reveal while volume and brightness adjustments can appear temporarily.
+- Added a compact-island horizontal swipe to hide or restore media and widgets without vertical movement; tapping still opens the expanded view. The compact background returns to black while content is hidden.
+- Added a short fading yellow outline only when the island hides for fullscreen.
+- Added a brightness overlay for supported built-in displays with drag adjustment, and refined compact volume spacing.
+- Fixed playback progress showing a nonzero fill at 0:00 and losing its rounded end at full progress.
+- Improved island and Settings placement across monitors with different DPI scales.
+- Improved touch input and made Settings scrolling follow the pointer without application inertia.
+- Converted fetched lyrics to Simplified Chinese when the UI is in Chinese, and added guidance for NetEase Cloud Music SMTC support.
+- Refined resource-widget rendering and progress animation.
+- Kept fullscreen volume adjustments in one stable temporary reveal instead of bouncing the island on every change.
+- Prevented rapid horizontal swipes in the expanded island from collapsing it.
+
 ### v1.3.8
 - Added configurable side spacing for compact lyrics
 - Added mouse dragging to the compact volume slider
