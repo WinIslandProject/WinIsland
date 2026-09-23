@@ -48,9 +48,13 @@ impl App {
                 .primary_monitor()
                 .or_else(|| window.current_monitor());
         }
+        use windows::Win32::Foundation::{LPARAM, RECT};
         use windows::Win32::Graphics::Gdi::{
-            DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW, EnumDisplayDevicesW,
+            DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW,
+            EnumDisplayDevicesW, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+            MONITORINFOEXW,
         };
+        use windows::core::BOOL;
         let mut win32_names: Vec<String> = Vec::new();
         // SAFETY: EnumDisplayDevicesW reads display device info. We provide a zeroed
         // DISPLAY_DEVICEW with correct cb size. idx increments safely. No mutable global state.
@@ -72,26 +76,56 @@ impl App {
                 }
             }
         }
-        let target_name = win32_names.get(monitor_index as usize);
-        let monitors: Vec<_> = window.available_monitors().collect();
-        if let Some(name) = target_name {
-            for mon in &monitors {
-                if let Some(mon_name) = mon.name()
-                    && (mon_name.contains(name.trim_start_matches("\\\\.\\"))
-                        || name.contains(&mon_name))
-                {
-                    return Some(mon.clone());
-                }
+        let target_name = win32_names.get(monitor_index as usize)?;
+        unsafe extern "system" fn collect_monitor(
+            monitor: HMONITOR,
+            _dc: HDC,
+            _rect: *mut RECT,
+            data: LPARAM,
+        ) -> BOOL {
+            // SAFETY: EnumDisplayMonitors invokes this synchronously while the Vec is alive.
+            let found = unsafe { &mut *(data.0 as *mut Vec<(String, RECT)>) };
+            let mut info = MONITORINFOEXW::default();
+            info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            // SAFETY: MONITORINFOEXW begins with MONITORINFO and cbSize includes the full struct.
+            if unsafe { GetMonitorInfoW(monitor, &mut info as *mut _ as *mut MONITORINFO) }
+                .as_bool()
+            {
+                found.push((
+                    String::from_utf16_lossy(&info.szDevice)
+                        .trim_end_matches('\0')
+                        .to_string(),
+                    info.monitorInfo.rcMonitor,
+                ));
             }
+            BOOL(1)
         }
-        let idx = monitor_index as usize;
-        if idx < monitors.len() {
-            monitors.get(idx).cloned()
-        } else {
-            window
-                .primary_monitor()
-                .or_else(|| window.current_monitor())
+        let mut native_monitors = Vec::<(String, RECT)>::new();
+        // SAFETY: The callback is synchronous and receives a valid pointer to native_monitors.
+        unsafe {
+            let _ = EnumDisplayMonitors(
+                None,
+                None,
+                Some(collect_monitor),
+                LPARAM((&mut native_monitors as *mut Vec<(String, RECT)>) as isize),
+            );
         }
+        let monitors: Vec<_> = window.available_monitors().collect();
+        if let Some((_, rect)) = native_monitors.iter().find(|(name, _)| name == target_name)
+            && let Some(mon) = monitors.iter().find(|mon| {
+                let pos = mon.position();
+                let size = mon.size();
+                pos.x == rect.left
+                    && pos.y == rect.top
+                    && size.width == (rect.right - rect.left) as u32
+                    && size.height == (rect.bottom - rect.top) as u32
+            })
+        {
+            return Some(mon.clone());
+        }
+        window
+            .primary_monitor()
+            .or_else(|| window.current_monitor())
     }
 
     pub(super) fn update_animation_frame_interval(
@@ -102,11 +136,12 @@ impl App {
             .refresh_rate_millihertz()
             .filter(|refresh_rate| *refresh_rate > 0)
             .unwrap_or(DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ);
-        let rate = if crate::utils::gpu::gpu_profile() == crate::utils::gpu::GpuProfile::Integrated
-        {
-            refresh_rate_millihertz.min(60_000)
-        } else {
+        self.display_frame_interval =
+            Duration::from_nanos(1_000_000_000_000u64 / u64::from(refresh_rate_millihertz));
+        let rate = if self.config.animation_fps == 0 {
             refresh_rate_millihertz
+        } else {
+            refresh_rate_millihertz.min(self.config.animation_fps.saturating_mul(1_000))
         };
         self.animation_frame_interval =
             Duration::from_nanos(1_000_000_000_000u64 / u64::from(rate));
@@ -140,6 +175,7 @@ impl App {
         mon_pos: PhysicalPosition<i32>,
         mon_size: PhysicalSize<u32>,
     ) -> (i32, i32) {
+        let window_size = self.required_window_size();
         let dock_position = self.automatic_dock_position(mon_pos, mon_size);
         let (collapsed_center_x, collapsed_center_y) =
             self.collapsed_island_center(mon_pos, mon_size);
@@ -152,15 +188,15 @@ impl App {
         } else if dock_position.is_right() {
             (
                 collapsed_center_x + base_half_w,
-                self.geom.os_w as f64 - TOP_OFFSET as f64,
+                window_size.width as f64 - TOP_OFFSET as f64,
             )
         } else {
-            (collapsed_center_x, self.geom.os_w as f64 / 2.0)
+            (collapsed_center_x, window_size.width as f64 / 2.0)
         };
         let (anchor_y, local_anchor_y) = if dock_position.is_bottom() {
             (
                 collapsed_center_y + base_half_h,
-                self.geom.os_h as f64 - TOP_OFFSET as f64,
+                window_size.height as f64 - TOP_OFFSET as f64,
             )
         } else {
             (collapsed_center_y - base_half_h, TOP_OFFSET as f64)
@@ -284,10 +320,18 @@ impl App {
 
     fn hidden_visible_height(&self) -> f64 {
         let edge_size = self.springs.h.value as f64;
-        if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
+        if self.config.hidden_width >= MAX_HIDDEN_WIDTH
+            && !(self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed)
+        {
             edge_size
         } else {
-            let configured = self.config.hidden_width as f64 * self.config.compact_scale as f64;
+            let hidden_width = if self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed
+            {
+                crate::core::config::MIN_HIDDEN_WIDTH
+            } else {
+                self.config.hidden_width
+            };
+            let configured = hidden_width as f64 * self.config.compact_scale as f64;
             if configured <= f64::EPSILON {
                 1.0_f64.min(edge_size)
             } else {
@@ -387,7 +431,8 @@ impl App {
         let base_height = self.config.base_height * scale;
         let has_secondary_lyric = !self.lyrics.current_secondary_text.is_empty()
             || (!self.lyrics.old_secondary_text.is_empty() && self.lyrics.transition < 1.0);
-        if !self.config.show_lyrics
+        if self.components_hidden
+            || !self.config.show_lyrics
             || !self.config.show_secondary_lyrics
             || !has_secondary_lyric
             || !matches!(

@@ -317,6 +317,10 @@ impl App {
             crate::core::persistence::save_config(&config);
         }
         let plugin_settings_pages = crate::plugin::manager::plugin_settings_pages();
+        let target_monitor = self
+            .window
+            .as_ref()
+            .and_then(|window| Self::get_target_monitor(window, self.config.monitor_index));
         let mut settings = crate::window::settings::SettingsApp::new(
             config,
             Vec::new(),
@@ -327,7 +331,7 @@ impl App {
             log::error!("Cannot open settings without the shared D3D12 renderer");
             return;
         };
-        settings.create_window(event_loop, renderer);
+        settings.create_window(event_loop, renderer, target_monitor);
         settings.set_plugin_inventory_receiver(self.plugin_mgr.installed_plugins_async());
         if let Some(catalog) = self.marketplace_catalog.clone() {
             settings.set_marketplace_catalog(catalog);
@@ -344,9 +348,10 @@ impl App {
                 renderer.remove_target(target);
             }
             drop(settings);
-            crate::utils::win32::trim_process_working_set();
-            self.last_working_set_trim = Instant::now();
-            self.settings_active_last_frame = false;
+            if !self.expanded {
+                crate::utils::win32::trim_process_working_set();
+                self.last_working_set_trim = Instant::now();
+            }
             log::info!("Settings window closed and resources released");
         }
     }
@@ -414,6 +419,7 @@ impl App {
                     let old_font = self.config.custom_font_path.clone();
                     let old_smtc_enabled = self.config.smtc_enabled;
                     let old_replace_native_volume_flyout = self.config.replace_native_volume_flyout;
+                    let old_brightness_overlay_enabled = self.config.brightness_overlay_enabled;
                     let old_position_x_offset = self.config.position_x_offset;
                     let old_position_y_offset = self.config.position_y_offset;
                     let old_monitor_index = self.config.monitor_index;
@@ -445,6 +451,10 @@ impl App {
                             .set_native_volume_flyout_replacement_enabled(
                                 self.config.replace_native_volume_flyout,
                             );
+                    }
+                    if old_brightness_overlay_enabled != self.config.brightness_overlay_enabled {
+                        self.compact_overlay
+                            .set_brightness_overlay_enabled(self.config.brightness_overlay_enabled);
                     }
                     if old_smtc_enabled != self.config.smtc_enabled {
                         self.smtc.set_enabled(self.config.smtc_enabled);
@@ -499,6 +509,9 @@ impl App {
                         && let Some(monitor) =
                             Self::get_target_monitor(window, self.config.monitor_index)
                     {
+                        if let Some(settings) = self.settings.as_mut() {
+                            settings.set_target_monitor(monitor.clone());
+                        }
                         let mon_size = monitor.size();
                         let mon_pos = monitor.position();
                         self.update_animation_frame_interval(&monitor);
@@ -508,6 +521,7 @@ impl App {
                             let (position_x, position_y) =
                                 self.compute_window_position(mon_pos, mon_size);
                             self.set_configured_window_position(window, position_x, position_y);
+                            self.geom.position_restore_after = None;
                         }
                     }
                 }
@@ -519,6 +533,9 @@ impl App {
         }
         self.last_monitor_check = now;
         if let Some(monitor) = Self::get_target_monitor(window, self.config.monitor_index) {
+            if let Some(settings) = self.settings.as_mut() {
+                settings.set_target_monitor(monitor.clone());
+            }
             let mon_size = monitor.size();
             let mon_pos = monitor.position();
             self.update_animation_frame_interval(&monitor);

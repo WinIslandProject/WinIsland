@@ -14,7 +14,7 @@ pub(super) fn draw(canvas: &Canvas, rect: Rect, scale: f32, alpha: u8) {
         if enabled.is_empty() {
             return;
         }
-        with_resource_usage(|usage| {
+        with_resource_usage(config, |usage| {
             let gap = METRIC_GAP * scale;
             let metric_width = (rect.width() - gap * enabled.len().saturating_sub(1) as f32)
                 / enabled.len() as f32;

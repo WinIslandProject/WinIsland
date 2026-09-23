@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -42,6 +42,11 @@ impl App {
                     win.set_maximized(false);
                 }
                 WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                    let expected = self.required_window_size();
+                    if size != expected {
+                        let _ = win.request_inner_size(expected);
+                        return;
+                    }
                     self.geom.os_w = size.width;
                     self.geom.os_h = size.height;
                     if let Some(renderer) = self.renderer.as_mut() {
@@ -51,6 +56,20 @@ impl App {
                         }
                     }
                     win.request_redraw();
+                }
+                WindowEvent::ScaleFactorChanged { .. } => {
+                    let expected = self.required_window_size();
+                    let _ = win.request_inner_size(expected);
+                    if let Some(monitor) = Self::get_target_monitor(win, self.config.monitor_index)
+                    {
+                        let (x, y) =
+                            self.compute_window_position(monitor.position(), monitor.size());
+                        self.geom.configured_x = x;
+                        self.geom.configured_y = y;
+                        self.geom.win_x = x;
+                        self.geom.win_y = y;
+                        win.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+                    }
                 }
                 WindowEvent::Moved(position) => {
                     self.geom.win_x = position.x;
@@ -79,6 +98,13 @@ impl App {
                     self.install_zip_drop(&path);
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
+                    if self.touch_id.is_some()
+                        || self
+                            .last_touch_at
+                            .is_some_and(|time| time.elapsed() < Duration::from_millis(250))
+                    {
+                        return;
+                    }
                     let (px, py) = get_global_cursor_pos();
                     if button == MouseButton::Left {
                         self.handle_input(event_loop, state, px, py, InputSource::Mouse);
@@ -87,6 +113,7 @@ impl App {
                     }
                 }
                 WindowEvent::Touch(touch) => {
+                    self.last_touch_at = Some(Instant::now());
                     let (px, py) = (
                         (touch.location.x + self.geom.win_x as f64) as i32,
                         (touch.location.y + self.geom.win_y as f64) as i32,
@@ -95,6 +122,7 @@ impl App {
                         TouchPhase::Started if self.touch_id.is_none() => {
                             self.touch_pos = touch.location;
                             self.touch_id = Some(touch.id);
+                            win.request_redraw();
                             self.handle_input(
                                 event_loop,
                                 ElementState::Pressed,
@@ -105,11 +133,11 @@ impl App {
                         }
                         TouchPhase::Moved if self.touch_id == Some(touch.id) => {
                             self.touch_pos = touch.location;
+                            win.request_redraw();
                         }
-                        TouchPhase::Ended | TouchPhase::Cancelled
-                            if self.touch_id == Some(touch.id) =>
-                        {
+                        TouchPhase::Ended if self.touch_id == Some(touch.id) => {
                             self.touch_pos = touch.location;
+                            win.request_redraw();
                             self.handle_input(
                                 event_loop,
                                 ElementState::Released,
@@ -118,6 +146,16 @@ impl App {
                                 InputSource::Touch,
                             );
                             self.touch_id = None;
+                        }
+                        TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
+                            self.touch_id = None;
+                            self.is_dragging = false;
+                            self.drag_axis = None;
+                            self.dismissing_notification = false;
+                            self.seek.active = false;
+                            self.compact_overlay.finish_volume_drag();
+                            self.compact_overlay.finish_brightness_drag();
+                            win.request_redraw();
                         }
                         _ => {}
                     }
@@ -252,7 +290,28 @@ impl App {
                                 settings.set_plugin_widgets(widgets);
                             }
                         }
-                        let mini_content = self.ctx_mgr.current_mini();
+                        let compact_components_hidden = self.components_hidden && !self.expanded;
+                        let mini_content = if compact_components_hidden {
+                            None
+                        } else {
+                            self.ctx_mgr.current_mini()
+                        };
+                        let attention_alpha = if self.config.fullscreen_auto_hide
+                            && self.is_fullscreen_suppressed
+                            && self.hide.fullscreen
+                            && !self.hide.overlay_reveal
+                        {
+                            self.attention_pulse_started.map_or(0.0, |started| {
+                                let elapsed = started.elapsed().as_secs_f32();
+                                if elapsed >= 1.6 {
+                                    0.0
+                                } else {
+                                    (elapsed / 0.2).min(1.0) * ((1.6 - elapsed) / 0.5).min(1.0)
+                                }
+                            })
+                        } else {
+                            0.0
+                        };
                         let (current_secondary_lyric, old_secondary_lyric) =
                             if self.config.show_secondary_lyrics {
                                 (
@@ -264,21 +323,14 @@ impl App {
                             };
 
                         let main_target = renderer.main_target();
-                        crate::ui::widget::resource_usage::set_configs(
-                            &self.config.resource_metrics,
-                            &self.config.compact_resource_metrics,
-                        );
-                        crate::core::config::set_resource_widget_span(
-                            self.config.resource_widget_columns,
-                            self.config.resource_widget_rows,
-                        );
                         let host_backdrop = renderer.update_host_backdrop(
                             main_target,
                             HostBackdropParams {
-                                enabled: matches!(
-                                    self.config.island_style.as_str(),
-                                    "glass" | "dynamic"
-                                ),
+                                enabled: !compact_components_hidden
+                                    && matches!(
+                                        self.config.island_style.as_str(),
+                                        "glass" | "dynamic"
+                                    ),
                                 screen_x: self.geom.win_x as f32
                                     + island_layout.current_island_x as f32,
                                 screen_y: self.geom.win_y as f32
@@ -299,6 +351,7 @@ impl App {
                                             current_h: self.springs.h.value,
                                             current_r: self.springs.r.value,
                                             sigmas,
+                                            shadow_static: !self.springs.any_animating(),
                                             expansion_progress: progress,
                                             view_offset: self.springs.view.value,
                                             compact_scale: self.config.compact_scale,
@@ -315,8 +368,13 @@ impl App {
                                             base_h: compact_content_h,
                                         },
                                         media: crate::core::render::MediaParams {
-                                            media: media_info,
-                                            music_active,
+                                            media: if compact_components_hidden {
+                                                &default_media_info
+                                            } else {
+                                                media_info
+                                            },
+                                            music_active: music_active
+                                                && !compact_components_hidden,
                                             available_controls,
                                         },
                                         lyrics: crate::core::render::LyricsParams {
@@ -333,20 +391,35 @@ impl App {
                                             lyric_side_gap: self.config.lyrics_side_gap,
                                         },
                                         style: crate::core::render::StyleParams {
-                                            island_style: &self.config.island_style,
+                                            island_style: if compact_components_hidden {
+                                                "solid"
+                                            } else {
+                                                &self.config.island_style
+                                            },
                                             host_backdrop,
                                             use_blur: self.config.motion_blur,
                                             font_size: self.config.font_size,
                                             dt,
-                                            widget_layout: &self.config.widget_layout,
-                                            plugin_widget_layout: &self.config.plugin_widget_layout,
+                                            widget_layout: if compact_components_hidden {
+                                                &[]
+                                            } else {
+                                                &self.config.widget_layout
+                                            },
+                                            plugin_widget_layout: if compact_components_hidden {
+                                                &[]
+                                            } else {
+                                                &self.config.plugin_widget_layout
+                                            },
                                             plugin_widgets: &self.widget_mgr,
-                                            compact_widget_layout: &self
-                                                .config
-                                                .compact_widget_layout,
+                                            compact_widget_layout: if compact_components_hidden {
+                                                &[]
+                                            } else {
+                                                &self.config.compact_widget_layout
+                                            },
                                         },
                                         mini_content,
                                         compact_overlay: &self.compact_overlay,
+                                        attention_alpha,
                                     },
                                 )
                             });

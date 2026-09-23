@@ -79,6 +79,7 @@ struct ResourceUsageCache {
     sampled_at: Option<Instant>,
     previous_cpu: Option<CpuTimes>,
     previous_network: Option<NetworkSample>,
+    gpu_adapters: Option<Vec<IDXGIAdapter3>>,
     values: [Option<f32>; METRIC_COUNT],
     animated: [AnimatedUsage; METRIC_COUNT],
     texts: [String; METRIC_COUNT],
@@ -90,6 +91,7 @@ impl Default for ResourceUsageCache {
             sampled_at: None,
             previous_cpu: None,
             previous_network: None,
+            gpu_adapters: None,
             values: [None; METRIC_COUNT],
             animated: std::array::from_fn(|_| AnimatedUsage::default()),
             texts: std::array::from_fn(|_| String::new()),
@@ -98,7 +100,7 @@ impl Default for ResourceUsageCache {
 }
 
 impl ResourceUsageCache {
-    fn refresh_if_due(&mut self) {
+    fn refresh_if_due(&mut self, metrics: &[ResourceMetricConfig]) {
         if self
             .sampled_at
             .is_some_and(|sampled_at| sampled_at.elapsed() < SAMPLE_INTERVAL)
@@ -112,7 +114,14 @@ impl ResourceUsageCache {
             .unwrap_or_default();
         self.sampled_at = Some(now);
 
-        if let Some(current) = read_cpu_times() {
+        let enabled = |kind: ResourceMetricKind| {
+            metrics
+                .iter()
+                .any(|metric| metric.enabled && metric.kind == kind)
+        };
+        if enabled(ResourceMetricKind::Cpu)
+            && let Some(current) = read_cpu_times()
+        {
             if let Some(previous) = self.previous_cpu {
                 let total = current.total.saturating_sub(previous.total);
                 let idle = current.idle.saturating_sub(previous.idle);
@@ -123,11 +132,19 @@ impl ResourceUsageCache {
             }
             self.previous_cpu = Some(current);
         }
-        self.values[ResourceMetricKind::Ram.index()] = read_ram_usage();
-        self.values[ResourceMetricKind::Gpu.index()] = read_gpu_usage();
-        self.values[ResourceMetricKind::Disk.index()] = read_disk_usage();
+        if enabled(ResourceMetricKind::Ram) {
+            self.values[ResourceMetricKind::Ram.index()] = read_ram_usage();
+        }
+        if enabled(ResourceMetricKind::Gpu) {
+            self.values[ResourceMetricKind::Gpu.index()] = read_gpu_usage(&mut self.gpu_adapters);
+        }
+        if enabled(ResourceMetricKind::Disk) {
+            self.values[ResourceMetricKind::Disk.index()] = read_disk_usage();
+        }
 
-        if let Some(current) = read_network_sample() {
+        if enabled(ResourceMetricKind::Network)
+            && let Some(current) = read_network_sample()
+        {
             if let Some(previous) = self.previous_network
                 && elapsed > 0.0
             {
@@ -143,6 +160,9 @@ impl ResourceUsageCache {
         }
 
         for kind in ResourceMetricKind::ALL {
+            if !enabled(kind) {
+                continue;
+            }
             let index = kind.index();
             if kind != ResourceMetricKind::Network {
                 update_percent_text(&mut self.texts[index], self.values[index]);
@@ -212,10 +232,13 @@ pub(crate) fn compact_width() -> f32 {
     })
 }
 
-pub(crate) fn with_resource_usage<R>(draw: impl FnOnce(ResourceUsage<'_>) -> R) -> R {
+pub(crate) fn with_resource_usage<R>(
+    metrics: &[ResourceMetricConfig],
+    draw: impl FnOnce(ResourceUsage<'_>) -> R,
+) -> R {
     RESOURCE_USAGE.with(|cell| {
         let mut cache = cell.borrow_mut();
-        cache.refresh_if_due();
+        cache.refresh_if_due(metrics);
         let now = Instant::now();
         let values = std::array::from_fn(|index| cache.animated[index].value(now));
         draw(ResourceUsage {
@@ -229,11 +252,13 @@ pub(crate) fn next_refresh_delay() -> Duration {
     RESOURCE_USAGE.with(|cell| cell.borrow().next_refresh_delay())
 }
 
-pub(crate) fn is_animating() -> bool {
+pub(crate) fn is_animating(metrics: &[ResourceMetricConfig]) -> bool {
     RESOURCE_USAGE.with(|cell| {
         let cache = cell.borrow();
         let now = Instant::now();
-        cache.animated.iter().any(|value| value.is_animating(now))
+        metrics
+            .iter()
+            .any(|metric| metric.enabled && cache.animated[metric.kind.index()].is_animating(now))
     })
 }
 
@@ -294,17 +319,23 @@ fn read_ram_usage() -> Option<f32> {
     Some((status.dwMemoryLoad as f32 / 100.0).clamp(0.0, 1.0))
 }
 
-fn read_gpu_usage() -> Option<f32> {
-    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ok()?;
+fn read_gpu_usage(adapters: &mut Option<Vec<IDXGIAdapter3>>) -> Option<f32> {
+    if adapters.is_none() {
+        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ok()?;
+        let mut available = Vec::new();
+        for index in 0..16 {
+            let Ok(adapter) = (unsafe { factory.EnumAdapters1(index) }) else {
+                break;
+            };
+            if let Ok(adapter) = adapter.cast::<IDXGIAdapter3>() {
+                available.push(adapter);
+            }
+        }
+        *adapters = Some(available);
+    }
     let mut current_usage = 0u64;
     let mut total_budget = 0u64;
-    for index in 0..16 {
-        let Ok(adapter) = (unsafe { factory.EnumAdapters1(index) }) else {
-            break;
-        };
-        let Ok(adapter) = adapter.cast::<IDXGIAdapter3>() else {
-            continue;
-        };
+    for adapter in adapters.as_ref()? {
         let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
         if unsafe { adapter.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info) }
             .is_ok()

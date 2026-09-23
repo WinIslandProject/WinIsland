@@ -1,9 +1,11 @@
+mod brightness;
 mod notification;
 mod notification_event;
 mod volume;
 
 use skia_safe::{Canvas, Rect};
 
+use self::brightness::BrightnessMonitor;
 use self::notification::{NotificationIndicator, NotificationMonitor};
 use self::volume::{VolumeIndicator, VolumeMonitor};
 
@@ -22,12 +24,17 @@ pub enum CompactOverlayState {
 
 pub struct CompactOverlayUpdate {
     pub volume_changed: bool,
+    pub brightness_changed: bool,
     pub notification_received: bool,
 }
 
 pub struct CompactOverlay {
     volume_monitor: VolumeMonitor,
     volume_indicator: VolumeIndicator,
+    brightness_monitor: BrightnessMonitor,
+    brightness_indicator: VolumeIndicator,
+    brightness_overlay_enabled: bool,
+    last_level_is_brightness: bool,
     notification_monitor: NotificationMonitor,
     notification_indicator: NotificationIndicator,
 }
@@ -35,6 +42,7 @@ pub struct CompactOverlay {
 enum ActiveCompactOverlay<'a> {
     Notification(&'a NotificationIndicator),
     Volume(&'a VolumeIndicator),
+    Brightness(&'a VolumeIndicator),
 }
 
 impl ActiveCompactOverlay<'_> {
@@ -44,6 +52,7 @@ impl ActiveCompactOverlay<'_> {
                 NotificationIndicator::target_size(base_width, base_height, scale)
             }
             Self::Volume(_) => VolumeIndicator::target_size(base_width, base_height, scale),
+            Self::Brightness(_) => VolumeIndicator::target_size(base_width, base_height, scale),
         }
     }
 
@@ -51,15 +60,20 @@ impl ActiveCompactOverlay<'_> {
         match self {
             Self::Notification(indicator) => indicator.draw(canvas, rect, scale, alpha),
             Self::Volume(indicator) => indicator.draw(canvas, rect, scale, alpha),
+            Self::Brightness(indicator) => indicator.draw_brightness(canvas, rect, scale, alpha),
         }
     }
 }
 
 impl CompactOverlay {
-    pub fn new(replace_native_volume_flyout: bool) -> Self {
+    pub fn new(replace_native_volume_flyout: bool, brightness_overlay_enabled: bool) -> Self {
         Self {
             volume_monitor: VolumeMonitor::new(replace_native_volume_flyout),
             volume_indicator: VolumeIndicator::default(),
+            brightness_monitor: BrightnessMonitor::new(),
+            brightness_indicator: VolumeIndicator::new_brightness(),
+            brightness_overlay_enabled,
+            last_level_is_brightness: false,
             notification_monitor: NotificationMonitor::default(),
             notification_indicator: NotificationIndicator::default(),
         }
@@ -68,6 +82,10 @@ impl CompactOverlay {
     pub fn set_native_volume_flyout_replacement_enabled(&mut self, enabled: bool) {
         self.volume_monitor
             .set_native_flyout_replacement_enabled(enabled);
+    }
+
+    pub fn set_brightness_overlay_enabled(&mut self, enabled: bool) {
+        self.brightness_overlay_enabled = enabled;
     }
 
     pub fn update(
@@ -81,6 +99,27 @@ impl CompactOverlay {
         let volume_changed = self
             .volume_indicator
             .update(self.volume_monitor.snapshot(), volume_state);
+        let brightness = self.brightness_monitor.snapshot();
+        let brightness_changed = self.brightness_overlay_enabled
+            && brightness.available
+            && self.brightness_indicator.update_brightness(
+                brightness.level,
+                brightness.revision,
+                volume_state,
+            );
+        if !self.brightness_overlay_enabled {
+            self.brightness_indicator.update_brightness(
+                brightness.level,
+                brightness.revision,
+                CompactOverlayState::Discard,
+            );
+        }
+        if volume_changed {
+            self.last_level_is_brightness = false;
+        }
+        if brightness_changed {
+            self.last_level_is_brightness = true;
+        }
         let notification = self.notification_monitor.update(notification_display);
         let notification_received = if notification_display {
             self.notification_indicator
@@ -91,6 +130,7 @@ impl CompactOverlay {
         };
         CompactOverlayUpdate {
             volume_changed,
+            brightness_changed,
             notification_received,
         }
     }
@@ -100,7 +140,8 @@ impl CompactOverlay {
     }
 
     pub fn begin_volume_drag(&mut self, x: f32, y: f32, rect: Rect, scale: f32) -> bool {
-        if !self.volume_monitor.can_set_level()
+        if self.last_level_is_brightness
+            || !self.volume_monitor.can_set_level()
             || !self.volume_indicator.begin_drag(x, y, rect, scale)
         {
             return false;
@@ -121,6 +162,31 @@ impl CompactOverlay {
 
     pub fn is_volume_dragging(&self) -> bool {
         self.volume_indicator.is_dragging()
+    }
+
+    pub fn begin_brightness_drag(&mut self, x: f32, y: f32, rect: Rect, scale: f32) -> bool {
+        if !self.last_level_is_brightness
+            || !self.brightness_monitor.snapshot().available
+            || !self.brightness_indicator.begin_drag(x, y, rect, scale)
+        {
+            return false;
+        }
+        self.update_brightness_drag(x, rect, scale);
+        true
+    }
+
+    pub fn update_brightness_drag(&mut self, x: f32, rect: Rect, scale: f32) {
+        if let Some(level) = self.brightness_indicator.drag_to(x, rect, scale) {
+            self.brightness_monitor.set_level(level);
+        }
+    }
+
+    pub fn finish_brightness_drag(&mut self) -> bool {
+        self.brightness_indicator.finish_drag()
+    }
+
+    pub fn is_brightness_dragging(&self) -> bool {
+        self.brightness_indicator.is_dragging()
     }
 
     pub fn is_notification_visible(&self) -> bool {
@@ -171,8 +237,12 @@ impl CompactOverlay {
     }
 
     fn active(&self) -> Option<ActiveCompactOverlay<'_>> {
-        if self.volume_indicator.is_visible() {
+        if self.last_level_is_brightness && self.brightness_indicator.is_visible() {
+            Some(ActiveCompactOverlay::Brightness(&self.brightness_indicator))
+        } else if self.volume_indicator.is_visible() {
             Some(ActiveCompactOverlay::Volume(&self.volume_indicator))
+        } else if self.brightness_indicator.is_visible() {
+            Some(ActiveCompactOverlay::Brightness(&self.brightness_indicator))
         } else if self.notification_indicator.is_visible() {
             Some(ActiveCompactOverlay::Notification(
                 &self.notification_indicator,

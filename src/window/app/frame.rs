@@ -5,7 +5,7 @@ use winit::dpi::PhysicalPosition;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::Window;
 
-use crate::core::config::MIN_HIDDEN_WIDTH;
+use crate::core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
 use crate::ui::compact::CompactOverlayState;
 use crate::ui::expanded::music_view::{
     get_progress_bar_rect, set_progress_dragging, set_progress_hover,
@@ -15,18 +15,25 @@ use crate::utils::mouse::{
     is_left_button_pressed, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
 
-use super::{App, RIGHT_DRAG_THRESHOLD};
+use super::{App, DragAxis, RIGHT_DRAG_THRESHOLD};
 
-const INTERACTIVE_FRAME_INTERVAL: Duration = Duration::from_millis(16);
-const PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
+const INTERACTIVE_FRAME_INTERVAL: Duration = Duration::from_millis(20);
+const PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const IDLE_FRAME_INTERVAL: Duration = Duration::from_millis(50);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_millis(100);
-const WORKING_SET_TRIM_INTERVAL: Duration = Duration::from_secs(10);
+const WORKING_SET_TRIM_INTERVAL: Duration = Duration::from_secs(20);
 const RENDERER_RECOVERY_INTERVAL: Duration = Duration::from_secs(1);
 const LYRIC_TRANSITION_STEP: f32 = 0.05;
 const LYRIC_TRANSITION_LEAD_MS: u64 = (1000.0 / (60.0 * LYRIC_TRANSITION_STEP as f64)) as u64;
 
 impl App {
+    fn input_pressed(&self) -> bool {
+        self.touch_id.is_some()
+            || (self
+                .last_touch_at
+                .is_none_or(|time| time.elapsed() >= Duration::from_millis(250))
+                && is_left_button_pressed())
+    }
     pub(super) fn on_about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let window = match self.window.clone() {
             Some(w) => w,
@@ -84,6 +91,7 @@ impl App {
 
         if !self.visible {
             self.compact_overlay.finish_volume_drag();
+            self.compact_overlay.finish_brightness_drag();
             self.audio.set_gate_override(false);
             self.next_frame_deadline = now + HIDDEN_FRAME_INTERVAL;
             event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
@@ -102,7 +110,7 @@ impl App {
         let (music_active, media_is_playing) = self.poll_media_info(&window);
 
         if now.duration_since(self.last_fullscreen_check) >= Duration::from_millis(100) {
-            self.update_fullscreen_suppression(&window, now, media_is_playing);
+            self.update_fullscreen_suppression(&window, now);
         }
 
         let rel_x = px - self.geom.win_x;
@@ -134,18 +142,22 @@ impl App {
                         layout.hidden_reveal_h,
                     )));
         let cursor_interaction_suppressed = self.is_cursor_suppressed && self.touch_id.is_none();
-        let interaction_suppressed =
-            cursor_interaction_suppressed || (self.is_fullscreen_suppressed && self.is_hidden());
+        let interaction_suppressed = cursor_interaction_suppressed
+            || (self.config.fullscreen_auto_hide
+                && self.is_fullscreen_suppressed
+                && !self.hide.overlay_reveal);
         let is_hovering_visible = !interaction_suppressed && is_hovering_island;
         let is_on_hidden_reveal = !interaction_suppressed
             && is_over_hidden_reveal
             && self.config.hidden_width <= MIN_HIDDEN_WIDTH
             && self.springs.hide.value >= 0.999;
 
-        let passive_reveal_active = self.is_fullscreen_suppressed && is_over_hidden_reveal;
+        let passive_reveal_active = self.is_fullscreen_suppressed
+            && !self.config.fullscreen_auto_hide
+            && is_over_hidden_reveal;
         if self.hidden_reveal_click.update(
             passive_reveal_active,
-            is_left_button_pressed(),
+            self.input_pressed(),
             (px as f32, py as f32),
             now,
             double_click_interval(),
@@ -161,7 +173,8 @@ impl App {
             let _ = window.set_cursor_hittest(
                 is_hovering_visible
                     || is_on_hidden_reveal
-                    || self.compact_overlay.is_volume_dragging(),
+                    || self.compact_overlay.is_volume_dragging()
+                    || self.compact_overlay.is_brightness_dragging(),
             );
         }
 
@@ -173,10 +186,18 @@ impl App {
         );
 
         if self.compact_overlay.is_volume_dragging() {
-            if (is_left_button_pressed() || self.touch_id.is_some()) && !interaction_suppressed {
+            if self.input_pressed() && !interaction_suppressed {
                 self.update_volume_drag_position(rel_x, &layout);
             } else {
                 self.compact_overlay.finish_volume_drag();
+            }
+            window.request_redraw();
+        }
+        if self.compact_overlay.is_brightness_dragging() {
+            if self.input_pressed() && !interaction_suppressed {
+                self.update_brightness_drag_position(rel_x, &layout);
+            } else {
+                self.compact_overlay.finish_brightness_drag();
             }
             window.request_redraw();
         }
@@ -353,12 +374,7 @@ impl App {
         window.request_redraw();
     }
 
-    fn update_fullscreen_suppression(
-        &mut self,
-        window: &Window,
-        now: Instant,
-        media_is_playing: bool,
-    ) {
+    fn update_fullscreen_suppression(&mut self, window: &Window, now: Instant) {
         self.last_fullscreen_check = now;
         let prev_fullscreen = self.is_fullscreen_suppressed;
         self.is_fullscreen_suppressed = is_foreground_fullscreen(
@@ -368,13 +384,12 @@ impl App {
             self.geom.monitor_size.1,
         );
         self.is_cursor_suppressed = is_cursor_hidden();
-        let should_hide_for_fullscreen = self.config.auto_hide
-            && self.is_fullscreen_suppressed
-            && !media_is_playing
-            && !self.hide.fullscreen_reveal_override;
+        let should_hide_for_fullscreen =
+            self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed;
         if should_hide_for_fullscreen != self.hide.fullscreen {
             if should_hide_for_fullscreen {
-                let hide_started = if self.is_hidden() {
+                self.hide.fullscreen = true;
+                let hide_started = if self.hide.origin.is_some() {
                     true
                 } else {
                     self.prepare_hide(window)
@@ -382,11 +397,16 @@ impl App {
                 if hide_started {
                     self.expanded = false;
                     self.widget_view = false;
-                    self.hide.fullscreen = true;
+                    self.hide.notification_reveal = false;
+                    self.hide.overlay_reveal = false;
+                    self.attention_pulse_started = Some(now);
+                } else {
+                    self.hide.fullscreen = false;
                 }
             } else {
                 let was_fullscreen_hidden = self.hide.fullscreen;
                 self.hide.fullscreen = false;
+                self.attention_pulse_started = None;
                 self.idle_timer = Instant::now();
                 if was_fullscreen_hidden && !self.is_hidden() {
                     self.springs.hide.velocity = -0.65;
@@ -395,9 +415,6 @@ impl App {
             window.request_redraw();
         }
         if self.is_fullscreen_suppressed != prev_fullscreen {
-            if !self.is_fullscreen_suppressed {
-                self.hide.fullscreen_reveal_override = false;
-            }
             log::info!(
                 "Fullscreen state: {}",
                 if self.is_fullscreen_suppressed {
@@ -437,7 +454,6 @@ impl App {
             self.audio.set_gate_override(false);
             if !self.last_media_title.is_empty() {
                 self.last_media_title.clear();
-                crate::utils::font::FontManager::global().clear_text_caches();
                 crate::ui::expanded::music_view::clear_cover_cache();
                 crate::utils::backdrop::clear_blurred_cover_cache();
             }
@@ -445,7 +461,6 @@ impl App {
         let track_changed = music_active && title != self.last_media_title;
         if track_changed {
             log::info!("Track changed: {title} - {artist} / {album}");
-            crate::utils::font::FontManager::global().clear_text_caches();
             self.last_media_title = title;
             crate::ui::expanded::music_view::trigger_cover_flip();
             window.request_redraw();
@@ -466,14 +481,15 @@ impl App {
     ) -> bool {
         let is_paused_idle = music_active && !media_is_playing;
         let overlay_present = !self.expanded && !self.is_hidden();
-        let volume_state = if overlay_present {
+        let fullscreen_hidden = self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed;
+        let volume_state = if overlay_present && (!fullscreen_hidden || self.hide.overlay_reveal) {
             CompactOverlayState::Present
-        } else if self.hide.auto && !self.hide.manual && !self.hide.fullscreen {
+        } else if fullscreen_hidden || (self.hide.auto && !self.hide.manual) {
             CompactOverlayState::Defer
         } else {
             CompactOverlayState::Discard
         };
-        let notification_state = if overlay_present {
+        let notification_state = if overlay_present && !fullscreen_hidden {
             CompactOverlayState::Present
         } else if !self.expanded && self.hide.has_hidden_reason() {
             CompactOverlayState::Defer
@@ -486,6 +502,7 @@ impl App {
             self.config.notification_display,
         );
         if compact_update.notification_received
+            && !fullscreen_hidden
             && self.hide.has_hidden_reason()
             && !self.hide.notification_reveal
         {
@@ -498,8 +515,14 @@ impl App {
                 self.config.notification_display,
             );
             log::info!("Island temporarily revealed for notification");
-        } else if compact_update.volume_changed && self.hide.auto && !self.hide.manual {
-            self.hide.auto = false;
+        } else if (compact_update.volume_changed || compact_update.brightness_changed)
+            && (fullscreen_hidden || (self.hide.auto && !self.hide.manual))
+        {
+            if fullscreen_hidden {
+                self.hide.overlay_reveal = true;
+            } else if self.hide.auto && !self.hide.manual {
+                self.hide.auto = false;
+            }
             self.idle_timer = Instant::now();
             self.springs.hide.velocity = -0.65;
             self.compact_overlay.update(
@@ -517,11 +540,34 @@ impl App {
             window.request_redraw();
         }
         let compact_overlay_visible = self.compact_overlay.is_visible();
-        let is_idle = !is_hovering_visible
+        if self.hide.overlay_reveal && !compact_overlay_visible {
+            self.hide.overlay_reveal = false;
+            if self.hide.has_hidden_reason() {
+                self.prepare_hide(window);
+            }
+            window.request_redraw();
+        }
+        let has_widgets = !self.components_hidden
+            && (self.config.widget_layout.iter().any(|entry| {
+                entry
+                    .widget
+                    .is_some_and(|widget| widget != WidgetKind::Settings)
+            }) || !self.config.plugin_widget_layout.is_empty()
+                || self
+                    .config
+                    .compact_widget_layout
+                    .iter()
+                    .any(|entry| entry.widget.is_some())
+                || matches!(
+                    self.ctx_mgr.current_mini(),
+                    Some(crate::core::context::MiniContent::Plugin(_))
+                ));
+        let is_idle = (!is_hovering_visible || self.components_hidden)
             && !self.expanded
             && !self.is_dragging
             && !compact_overlay_visible
-            && (!music_active || is_paused_idle);
+            && (self.components_hidden || !music_active || is_paused_idle)
+            && !has_widgets;
         if !self.config.auto_hide {
             let was_auto_hidden = self.hide.auto;
             self.hide.auto = false;
@@ -529,7 +575,8 @@ impl App {
             if was_auto_hidden && !self.is_hidden() {
                 self.springs.hide.velocity = -0.65;
             }
-        } else if media_is_playing && self.hide.auto && !self.hide.manual {
+        } else if media_is_playing && !self.components_hidden && self.hide.auto && !self.hide.manual
+        {
             self.hide.auto = false;
             self.idle_timer = Instant::now();
             if !self.is_hidden() {
@@ -553,7 +600,7 @@ impl App {
     }
 
     fn update_seeking_input(&mut self, window: &Window, rel_x: i32) {
-        if self.seek.active && (is_left_button_pressed() || self.touch_id.is_some()) {
+        if self.seek.active && self.input_pressed() {
             let page_shift = self.springs.view.value * self.springs.w.value;
             let click_x = rel_x as f32 - page_shift;
             self.seek.preview_at(click_x);
@@ -609,10 +656,22 @@ impl App {
             if upward_distance.abs() > 3 || horizontal_distance.abs() > 3 {
                 self.drag_has_moved = true;
             }
-            if upward_distance > 3 && self.hide.origin.is_none() {
+            if self.drag_axis.is_none() {
+                let horizontal = horizontal_distance.abs();
+                let vertical = upward_distance.abs();
+                if horizontal >= 10 && horizontal as f32 > vertical as f32 * 1.4 {
+                    self.drag_axis = Some(DragAxis::Horizontal);
+                } else if vertical >= 24 && vertical as f32 > horizontal as f32 * 1.4 {
+                    self.drag_axis = Some(DragAxis::Vertical);
+                }
+            }
+            if self.drag_axis == Some(DragAxis::Vertical)
+                && upward_distance > 3
+                && self.hide.origin.is_none()
+            {
                 self.prepare_hide(window);
             }
-            if self.hide.origin.is_some() {
+            if self.drag_axis == Some(DragAxis::Vertical) && self.hide.origin.is_some() {
                 let drag_layout = self.compute_island_layout();
                 if drag_layout.hide_distance > 0.0 {
                     let mut new_val = self.drag_start_hide_val
@@ -645,7 +704,10 @@ impl App {
     }
 
     fn update_expand_collapse_click(&mut self, window: &Window, is_hovering_visible: bool) {
-        let pressing = is_left_button_pressed() || self.touch_id.is_some();
+        if self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed {
+            return;
+        }
+        let pressing = self.input_pressed();
         if self.expanded && !is_hovering_visible && pressing {
             self.expanded = false;
             self.widget_view = false;
@@ -721,6 +783,8 @@ impl App {
         dt: f32,
     ) {
         let was_animating = self.springs.any_animating();
+        let compact_components_visible = self.expanded || !self.components_hidden;
+        let music_active = music_active && compact_components_visible;
         let lyric_target_w = self.compute_lyric_target_width(window, music_active, is_paused, dt);
         let preserve_compact_widget_width = !self.is_width_hiding()
             || !crate::ui::widget::compact::hide_fade_complete(self.springs.hide.value);
@@ -729,10 +793,14 @@ impl App {
             && preserve_compact_widget_width
         {
             let scale = self.config.compact_scale.max(f32::EPSILON);
-            let has_mini_content = self.ctx_mgr.current_mini().is_some();
+            let has_mini_content = !self.components_hidden && self.ctx_mgr.current_mini().is_some();
             let center_content_width = has_mini_content.then_some(lyric_target_w / scale);
             crate::ui::widget::compact::target_width(
-                &self.config.compact_widget_layout,
+                if self.components_hidden {
+                    &[]
+                } else {
+                    &self.config.compact_widget_layout
+                },
                 self.config.base_width,
                 center_content_width,
             ) * scale
@@ -798,7 +866,11 @@ impl App {
     }
 
     fn update_compact_widget_refresh(&mut self, window: &Window, now: Instant) {
-        if self.expanded || self.is_hidden() || self.compact_overlay.is_visible() {
+        if self.expanded
+            || self.components_hidden
+            || self.is_hidden()
+            || self.compact_overlay.is_visible()
+        {
             self.compact_widget_refresh_at = now;
             return;
         }
@@ -833,56 +905,77 @@ impl App {
         pacing: FramePacing,
     ) {
         let should_periodic_redraw = self.periodic_effect_redraw_due();
-        let animation_active = self.springs.any_animating()
-            || self.resource_usage_animating()
+        let transition_active = self.springs.any_animating()
+            || self
+                .attention_pulse_started
+                .is_some_and(|started| now.duration_since(started) < Duration::from_millis(1600))
             || self.compact_overlay.is_volume_dragging()
+            || self.compact_overlay.is_brightness_dragging()
             || self.lyrics.transition < 1.0
             || self.is_dragging
             || self.seek.active
             || self.is_right_dragging;
-        let playback_active = !self.is_hidden() && pacing.media_is_playing;
-        let interactive_active = pacing.is_hovering_visible
+        let resource_usage_active = self.resource_usage_animating();
+        let compact_components_visible = self.expanded || !self.components_hidden;
+        let playback_active = !self.is_hidden()
+            && compact_components_visible
+            && pacing.media_is_playing
+            && (!self.expanded || self.springs.view.value < 1.0);
+        let dynamic_effect_active = !self.is_hidden()
+            && compact_components_visible
+            && self.config.island_style == "dynamic"
+            && self.current_media_info().thumbnail.is_some();
+        let interactive_active = (pacing.is_hovering_visible
+            && (!self.expanded || (self.music_page_available && self.springs.view.value < 1.0)))
             || pacing.compact_overlay_visible
             || pacing.passive_reveal_active
             || self.right_press_cursor.is_some();
-        let settings_active = self
-            .settings
-            .as_ref()
-            .is_some_and(|settings| !settings.is_idle());
-        let settings_became_idle = self.settings_active_last_frame && !settings_active;
-        let settings_requested_trim = self
-            .settings
-            .as_mut()
-            .is_some_and(crate::window::settings::SettingsApp::take_idle_memory_trim_request);
-        self.settings_active_last_frame = settings_active;
-
-        if !animation_active
+        if !transition_active
             && !interactive_active
-            && (settings_became_idle
-                || settings_requested_trim
-                || (!settings_active
-                    && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL))
+            && !resource_usage_active
+            && (!self.expanded || (!playback_active && !dynamic_effect_active))
+            && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL
         {
             crate::utils::win32::trim_process_working_set();
             self.last_working_set_trim = now;
         }
-
-        let frame_interval = if animation_active {
+        let frame_interval = if transition_active {
             self.animation_frame_interval
-        } else if playback_active {
-            self.animation_frame_interval.max(PLAYBACK_FRAME_INTERVAL)
-        } else if interactive_active {
-            INTERACTIVE_FRAME_INTERVAL
+        } else if self.expanded
+            && (playback_active
+                || dynamic_effect_active
+                || interactive_active
+                || resource_usage_active)
+        {
+            self.aligned_frame_interval(Duration::from_secs_f64(
+                1.0 / f64::from(self.config.expanded_idle_fps),
+            ))
+        } else if playback_active || dynamic_effect_active {
+            self.aligned_frame_interval(PLAYBACK_FRAME_INTERVAL)
+        } else if interactive_active || resource_usage_active {
+            self.aligned_frame_interval(INTERACTIVE_FRAME_INTERVAL)
         } else if self.is_hidden() {
             HIDDEN_FRAME_INTERVAL
         } else {
             IDLE_FRAME_INTERVAL
         };
         self.next_frame_deadline = now + frame_interval;
-        if animation_active || playback_active || interactive_active || should_periodic_redraw {
+        if transition_active
+            || resource_usage_active
+            || playback_active
+            || dynamic_effect_active
+            || interactive_active
+            || should_periodic_redraw
+        {
             window.request_redraw();
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
+    }
+
+    fn aligned_frame_interval(&self, desired: Duration) -> Duration {
+        let refresh = self.display_frame_interval.as_nanos().max(1);
+        let refreshes = ((desired.as_nanos() + refresh / 2) / refresh).max(1) as u32;
+        self.display_frame_interval.saturating_mul(refreshes)
     }
 
     fn resource_usage_animating(&self) -> bool {
@@ -904,7 +997,14 @@ impl App {
                 .iter()
                 .any(|slot| slot.widget == Some(CompactWidgetKind::ResourceUsage))
         };
-        visible && crate::ui::widget::resource_usage::is_animating()
+        visible
+            && if self.expanded {
+                crate::ui::widget::resource_usage::is_animating(&self.config.resource_metrics)
+            } else {
+                crate::ui::widget::resource_usage::is_animating(
+                    &self.config.compact_resource_metrics,
+                )
+            }
     }
 }
 

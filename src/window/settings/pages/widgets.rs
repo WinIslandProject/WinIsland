@@ -113,7 +113,6 @@ impl SettingsApp {
             self.widget_drop_animation = None;
             self.scroll_y = 0.0;
             self.target_scroll_y = 0.0;
-            self.scroll_vel_y = 0.0;
             self.mark_items_dirty();
             self.request_redraw();
         }

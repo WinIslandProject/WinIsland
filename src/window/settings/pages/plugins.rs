@@ -385,7 +385,6 @@ impl SettingsApp {
         self.anim.set_with_speed(PLUGIN_DETAIL_KEY, 0.0, 0.24);
         self.scroll_y = 0.0;
         self.target_scroll_y = 0.0;
-        self.scroll_vel_y = 0.0;
         self.mark_items_dirty();
         if tab == PluginPageTab::Marketplace
             && !matches!(self.marketplace_state, MarketplaceViewState::Loading)

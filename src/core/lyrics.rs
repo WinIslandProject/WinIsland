@@ -7,6 +7,8 @@ use std::sync::Arc;
 use encoding_rs::GBK;
 use fuzzengine::{PreprocessingOptions, partial_ratio, partial_token_set_ratio};
 use lrc::Lyrics;
+use windows::Win32::Globalization::{LCMAP_SIMPLIFIED_CHINESE, LCMapStringEx};
+use windows::core::w;
 
 mod providers;
 
@@ -487,7 +489,8 @@ pub async fn fetch_lyrics(
         return tokio::task::spawn_blocking(move || fetch_lyrics_local(&title, &artist, &dir))
             .await
             .ok()
-            .flatten();
+            .flatten()
+            .map(simplify_lyrics_for_chinese_ui);
     }
 
     log::info!("Lyrics: fetching '{title}' - '{artist}' from source '{source}'");
@@ -498,7 +501,7 @@ pub async fn fetch_lyrics(
             lyrics.len()
         );
         log::logger().flush();
-        return Some(lyrics);
+        return Some(simplify_lyrics_for_chinese_ui(lyrics));
     }
     log::warn!(
         "Lyrics: source '{source}' returned no lyrics for '{title}' - '{artist}', starting fallback"
@@ -513,10 +516,62 @@ pub async fn fetch_lyrics(
                 lyrics.len()
             );
             log::logger().flush();
-            return Some(lyrics);
+            return Some(simplify_lyrics_for_chinese_ui(lyrics));
         }
     }
     None
+}
+
+fn simplify_lyrics_for_chinese_ui(mut lyrics: Arc<Vec<LyricLine>>) -> Arc<Vec<LyricLine>> {
+    if crate::core::i18n::current_lang() != "zh_cn" {
+        return lyrics;
+    }
+    for line in Arc::make_mut(&mut lyrics) {
+        let simplified = simplify_chinese(&line.text);
+        // A rare one-to-many mapping cannot preserve per-word timing boundaries.
+        line.replace_text_preserving_timings(simplified);
+        if let Some(secondary) = line.secondary_text.as_mut() {
+            *secondary = simplify_chinese(secondary);
+        }
+    }
+    lyrics
+}
+
+fn simplify_chinese(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let source: Vec<u16> = text.encode_utf16().collect();
+    // SAFETY: Both calls use valid UTF-16 slices; the first obtains the exact output length.
+    unsafe {
+        let len = LCMapStringEx(
+            w!("zh-CN"),
+            LCMAP_SIMPLIFIED_CHINESE,
+            &source,
+            None,
+            None,
+            None,
+            windows::Win32::Foundation::LPARAM(0),
+        );
+        if len <= 0 {
+            return text.to_string();
+        }
+        let mut output = vec![0u16; len as usize];
+        let written = LCMapStringEx(
+            w!("zh-CN"),
+            LCMAP_SIMPLIFIED_CHINESE,
+            &source,
+            Some(&mut output),
+            None,
+            None,
+            windows::Win32::Foundation::LPARAM(0),
+        );
+        if written <= 0 {
+            text.to_string()
+        } else {
+            String::from_utf16_lossy(&output[..written as usize])
+        }
+    }
 }
 
 fn parse_lyrics(lrc: &str, tlrc: &str) -> Vec<LyricLine> {

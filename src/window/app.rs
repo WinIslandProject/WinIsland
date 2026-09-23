@@ -40,6 +40,12 @@ fn should_show_widget_view(music_page_available: bool) -> bool {
     !music_page_available
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DragAxis {
+    Horizontal,
+    Vertical,
+}
+
 struct PluginMediaSource {
     resource_id: u64,
     available_controls: u32,
@@ -57,6 +63,7 @@ pub struct App {
     compact_overlay: CompactOverlay,
     config: AppConfig,
     expanded: bool,
+    components_hidden: bool,
     widget_view: bool,
     music_page_available: bool,
     visible: bool,
@@ -74,6 +81,7 @@ pub struct App {
     drag_start_py: i32,
     drag_start_hide_val: f32,
     drag_has_moved: bool,
+    drag_axis: Option<DragAxis>,
     last_update_time: Instant,
     last_render_time: Instant,
     last_topmost_check: Instant,
@@ -82,20 +90,22 @@ pub struct App {
     last_config_check: Instant,
     last_monitor_check: Instant,
     last_working_set_trim: Instant,
-    settings_active_last_frame: bool,
     compact_widget_refresh_at: Instant,
     last_config_modified: Option<SystemTime>,
     next_frame_deadline: Instant,
     animation_frame_interval: Duration,
+    display_frame_interval: Duration,
     width_hiding_last_frame: bool,
     restoring_hide_width: bool,
     seek: SeekDrag,
     is_fullscreen_suppressed: bool,
+    attention_pulse_started: Option<Instant>,
     is_cursor_suppressed: bool,
     hidden_reveal_click: HiddenRevealClick,
     cover_click: DoubleClick,
     touch_id: Option<u64>,
     touch_pos: PhysicalPosition<f64>,
+    last_touch_at: Option<Instant>,
     ctx_mgr: ContextManager,
     widget_mgr: WidgetManager,
     plugin_mgr: PluginManager,
@@ -117,6 +127,16 @@ impl Default for App {
             &config.resource_metrics,
             &config.compact_resource_metrics,
         );
+        if config
+            .widget_layout
+            .iter()
+            .any(|slot| slot.widget == Some(crate::core::config::WidgetKind::ResourceUsage))
+        {
+            crate::ui::widget::resource_usage::with_resource_usage(
+                &config.resource_metrics,
+                |_| (),
+            );
+        }
         crate::core::config::set_resource_widget_span(
             config.resource_widget_columns,
             config.resource_widget_rows,
@@ -134,6 +154,7 @@ impl Default for App {
             tray: None,
             config: config.clone(),
             expanded: false,
+            components_hidden: false,
             widget_view: false,
             music_page_available: false,
             visible: true,
@@ -148,7 +169,10 @@ impl Default for App {
                 config.smtc_known_apps.clone(),
             ),
             audio: AudioProcessor::new(),
-            compact_overlay: CompactOverlay::new(config.replace_native_volume_flyout),
+            compact_overlay: CompactOverlay::new(
+                config.replace_native_volume_flyout,
+                config.brightness_overlay_enabled,
+            ),
             smtc_media_info: MediaInfo::default(),
             last_media_title: String::new(),
             lyrics: LyricState::default(),
@@ -161,6 +185,7 @@ impl Default for App {
             drag_start_py: 0,
             drag_start_hide_val: 0.0,
             drag_has_moved: false,
+            drag_axis: None,
             last_update_time: Instant::now(),
             last_render_time: Instant::now(),
             last_topmost_check: Instant::now(),
@@ -169,20 +194,22 @@ impl Default for App {
             last_config_check: Instant::now(),
             last_monitor_check: Instant::now(),
             last_working_set_trim: Instant::now(),
-            settings_active_last_frame: false,
             compact_widget_refresh_at: Instant::now(),
             last_config_modified,
             next_frame_deadline: Instant::now(),
             animation_frame_interval: DEFAULT_ANIMATION_FRAME_INTERVAL,
+            display_frame_interval: DEFAULT_ANIMATION_FRAME_INTERVAL,
             width_hiding_last_frame: false,
             restoring_hide_width: false,
             seek: SeekDrag::default(),
             is_fullscreen_suppressed: false,
+            attention_pulse_started: None,
             is_cursor_suppressed: false,
             hidden_reveal_click: HiddenRevealClick::default(),
             cover_click: DoubleClick::default(),
             touch_id: None,
             touch_pos: PhysicalPosition::new(0.0, 0.0),
+            last_touch_at: None,
             ctx_mgr: ContextManager::new(),
             widget_mgr: WidgetManager::new(),
             plugin_mgr: PluginManager::default(),
@@ -373,14 +400,14 @@ struct HideState {
     auto: bool,
     manual: bool,
     fullscreen: bool,
-    fullscreen_reveal_override: bool,
     notification_reveal: bool,
+    overlay_reveal: bool,
     origin: Option<(i32, i32)>,
 }
 
 impl HideState {
     fn is_hidden(&self) -> bool {
-        self.has_hidden_reason() && !self.notification_reveal
+        self.has_hidden_reason() && !self.notification_reveal && !self.overlay_reveal
     }
 
     fn has_hidden_reason(&self) -> bool {
@@ -555,13 +582,14 @@ impl App {
     }
 
     fn reveal_island(&mut self) {
+        if self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed {
+            return;
+        }
         self.hide.auto = false;
         self.hide.fullscreen = false;
         self.hide.manual = false;
         self.hide.notification_reveal = false;
-        if self.is_fullscreen_suppressed {
-            self.hide.fullscreen_reveal_override = true;
-        }
+        self.hide.overlay_reveal = false;
         self.springs.hide.velocity = -0.65;
         self.idle_timer = Instant::now();
     }

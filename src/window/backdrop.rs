@@ -1,4 +1,4 @@
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::sync::Arc;
 
 use windows::{
@@ -43,6 +43,18 @@ pub(crate) struct HostBackdrop {
     visual: SpriteVisual,
     _clip: CompositionGeometricClip,
     geometry: CompositionRoundedRectangleGeometry,
+    last_geometry: RefCell<Option<BackdropGeometry>>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct BackdropGeometry {
+    screen_x: i32,
+    screen_y: i32,
+    window_width: i32,
+    window_height: i32,
+    width: f32,
+    height: f32,
+    radius: f32,
 }
 
 pub(crate) struct HostBackdropParams {
@@ -114,6 +126,7 @@ impl HostBackdrop {
             visual,
             _clip: clip,
             geometry,
+            last_geometry: RefCell::new(None),
         })
     }
 
@@ -126,9 +139,22 @@ impl HostBackdrop {
 
         let window_width = params.width.ceil().max(1.0) as i32;
         let window_height = params.height.ceil().max(1.0) as i32;
-        let width = (params.width - HOST_BACKDROP_INSET * 2.0).max(0.0);
-        let height = (params.height - HOST_BACKDROP_INSET * 2.0).max(0.0);
-        let radius = (params.radius - HOST_BACKDROP_INSET).max(0.0);
+        let quantize = |value: f32| (value * 16.0).round() / 16.0;
+        let width = quantize((params.width - HOST_BACKDROP_INSET * 2.0).max(0.0));
+        let height = quantize((params.height - HOST_BACKDROP_INSET * 2.0).max(0.0));
+        let radius = quantize((params.radius - HOST_BACKDROP_INSET).max(0.0));
+        let geometry = BackdropGeometry {
+            screen_x: params.screen_x.floor() as i32,
+            screen_y: params.screen_y.floor() as i32,
+            window_width,
+            window_height,
+            width,
+            height,
+            radius,
+        };
+        if self.last_geometry.borrow().as_ref() == Some(&geometry) {
+            return Ok(());
+        }
         self.visual.SetOffset(Vector3 {
             X: HOST_BACKDROP_INSET,
             Y: HOST_BACKDROP_INSET,
@@ -146,24 +172,28 @@ impl HostBackdrop {
             X: radius,
             Y: radius,
         })?;
-        self.visual.SetIsVisible(true)?;
         unsafe {
             // SAFETY: Both HWND values belong to live windows on this thread. Placing the backdrop
             // immediately behind the owned foreground window preserves z-order without activation.
             SetWindowPos(
                 self.backdrop_hwnd,
                 Some(self.main_hwnd),
-                params.screen_x.floor() as i32,
-                params.screen_y.floor() as i32,
+                geometry.screen_x,
+                geometry.screen_y,
                 window_width,
                 window_height,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             )?;
         }
+        self.visual.SetIsVisible(true)?;
+        *self.last_geometry.borrow_mut() = Some(geometry);
         Ok(())
     }
 
     pub(crate) fn hide(&self) {
+        if self.last_geometry.borrow_mut().take().is_none() {
+            return;
+        }
         let _ = self.visual.SetIsVisible(false);
         unsafe {
             // SAFETY: The backdrop HWND remains owned by `_window`; this only hides it.

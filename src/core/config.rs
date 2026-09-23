@@ -408,9 +408,15 @@ pub struct AppConfig {
     pub expanded_width: f32,
     pub expanded_height: f32,
     pub motion_blur: bool,
+    #[serde(default = "default_animation_fps")]
+    pub animation_fps: u32,
+    #[serde(default = "default_expanded_idle_fps")]
+    pub expanded_idle_fps: u32,
     #[serde(default = "default_island_style")]
     pub island_style: String,
     pub smtc_enabled: bool,
+    #[serde(default)]
+    pub music_notice_acknowledged: bool,
     pub smtc_apps: Vec<String>,
     #[serde(default)]
     pub smtc_known_apps: Vec<String>,
@@ -428,6 +434,8 @@ pub struct AppConfig {
     pub auto_start: bool,
     #[serde(default)]
     pub auto_hide: bool,
+    #[serde(default)]
+    pub fullscreen_auto_hide: bool,
     #[serde(default = "default_auto_hide_delay")]
     pub auto_hide_delay: f32,
     #[serde(default = "default_hidden_width")]
@@ -480,6 +488,8 @@ pub struct AppConfig {
     pub notification_display: bool,
     #[serde(default = "default_replace_native_volume_flyout")]
     pub replace_native_volume_flyout: bool,
+    #[serde(default = "default_brightness_overlay_enabled")]
+    pub brightness_overlay_enabled: bool,
     #[serde(default = "default_widget_layout")]
     pub widget_layout: Vec<WidgetSlot>,
     #[serde(default)]
@@ -507,7 +517,10 @@ defaults! {
     default_resource_widget_columns: usize = 2,
     default_resource_widget_rows: usize = 1,
     default_expanded_scale: f32 = 1.0,
+    default_animation_fps: u32 = 90,
+    default_expanded_idle_fps: u32 = 60,
     default_replace_native_volume_flyout: bool = true,
+    default_brightness_overlay_enabled: bool = true,
     default_island_style: String = "default".to_string(),
     default_show_lyrics: bool = true,
     default_lyrics_mode: String = "online".to_string(),
@@ -917,8 +930,11 @@ impl Default for AppConfig {
             expanded_width: 360.0,
             expanded_height: 200.0,
             motion_blur: true,
+            animation_fps: default_animation_fps(),
+            expanded_idle_fps: default_expanded_idle_fps(),
             island_style: default_island_style(),
             smtc_enabled: true,
+            music_notice_acknowledged: false,
             smtc_apps: Vec::new(),
             smtc_known_apps: Vec::new(),
             show_lyrics: default_show_lyrics(),
@@ -928,6 +944,7 @@ impl Default for AppConfig {
             custom_font_path: None,
             auto_start: false,
             auto_hide: false,
+            fullscreen_auto_hide: false,
             auto_hide_delay: default_auto_hide_delay(),
             hidden_width: default_hidden_width(),
             check_for_updates: default_check_for_updates(),
@@ -952,6 +969,7 @@ impl Default for AppConfig {
             right_click_drag: false,
             notification_display: false,
             replace_native_volume_flyout: default_replace_native_volume_flyout(),
+            brightness_overlay_enabled: default_brightness_overlay_enabled(),
             widget_layout: default_widget_layout(),
             plugin_widget_layout: Vec::new(),
             compact_widget_layout: Vec::new(),

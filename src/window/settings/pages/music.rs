@@ -1,10 +1,17 @@
 use crate::core::config::LyricTransitionMode;
-use crate::core::i18n::tr;
+use crate::core::i18n::{current_lang, tr};
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
+use skia_safe::Contains;
 
 use super::super::{NumberInputHandler, PopupState, SettingsApp};
 use super::{PageInput, SettingsPage};
+
+pub(super) const MUSIC_NOTICE_HEIGHT: f32 = 150.0;
+
+pub(crate) fn music_notice_button_rect(width: f32, start_y: f32) -> skia_safe::Rect {
+    skia_safe::Rect::from_xywh(width - 24.0 - 14.0 - 86.0, start_y + 102.0, 86.0, 26.0)
+}
 
 #[derive(Clone)]
 enum MusicAction {
@@ -23,9 +30,18 @@ enum MusicAction {
 }
 
 impl SettingsApp {
+    pub(crate) fn show_music_notice(&self) -> bool {
+        current_lang() == "zh_cn" && !self.config.music_notice_acknowledged
+    }
+
     fn build_music_page(&self) -> SettingsPage<MusicAction> {
         let show_lyrics = self.config.show_lyrics;
         let mut page = SettingsPage::new();
+        if self.show_music_notice() {
+            page.push(SettingsItem::Custom {
+                height: MUSIC_NOTICE_HEIGHT,
+            });
+        }
         page.section(tr("section_playback"));
         page.group_start();
         page.row_switch(
@@ -167,6 +183,14 @@ impl SettingsApp {
     }
 
     pub(crate) fn handle_music_click(&mut self, input: PageInput) {
+        if self.show_music_notice() {
+            let button = music_notice_button_rect(input.width, input.start_y);
+            if button.contains(skia_safe::Point::new(input.x, input.y)) {
+                self.music_notice_pressed = true;
+                self.request_redraw();
+                return;
+            }
+        }
         let page = self.build_music_page();
         let result = input.hit_test(&page);
         let Some(action) = page.action(&result).cloned() else {

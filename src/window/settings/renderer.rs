@@ -2,7 +2,7 @@ use crate::core::i18n::tr;
 use crate::ui::expanded::widget_view::draw_plugin_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::FontManager;
+use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
 use crate::utils::settings_ui::{
     ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
@@ -18,6 +18,78 @@ use super::{
 };
 
 impl SettingsApp {
+    fn draw_music_notice(&self, canvas: &Canvas, width: f32) {
+        use super::pages::music::music_notice_button_rect;
+
+        let top = SETTINGS_HEADER_H;
+        let card = Rect::from_xywh(24.0, top + 8.0, width - 48.0, 134.0);
+        canvas.draw_round_rect(
+            card,
+            11.0,
+            11.0,
+            &settings_paint(Color::from_argb(42, 44, 132, 245)),
+        );
+        let mut outline = settings_paint(Color::from_rgb(42, 132, 238));
+        outline.set_style(skia_safe::paint::Style::Stroke);
+        outline.set_stroke_width(1.5);
+        canvas.draw_round_rect(card, 11.0, 11.0, &outline);
+        let text = settings_paint(if self.is_light {
+            Color::from_rgb(23, 65, 122)
+        } else {
+            Color::WHITE
+        });
+        let font = FontManager::global();
+        font.draw_text_cached(DrawTextCachedParams {
+            canvas,
+            text: "注意",
+            x: 38.0,
+            y: top + 32.0,
+            size: 14.0,
+            bold: true,
+            paint: &text,
+        });
+        for (line, y) in [
+            (
+                "若您使用网易云音乐，请在设置中开启 SMTC 以使用此功能。",
+                top + 56.0,
+            ),
+            ("由于网易云适配问题，可能会出现 BUG。", top + 77.0),
+            (
+                "若无法忍受，请安装 BetterNCM 及插件以体验完整 SMTC 功能。",
+                top + 98.0,
+            ),
+        ] {
+            font.draw_text_cached(DrawTextCachedParams {
+                canvas,
+                text: line,
+                x: 38.0,
+                y,
+                size: 12.0,
+                bold: false,
+                paint: &text,
+            });
+        }
+        let button = music_notice_button_rect(width, top);
+        let color = if self.music_notice_pressed {
+            Color::from_rgb(18, 77, 163)
+        } else if self.music_notice_button_hovered() {
+            Color::from_rgb(33, 113, 218)
+        } else {
+            Color::from_rgb(42, 132, 238)
+        };
+        canvas.draw_round_rect(button, 7.0, 7.0, &settings_paint(color));
+        font.draw_text_cached(DrawTextCachedParams {
+            canvas,
+            text: "我已知晓",
+            x: button.center_x()
+                - font.measure_text_cached("我已知晓", 12.0, skia_safe::FontStyle::bold()) / 2.0,
+            y: button.top + 18.0,
+            size: 12.0,
+            bold: true,
+            paint: &settings_paint(Color::WHITE),
+        });
+    }
+
     pub(crate) fn draw(&mut self, renderer: &mut Renderer) {
         let Some(win) = self.window.as_ref() else {
             return;
@@ -34,16 +106,7 @@ impl SettingsApp {
             return;
         }
 
-        let rebuilt_items = self.items_dirty;
         self.ensure_items_cache();
-        crate::ui::widget::resource_usage::set_configs(
-            &self.config.resource_metrics,
-            &self.config.compact_resource_metrics,
-        );
-        crate::core::config::set_resource_widget_span(
-            self.config.resource_widget_columns,
-            self.config.resource_widget_rows,
-        );
         let theme = self.theme();
         let win_w = self.win_w / scale;
         let win_h = self.win_h / scale;
@@ -135,6 +198,9 @@ impl SettingsApp {
                     self.logical_mouse_pos.1 + self.scroll_y,
                 )),
             });
+            if self.active_page == 1 && self.show_music_notice() {
+                self.draw_music_notice(canvas, content_w);
+            }
             canvas.restore();
 
             if let Some(scrollbar) = self.scrollbar_geometry() {
@@ -168,8 +234,6 @@ impl SettingsApp {
         });
         if let Err(error) = render_result {
             log::error!("Settings rendering failed: {error}");
-        } else if rebuilt_items {
-            self.memory_trim_pending = true;
         }
     }
 

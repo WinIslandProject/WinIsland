@@ -23,6 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCWSTR, Result};
 
 use crate::core::i18n::tr;
+use crate::icons::brightness::draw_brightness_icon;
 use crate::icons::volume::draw_volume_icon;
 use crate::ui::compact::{CompactOverlayState, CompactSize};
 use crate::utils::font::{DrawTextCachedParams, FontManager};
@@ -53,9 +54,9 @@ static VOLUME_KEY_HANDLER: Mutex<Option<VolumeKeyHandler>> = Mutex::new(None);
 
 #[derive(Clone, Copy)]
 pub(super) struct VolumeSnapshot {
-    level: f32,
-    muted: bool,
-    revision: u64,
+    pub(super) level: f32,
+    pub(super) muted: bool,
+    pub(super) revision: u64,
 }
 
 struct SharedVolumeState {
@@ -505,6 +506,7 @@ impl IMMNotificationClient_Impl for DefaultEndpointNotification_Impl {
 pub(super) struct VolumeIndicator {
     snapshot: VolumeSnapshot,
     label: String,
+    brightness: bool,
     seen_revision: u64,
     pending: bool,
     display_until: Option<Instant>,
@@ -521,6 +523,7 @@ impl Default for VolumeIndicator {
                 revision: 0,
             },
             label: tr("volume"),
+            brightness: false,
             seen_revision: 0,
             pending: false,
             display_until: None,
@@ -531,6 +534,30 @@ impl Default for VolumeIndicator {
 }
 
 impl VolumeIndicator {
+    pub(super) fn new_brightness() -> Self {
+        Self {
+            label: tr("brightness"),
+            brightness: true,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn update_brightness(
+        &mut self,
+        level: f32,
+        revision: u64,
+        state: CompactOverlayState,
+    ) -> bool {
+        self.update(
+            VolumeSnapshot {
+                level,
+                muted: false,
+                revision,
+            },
+            state,
+        )
+    }
+
     pub(super) fn update(&mut self, snapshot: VolumeSnapshot, state: CompactOverlayState) -> bool {
         let changed = snapshot.revision != self.seen_revision;
         if changed {
@@ -564,7 +591,11 @@ impl VolumeIndicator {
         }
 
         self.pending = false;
-        self.label = tr("volume");
+        self.label = tr(if self.brightness {
+            "brightness"
+        } else {
+            "volume"
+        });
         self.display_until = Some(Instant::now() + DISPLAY_DURATION);
         changed
     }
@@ -622,7 +653,7 @@ impl VolumeIndicator {
             12.0 * scale,
             FontStyle::normal(),
         );
-        let left = rect.left() + (37.0 + 26.0) * scale + label_width;
+        let left = rect.left() + (37.0 + 11.0) * scale + label_width;
         Rect::from_xywh(
             left,
             rect.center_y() - 2.0 * scale,
@@ -639,6 +670,14 @@ impl VolumeIndicator {
     }
 
     pub(super) fn draw(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
+        self.draw_level(canvas, rect, scale, alpha, false);
+    }
+
+    pub(super) fn draw_brightness(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
+        self.draw_level(canvas, rect, scale, alpha, true);
+    }
+
+    fn draw_level(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32, brightness: bool) {
         let alpha = (alpha * self.opacity() * 255.0).round().clamp(0.0, 255.0) as u8;
         if alpha == 0 {
             return;
@@ -652,14 +691,18 @@ impl VolumeIndicator {
             .preview
             .map_or(self.snapshot.muted, |(level, _)| level <= 0.0)
             || level <= VOLUME_CHANGE_THRESHOLD;
-        draw_volume_icon(
-            canvas,
-            icon_center,
-            icon_size,
-            alpha,
-            if muted { 0.0 } else { level },
-            Color::WHITE,
-        );
+        if brightness {
+            draw_brightness_icon(canvas, icon_center, icon_size, alpha, level);
+        } else {
+            draw_volume_icon(
+                canvas,
+                icon_center,
+                icon_size,
+                alpha,
+                if muted { 0.0 } else { level },
+                Color::WHITE,
+            );
+        }
 
         let label_size = 12.0 * scale;
         let label_x = rect.left() + 37.0 * scale;

@@ -11,6 +11,15 @@ use super::{
 };
 
 impl SettingsApp {
+    pub(crate) fn music_notice_button_hovered(&self) -> bool {
+        if self.active_page != 1 || !self.show_music_notice() {
+            return false;
+        }
+        let (x, y) = self.logical_mouse_pos;
+        super::pages::music::music_notice_button_rect(self.content_width(), SETTINGS_HEADER_H)
+            .contains(skia_safe::Point::new(x - SIDEBAR_W, y + self.scroll_y))
+    }
+
     pub(super) fn handle_click(&mut self) {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
 
@@ -67,7 +76,6 @@ impl SettingsApp {
         }
 
         let content_width = self.content_width();
-
         let input = PageInput {
             x: mouse_x - SIDEBAR_W,
             y: mouse_y + self.scroll_y,
@@ -94,7 +102,6 @@ impl SettingsApp {
     fn reset_scroll(&mut self) {
         self.scroll_y = 0.0;
         self.target_scroll_y = 0.0;
-        self.scroll_vel_y = 0.0;
         self.widget_hover_target = None;
         self.widget_hover_visual = None;
         self.widget_hover_progress = 0.0;
@@ -160,6 +167,9 @@ impl SettingsApp {
         }
 
         let content_width = self.content_width();
+        if self.music_notice_button_hovered() {
+            return true;
+        }
         if self.widget_drag_active() {
             return true;
         }

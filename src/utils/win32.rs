@@ -38,6 +38,14 @@ struct AccentPolicy {
     animation_id: u32,
 }
 
+pub fn trim_process_working_set() {
+    // SAFETY: GetCurrentProcess returns a valid pseudo-handle; maximum limits request a trim.
+    unsafe {
+        let process = GetCurrentProcess();
+        let _ = SetProcessWorkingSetSize(process, usize::MAX, usize::MAX);
+    }
+}
+
 #[repr(C)]
 struct WindowCompositionAttributeData {
     attribute: u32,
@@ -341,13 +349,4 @@ fn process_executable_name(process: windows::Win32::Foundation::HANDLE) -> Optio
     Path::new(&path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-}
-
-pub fn trim_process_working_set() {
-    // SAFETY: GetCurrentProcess returns a pseudo-handle valid in the current process.
-    // Passing usize::MAX for both limits requests the documented working-set trim operation.
-    unsafe {
-        let process = GetCurrentProcess();
-        let _ = SetProcessWorkingSetSize(process, usize::MAX, usize::MAX);
-    }
 }

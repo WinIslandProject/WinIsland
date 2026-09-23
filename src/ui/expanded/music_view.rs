@@ -319,7 +319,9 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
         let progress = PROGRESS_SMOOTH.with(|cell| {
             let mut smooth = cell.borrow_mut();
             let dragging = PROGRESS_DRAGGING.with(|d| *d.borrow());
-            if dragging
+            if current_pos_ms < 1000
+                || raw_progress <= 0.0
+                || dragging
                 || *smooth < 0.0
                 || (*smooth < PROGRESS_START_THRESHOLD && raw_progress > PROGRESS_START_THRESHOLD)
             {
@@ -428,9 +430,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
         let track_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, bar_total_w, bar_h);
         canvas.draw_round_rect(track_rect, bar_radius, bar_radius, &track_paint);
 
-        let filled_w = (bar_total_w * progress.clamp(0.0, 1.0))
-            .max(bar_h)
-            .min(bar_total_w);
+        let filled_w = (bar_total_w * progress.clamp(0.0, 1.0)).min(bar_total_w);
         let mut fill_paint = Paint::default();
         fill_paint.set_anti_alias(true);
         let fill_hover_t = ((hover_t - PROGRESS_FILL_BRIGHTEN_DELAY)
@@ -445,24 +445,27 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             (text_color.g() as f32 * fill_brightness).round() as u8,
             (text_color.b() as f32 * fill_brightness).round() as u8,
         ));
-        let fill_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, filled_w, bar_h);
-        let fill_rrect = RRect::new_rect_radii(
-            fill_rect,
-            &[
-                Point::new(bar_radius, bar_radius),
-                Point::new(0.0, 0.0),
-                Point::new(0.0, 0.0),
-                Point::new(bar_radius, bar_radius),
-            ],
-        );
-        canvas.save();
-        canvas.clip_rrect(
-            RRect::new_rect_xy(track_rect, bar_radius, bar_radius),
-            skia_safe::ClipOp::Intersect,
-            true,
-        );
-        canvas.draw_rrect(fill_rrect, &fill_paint);
-        canvas.restore();
+        if filled_w > 0.0 {
+            let fill_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, filled_w, bar_h);
+            let fill_radius = bar_radius.min(filled_w / 2.0);
+            let fill_rrect = RRect::new_rect_radii(
+                fill_rect,
+                &[
+                    Point::new(fill_radius, fill_radius),
+                    Point::new(0.0, 0.0),
+                    Point::new(0.0, 0.0),
+                    Point::new(fill_radius, fill_radius),
+                ],
+            );
+            canvas.save();
+            canvas.clip_rrect(
+                RRect::new_rect_xy(track_rect, bar_radius, bar_radius),
+                skia_safe::ClipOp::Intersect,
+                true,
+            );
+            canvas.draw_rrect(fill_rrect, &fill_paint);
+            canvas.restore();
+        }
 
         let btn_cx = ox + w / 2.0;
         let btn_cy = bar_center_y + bar_h / 2.0 + PLAYBACK_CONTROLS_TOP_GAP * scale;

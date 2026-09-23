@@ -10,6 +10,8 @@ use super::SettingsApp;
 pub(super) enum EffectsAction {
     SettingsTheme,
     MotionBlur,
+    AnimationFps,
+    ExpandedIdleFps,
     IslandStyle,
     CustomFont,
 }
@@ -34,6 +36,28 @@ impl SettingsApp {
             self.config.motion_blur,
             true,
             EffectsAction::MotionBlur,
+        );
+        page.row_source(
+            tr("animation_fps"),
+            [30, 60, 90, 120]
+                .into_iter()
+                .map(|fps| (format!("{fps} FPS"), self.config.animation_fps == fps))
+                .chain(std::iter::once((
+                    tr("frame_rate_native"),
+                    self.config.animation_fps == 0,
+                )))
+                .collect(),
+            true,
+            EffectsAction::AnimationFps,
+        );
+        page.row_source(
+            tr("expanded_idle_fps"),
+            [30, 45, 60, 90]
+                .into_iter()
+                .map(|fps| (format!("{fps} FPS"), self.config.expanded_idle_fps == fps))
+                .collect(),
+            true,
+            EffectsAction::ExpandedIdleFps,
         );
         page.group_end();
         page.group_start();
@@ -135,6 +159,36 @@ impl SettingsApp {
                 win_w,
                 win_h,
             ),
+            EffectsAction::AnimationFps => PopupState::new(
+                select_animation_fps,
+                button_rect,
+                vec![
+                    "30 FPS".to_string(),
+                    "60 FPS".to_string(),
+                    "90 FPS".to_string(),
+                    "120 FPS".to_string(),
+                    tr("frame_rate_native"),
+                ],
+                [30, 60, 90, 120, 0].map(|fps| fps.to_string()).to_vec(),
+                [30, 60, 90, 120, 0]
+                    .iter()
+                    .position(|fps| *fps == self.config.animation_fps)
+                    .unwrap_or(2),
+                win_w,
+                win_h,
+            ),
+            EffectsAction::ExpandedIdleFps => PopupState::new(
+                select_expanded_idle_fps,
+                button_rect,
+                [30, 45, 60, 90].map(|fps| format!("{fps} FPS")).to_vec(),
+                [30, 45, 60, 90].map(|fps| fps.to_string()).to_vec(),
+                [30, 45, 60, 90]
+                    .iter()
+                    .position(|fps| *fps == self.config.expanded_idle_fps)
+                    .unwrap_or(2),
+                win_w,
+                win_h,
+            ),
             _ => return,
         };
         self.show_popup(popup);
@@ -148,4 +202,16 @@ fn select_theme(app: &mut SettingsApp, value: &str) {
 
 fn select_island_style(app: &mut SettingsApp, value: &str) {
     app.config.island_style = value.to_string();
+}
+
+fn select_animation_fps(app: &mut SettingsApp, value: &str) {
+    if let Ok(fps) = value.parse() {
+        app.config.animation_fps = fps;
+    }
+}
+
+fn select_expanded_idle_fps(app: &mut SettingsApp, value: &str) {
+    if let Ok(fps) = value.parse() {
+        app.config.expanded_idle_fps = fps;
+    }
 }

@@ -75,7 +75,7 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
         };
         let page_shift = visible_view_offset * current_w;
 
-        if music_page_available {
+        if music_page_available && visible_view_offset < 1.0 {
             canvas.save();
             canvas.translate((-page_shift, 0.0));
             draw_music_page(DrawMusicPageParams {
