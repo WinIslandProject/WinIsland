@@ -182,6 +182,8 @@ impl App {
         }
 
         if self.expanded {
+            self.expanded_press_started_inside = true;
+            self.expanded_header_press = None;
             let music_page_available = self.music_page_available;
             let view_val = self.springs.view.value as f64;
             let w = self.springs.w.value as f64;
@@ -360,8 +362,8 @@ impl App {
             }
 
             if (rel_y as f64) < island_y + 40.0 * scale {
-                self.expanded = false;
-                self.widget_view = false;
+                self.expanded_header_press =
+                    Some((rel_x + self.geom.win_x, rel_y + self.geom.win_y));
             }
         } else if is_hovering_visible || is_on_hidden_reveal {
             if self.is_hidden() && !self.components_hidden {
@@ -378,6 +380,8 @@ impl App {
     }
 
     pub(super) fn handle_release(&mut self, px: i32, py: i32) {
+        self.expanded_press_started_inside = false;
+        let expanded_header_press = self.expanded_header_press.take();
         if self.compact_overlay.finish_volume_drag() {
             return;
         }
@@ -385,6 +389,17 @@ impl App {
             return;
         }
         if self.finish_seek() {
+            return;
+        }
+        if let Some((start_x, start_y)) = expanded_header_press {
+            let threshold = (10.0 * self.config.expanded_scale).max(8.0) as i32;
+            if self.expanded
+                && (px - start_x).abs() <= threshold
+                && (py - start_y).abs() <= threshold
+            {
+                self.expanded = false;
+                self.widget_view = false;
+            }
             return;
         }
         if self.dismissing_notification {

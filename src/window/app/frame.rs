@@ -518,13 +518,20 @@ impl App {
         } else if (compact_update.volume_changed || compact_update.brightness_changed)
             && (fullscreen_hidden || (self.hide.auto && !self.hide.manual))
         {
+            let reveal_started = if fullscreen_hidden {
+                !self.hide.overlay_reveal
+            } else {
+                self.hide.auto
+            };
             if fullscreen_hidden {
                 self.hide.overlay_reveal = true;
             } else if self.hide.auto && !self.hide.manual {
                 self.hide.auto = false;
             }
             self.idle_timer = Instant::now();
-            self.springs.hide.velocity = -0.65;
+            if reveal_started {
+                self.springs.hide.velocity = -0.65;
+            }
             self.compact_overlay.update(
                 CompactOverlayState::Present,
                 CompactOverlayState::Present,
@@ -693,7 +700,7 @@ impl App {
                 .hide
                 .update_dt(hide_target, stiffness, damping, dt);
         }
-        if !self.is_hidden() {
+        if !(self.is_hidden() || self.hide.fullscreen && self.hide.overlay_reveal) {
             self.restore_hide_origin(window);
         }
         if self.springs.hide.velocity.abs() > 0.001
@@ -708,7 +715,12 @@ impl App {
             return;
         }
         let pressing = self.input_pressed();
-        if self.expanded && !is_hovering_visible && pressing {
+        if !pressing {
+            self.expanded_press_started_inside = false;
+            self.expanded_header_press = None;
+        }
+        if self.expanded && !is_hovering_visible && pressing && !self.expanded_press_started_inside
+        {
             self.expanded = false;
             self.widget_view = false;
             window.request_redraw();

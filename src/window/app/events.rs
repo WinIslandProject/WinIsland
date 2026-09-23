@@ -149,6 +149,8 @@ impl App {
                         }
                         TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
                             self.touch_id = None;
+                            self.expanded_press_started_inside = false;
+                            self.expanded_header_press = None;
                             self.is_dragging = false;
                             self.drag_axis = None;
                             self.dismissing_notification = false;
