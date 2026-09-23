@@ -35,7 +35,7 @@ fn load_icon(bytes: &[u8]) -> Option<Image> {
     .to_image();
     let small = image::imageops::resize(&cropped, 64, 64, FilterType::Lanczos3);
     let mut pixels = small.into_raw();
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel[0] = pixel[3];
         pixel[1] = pixel[3];
         pixel[2] = pixel[3];
