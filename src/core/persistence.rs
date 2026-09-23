@@ -61,6 +61,10 @@ pub fn load_config() -> AppConfig {
         }
     };
     if let Ok(table) = toml::from_str::<toml::Table>(&content) {
+        if !table.contains_key("fullscreen_auto_hide") {
+            config.fullscreen_auto_hide = config.auto_hide;
+            migrated = true;
+        }
         if !table.contains_key("expanded_scale") {
             config.expanded_scale = config.compact_scale;
             migrated = true;
@@ -115,6 +119,10 @@ pub fn load_config() -> AppConfig {
     };
     config.expanded_width = config.expanded_width.clamp(200.0, 2000.0);
     config.expanded_height = config.expanded_height.clamp(100.0, 1000.0);
+    if config.animation_fps != 0 {
+        config.animation_fps = config.animation_fps.clamp(30, 240);
+    }
+    config.expanded_idle_fps = config.expanded_idle_fps.clamp(15, 120);
     let resource_span =
         set_resource_widget_span(config.resource_widget_columns, config.resource_widget_rows);
     if (config.resource_widget_columns, config.resource_widget_rows) != resource_span {

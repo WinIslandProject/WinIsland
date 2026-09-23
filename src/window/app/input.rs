@@ -14,7 +14,7 @@ use crate::utils::mouse::{
     double_click_interval, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
 
-use super::{App, IslandLayout, should_show_widget_view};
+use super::{App, DragAxis, IslandLayout, should_show_widget_view};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum InputSource {
@@ -31,7 +31,9 @@ impl App {
         py: i32,
         source: InputSource,
     ) {
-        let fullscreen_suppressed = self.is_fullscreen_suppressed && self.is_hidden();
+        let fullscreen_suppressed = self.config.fullscreen_auto_hide
+            && self.is_fullscreen_suppressed
+            && !self.hide.overlay_reveal;
         if fullscreen_suppressed || (source == InputSource::Mouse && self.is_cursor_suppressed) {
             return;
         }
@@ -43,7 +45,8 @@ impl App {
             self.handle_press(event_loop, rel_x, rel_y, &layout);
         } else if state == ElementState::Released {
             self.update_volume_drag_position(rel_x, &layout);
-            self.handle_release(py);
+            self.update_brightness_drag_position(rel_x, &layout);
+            self.handle_release(px, py);
         }
     }
 
@@ -143,12 +146,38 @@ impl App {
             return;
         }
 
-        if !self.expanded && self.compact_overlay.is_notification_visible() && is_hovering_visible {
+        if !self.expanded
+            && is_hovering_visible
+            && self.compact_overlay.begin_brightness_drag(
+                rel_x as f32,
+                rel_y as f32,
+                skia_safe::Rect::from_xywh(
+                    current_island_x as f32,
+                    current_island_y as f32,
+                    self.springs.w.value,
+                    self.springs.h.value,
+                ),
+                self.config.compact_scale,
+            )
+        {
+            self.idle_timer = Instant::now();
+            return;
+        }
+
+        if !(self.expanded || self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed)
+            && self.compact_overlay.is_notification_visible()
+            && is_hovering_visible
+        {
             self.dismissing_notification = true;
             self.is_dragging = true;
             self.drag_start_px = rel_x + self.geom.win_x;
             self.drag_start_py = rel_y + self.geom.win_y;
             self.drag_has_moved = false;
+            self.drag_axis = None;
+            return;
+        }
+
+        if self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed {
             return;
         }
 
@@ -335,7 +364,7 @@ impl App {
                 self.widget_view = false;
             }
         } else if is_hovering_visible || is_on_hidden_reveal {
-            if self.is_hidden() {
+            if self.is_hidden() && !self.components_hidden {
                 self.reveal_island();
                 return;
             }
@@ -344,11 +373,15 @@ impl App {
             self.drag_start_py = rel_y + self.geom.win_y;
             self.drag_start_hide_val = self.springs.hide.value;
             self.drag_has_moved = false;
+            self.drag_axis = None;
         }
     }
 
-    pub(super) fn handle_release(&mut self, py: i32) {
+    pub(super) fn handle_release(&mut self, px: i32, py: i32) {
         if self.compact_overlay.finish_volume_drag() {
+            return;
+        }
+        if self.compact_overlay.finish_brightness_drag() {
             return;
         }
         if self.finish_seek() {
@@ -357,6 +390,7 @@ impl App {
         if self.dismissing_notification {
             self.dismissing_notification = false;
             self.is_dragging = false;
+            self.drag_axis = None;
             if self.drag_start_py - py > 20 {
                 self.compact_overlay.dismiss_notification();
             } else if !self.compact_overlay.activate_notification() {
@@ -366,7 +400,33 @@ impl App {
         }
         if self.is_dragging {
             self.is_dragging = false;
-            if !self.drag_has_moved {
+            let dx = px - self.drag_start_px;
+            let dy = py - self.drag_start_py;
+            let drag_axis = self.drag_axis.take();
+            if !self.expanded
+                && drag_axis != Some(DragAxis::Vertical)
+                && dx.abs() >= 40
+                && dx.abs() > dy.abs() * 2
+            {
+                self.components_hidden = !self.components_hidden;
+                if self.is_hidden() {
+                    self.reveal_island();
+                }
+                self.idle_timer = Instant::now();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                return;
+            }
+            if drag_axis == Some(DragAxis::Horizontal) {
+                return;
+            }
+            if !self.drag_has_moved
+                || (self.components_hidden
+                    && drag_axis.is_none()
+                    && dx.abs() <= 10
+                    && dy.abs() <= 10)
+            {
                 if self.is_hidden() {
                     self.reveal_island();
                 } else {
@@ -380,15 +440,25 @@ impl App {
                 self.hide.manual = false;
                 self.hide.auto = false;
                 self.hide.fullscreen = false;
-                if self.is_fullscreen_suppressed {
-                    self.hide.fullscreen_reveal_override = true;
-                }
             }
         }
     }
 
     pub(super) fn update_volume_drag_position(&mut self, rel_x: i32, layout: &IslandLayout) {
         self.compact_overlay.update_volume_drag(
+            rel_x as f32,
+            skia_safe::Rect::from_xywh(
+                layout.current_island_x as f32,
+                layout.current_island_y as f32,
+                self.springs.w.value,
+                self.springs.h.value,
+            ),
+            self.config.compact_scale,
+        );
+    }
+
+    pub(super) fn update_brightness_drag_position(&mut self, rel_x: i32, layout: &IslandLayout) {
+        self.compact_overlay.update_brightness_drag(
             rel_x as f32,
             skia_safe::Rect::from_xywh(
                 layout.current_island_x as f32,

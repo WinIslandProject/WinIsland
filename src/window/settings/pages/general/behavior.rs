@@ -12,10 +12,12 @@ use super::SettingsApp;
 pub(super) enum BehaviorAction {
     AutoStart,
     AutoHide,
+    FullscreenAutoHide,
     HiddenWidth,
     RightClickDrag,
     NotificationDisplay,
     ReplaceNativeVolumeFlyout,
+    BrightnessOverlay,
     HideDelay,
     Language,
     CheckForUpdates,
@@ -41,6 +43,12 @@ impl SettingsApp {
             self.config.auto_hide,
             true,
             BehaviorAction::AutoHide,
+        );
+        page.row_switch(
+            tr("fullscreen_auto_hide"),
+            self.config.fullscreen_auto_hide,
+            true,
+            BehaviorAction::FullscreenAutoHide,
         );
         if self.config.auto_hide {
             page.row_stepper(
@@ -77,6 +85,12 @@ impl SettingsApp {
             self.config.replace_native_volume_flyout,
             true,
             BehaviorAction::ReplaceNativeVolumeFlyout,
+        );
+        page.row_switch(
+            tr("brightness_overlay"),
+            self.config.brightness_overlay_enabled,
+            true,
+            BehaviorAction::BrightnessOverlay,
         );
 
         let language = current_lang();
@@ -171,6 +185,10 @@ impl SettingsApp {
                 self.config.auto_hide = !self.config.auto_hide;
                 true
             }
+            (BehaviorAction::FullscreenAutoHide, ClickResult::Switch(_)) => {
+                self.config.fullscreen_auto_hide = !self.config.fullscreen_auto_hide;
+                true
+            }
             (BehaviorAction::RightClickDrag, ClickResult::Switch(_)) => {
                 self.config.right_click_drag = !self.config.right_click_drag;
                 true
@@ -182,6 +200,10 @@ impl SettingsApp {
             (BehaviorAction::ReplaceNativeVolumeFlyout, ClickResult::Switch(_)) => {
                 self.config.replace_native_volume_flyout =
                     !self.config.replace_native_volume_flyout;
+                true
+            }
+            (BehaviorAction::BrightnessOverlay, ClickResult::Switch(_)) => {
+                self.config.brightness_overlay_enabled = !self.config.brightness_overlay_enabled;
                 true
             }
             (BehaviorAction::CheckForUpdates, ClickResult::Switch(_)) => {

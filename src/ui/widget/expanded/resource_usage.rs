@@ -244,7 +244,7 @@ pub fn draw_resource_usage_widget(
     text_color: Color,
 ) {
     with_expanded_config(|metrics| {
-        with_resource_usage(|usage| {
+        with_resource_usage(metrics, |usage| {
             draw_resource_usage(
                 canvas,
                 x,

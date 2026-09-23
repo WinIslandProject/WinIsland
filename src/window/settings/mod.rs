@@ -20,6 +20,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{Key, NamedKey};
+use winit::monitor::MonitorHandle;
 use winit::platform::windows::WindowAttributesExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowButtons, WindowId};
@@ -125,8 +126,6 @@ pub(crate) enum PageNavigation {
 pub(crate) const POPUP_OPACITY_KEY: u64 = 1;
 pub(crate) const SIDEBAR_KEY_BASE: u64 = 1_000;
 pub(crate) const PLUGIN_DETAIL_KEY: u64 = 2_000;
-pub(crate) const SCROLL_STIFFNESS: f32 = 55.0;
-pub(crate) const SCROLL_DAMPING: f32 = 16.0;
 
 pub(crate) fn widget_drag_move_needs_redraw<T: PartialEq>(
     dragging: bool,
@@ -196,13 +195,16 @@ pub struct SettingsApp {
     pub(crate) logical_mouse_pos: (f32, f32),
     pub(crate) last_hover_mouse_pos: (f32, f32),
     touch_id: Option<u64>,
+    touch_start: PhysicalPosition<f64>,
+    touch_last: PhysicalPosition<f64>,
+    touch_scrolling: bool,
+    touch_pressed: bool,
+    last_touch_at: Option<Instant>,
     pub(crate) frame_count: u64,
     pub(crate) scroll_y: f32,
     pub(crate) target_scroll_y: f32,
-    pub(crate) scroll_vel_y: f32,
     pub(crate) last_frame_time: Instant,
     pub(crate) next_frame_deadline: Instant,
-    memory_trim_pending: bool,
     pub(crate) detected_apps: Vec<String>,
     detected_apps_rx: Option<mpsc::Receiver<Vec<String>>>,
     pub(crate) sidebar_hover: i32,
@@ -215,8 +217,13 @@ pub struct SettingsApp {
     pub(crate) cached_max_scroll: f32,
     pub(crate) win_w: f32,
     pub(crate) win_h: f32,
+    logical_win_w: f64,
+    logical_win_h: f64,
+    pending_dpi_size: Option<PhysicalSize<u32>>,
+    target_monitor: Option<MonitorHandle>,
     pub(crate) focused: bool,
     pub(crate) dots_hovered: bool,
+    pub(crate) music_notice_pressed: bool,
     pub(crate) scroll_dragging: bool,
     scroll_drag_offset: f32,
     pub(crate) widget_dragging: Option<WidgetSource>,
@@ -319,13 +326,16 @@ impl SettingsApp {
             logical_mouse_pos: (0.0, 0.0),
             last_hover_mouse_pos: (-1.0, -1.0),
             touch_id: None,
+            touch_start: PhysicalPosition::new(0.0, 0.0),
+            touch_last: PhysicalPosition::new(0.0, 0.0),
+            touch_scrolling: false,
+            touch_pressed: false,
+            last_touch_at: None,
             frame_count: 0,
             scroll_y: 0.0,
             target_scroll_y: 0.0,
-            scroll_vel_y: 0.0,
             last_frame_time: Instant::now(),
             next_frame_deadline: Instant::now(),
-            memory_trim_pending: false,
             detected_apps,
             detected_apps_rx: None,
             sidebar_hover: -1,
@@ -338,8 +348,13 @@ impl SettingsApp {
             cached_max_scroll: 0.0,
             win_w: WIN_W,
             win_h: WIN_H,
+            logical_win_w: WIN_W as f64,
+            logical_win_h: WIN_H as f64,
+            pending_dpi_size: None,
+            target_monitor: None,
             focused: true,
             dots_hovered: false,
+            music_notice_pressed: false,
             scroll_dragging: false,
             scroll_drag_offset: 0.0,
             widget_dragging: None,
@@ -521,7 +536,13 @@ impl SettingsApp {
 }
 
 impl SettingsApp {
-    pub(crate) fn create_window(&mut self, event_loop: &ActiveEventLoop, renderer: &mut Renderer) {
+    pub(crate) fn create_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        renderer: &mut Renderer,
+        target_monitor: Option<MonitorHandle>,
+    ) {
+        self.target_monitor = target_monitor;
         let attrs = Window::default_attributes()
             .with_title("WinIsland Settings")
             .with_inner_size(LogicalSize::new(WIN_W as f64, WIN_H as f64))
@@ -531,11 +552,27 @@ impl SettingsApp {
             .with_transparent(true)
             .with_no_redirection_bitmap(true)
             .with_window_icon(get_app_icon());
+        let attrs = if let Some(monitor) = self.target_monitor.as_ref() {
+            let origin = monitor.position();
+            let resolution = monitor.size();
+            let size = LogicalSize::new(WIN_W as f64, WIN_H as f64)
+                .to_physical::<u32>(monitor.scale_factor());
+            attrs.with_position(PhysicalPosition::new(
+                origin.x + (resolution.width as i32 - size.width as i32) / 2,
+                origin.y + (resolution.height as i32 - size.height as i32) / 2,
+            ))
+        } else {
+            attrs
+        };
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         self.window = Some(window.clone());
+        self.keep_window_on_island_monitor(true);
         let size = window.inner_size();
         self.win_w = size.width as f32;
         self.win_h = size.height as f32;
+        let scale = window.scale_factor();
+        self.logical_win_w = size.width as f64 / scale;
+        self.logical_win_h = size.height as f64 / scale;
         self.renderer_target = match renderer.create_target(&window, size.width, size.height) {
             Ok(target) => Some(target),
             Err(error) => {
@@ -587,7 +624,11 @@ impl SettingsApp {
                 }
             }
             WindowEvent::Resized(new_size) => self.handle_resized(renderer, new_size),
-            WindowEvent::ScaleFactorChanged { .. } => self.handle_scale_changed(renderer),
+            WindowEvent::ScaleFactorChanged {
+                mut inner_size_writer,
+                scale_factor,
+            } => self.handle_scale_changed(scale_factor, &mut inner_size_writer),
+            WindowEvent::Moved(_) => self.keep_window_on_island_monitor(false),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 self.handle_pressed_key(&event.logical_key);
             }
@@ -601,17 +642,19 @@ impl SettingsApp {
             {
                 self.handle_plugin_file_drop(path);
             }
-            WindowEvent::MouseWheel { delta, .. } => self.handle_mouse_wheel(delta),
+            WindowEvent::MouseWheel { delta, .. } if !self.suppress_synthetic_mouse() => {
+                self.handle_mouse_wheel(delta);
+            }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
-            } => self.handle_left_mouse_pressed(),
+            } if !self.suppress_synthetic_mouse() => self.handle_left_mouse_pressed(),
             WindowEvent::MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
-            } => self.handle_left_mouse_released(),
+            } if !self.suppress_synthetic_mouse() => self.handle_left_mouse_released(),
             WindowEvent::Touch(touch) => self.handle_touch(touch),
             WindowEvent::RedrawRequested => self.draw(renderer),
             _ => (),
@@ -637,21 +680,100 @@ impl SettingsApp {
     }
 
     fn handle_resized(&mut self, renderer: &mut Renderer, size: PhysicalSize<u32>) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        if let Some(expected) = self.pending_dpi_size.take() {
+            if expected.width.abs_diff(size.width) > 2 || expected.height.abs_diff(size.height) > 2
+            {
+                self.pending_dpi_size = Some(expected);
+                let _ = window.request_inner_size(expected);
+                return;
+            }
+        } else if size.width > 0 && size.height > 0 {
+            let scale = window.scale_factor();
+            self.logical_win_w = size.width as f64 / scale;
+            self.logical_win_h = size.height as f64 / scale;
+        }
         self.win_w = size.width as f32;
         self.win_h = size.height as f32;
         self.mark_items_dirty();
         self.resize_renderer_target(renderer, size);
+        self.keep_window_on_island_monitor(false);
         self.request_redraw();
     }
 
-    fn handle_scale_changed(&mut self, renderer: &mut Renderer) {
-        let Some(window) = &self.window else {
+    fn handle_scale_changed(
+        &mut self,
+        scale_factor: f64,
+        inner_size_writer: &mut winit::event::InnerSizeWriter,
+    ) {
+        let size = LogicalSize::new(self.logical_win_w, self.logical_win_h)
+            .to_physical::<u32>(scale_factor);
+        if inner_size_writer.request_inner_size(size).is_ok() {
+            self.pending_dpi_size = Some(size);
+        }
+    }
+
+    pub(crate) fn set_target_monitor(&mut self, monitor: MonitorHandle) {
+        let changed = self.target_monitor.as_ref().is_none_or(|current| {
+            current.position() != monitor.position() || current.size() != monitor.size()
+        });
+        if changed {
+            self.target_monitor = Some(monitor);
+            self.keep_window_on_island_monitor(true);
+        }
+    }
+
+    fn keep_window_on_island_monitor(&self, center_if_outside: bool) {
+        use windows::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+        };
+
+        let Some(window) = self.window.as_ref() else {
             return;
         };
-        let size = window.inner_size();
-        self.mark_items_dirty();
-        self.resize_renderer_target(renderer, size);
-        self.request_redraw();
+        let Some(target) = self.target_monitor.as_ref() else {
+            return;
+        };
+        let Ok(position) = window.outer_position() else {
+            return;
+        };
+        let size = window.outer_size();
+        let origin = target.position();
+        let bounds = target.size();
+        let center = windows::Win32::Foundation::POINT {
+            x: origin.x + bounds.width as i32 / 2,
+            y: origin.y + bounds.height as i32 / 2,
+        };
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: The point is within the selected island monitor.
+        let monitor = unsafe { MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST) };
+        // SAFETY: The monitor handle is valid and info has the required size.
+        if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+            return;
+        }
+        let work = info.rcWork;
+        let max_x = (work.right - size.width as i32).max(work.left);
+        let max_y = (work.bottom - size.height as i32).max(work.top);
+        let outside = position.x < work.left
+            || position.x > max_x
+            || position.y < work.top
+            || position.y > max_y;
+        let (x, y) = if center_if_outside && outside {
+            ((work.left + max_x) / 2, (work.top + max_y) / 2)
+        } else {
+            (
+                position.x.clamp(work.left, max_x),
+                position.y.clamp(work.top, max_y),
+            )
+        };
+        if position.x != x || position.y != y {
+            window.set_outer_position(PhysicalPosition::new(x, y));
+        }
     }
 
     fn resize_renderer_target(&mut self, renderer: &mut Renderer, size: PhysicalSize<u32>) {
@@ -698,8 +820,10 @@ impl SettingsApp {
         self.logical_mouse_pos = new_position;
         self.update_scroll_drag(new_position.1);
 
-        let mut redraw = (matches!(self.active_page, WIDGETS_PAGE_INDEX | PLUGINS_PAGE_INDEX)
-            || self.active_plugin_settings_page().is_some())
+        let mut redraw = (matches!(
+            self.active_page,
+            1 | WIDGETS_PAGE_INDEX | PLUGINS_PAGE_INDEX
+        ) || self.active_plugin_settings_page().is_some())
             && mouse_moved;
         let dots_hovered = self.focused && window_controls_hovered(new_position.0, new_position.1);
         if dots_hovered != self.dots_hovered {
@@ -727,22 +851,106 @@ impl SettingsApp {
     }
 
     fn handle_touch(&mut self, touch: Touch) {
+        self.last_touch_at = Some(Instant::now());
         match touch.phase {
             TouchPhase::Started if self.touch_id.is_none() => {
                 self.touch_id = Some(touch.id);
+                self.touch_start = touch.location;
+                self.touch_last = touch.location;
+                self.touch_scrolling = false;
+                self.touch_pressed = false;
                 self.handle_cursor_moved(touch.location);
-                self.handle_left_mouse_pressed();
+                let (x, y) = self.logical_mouse_pos;
+                if self.begin_scroll_drag(x, y) {
+                    self.touch_pressed = true;
+                    self.request_redraw();
+                } else if self.active_page == WIDGETS_PAGE_INDEX
+                    && !self.resource_editor_open
+                    && self.handle_widget_drag_press()
+                {
+                    self.touch_pressed = true;
+                    self.widget_drag_lift_progress = 0.0;
+                    self.widget_drop_animation = None;
+                    self.set_widget_hover_target(None);
+                    self.request_redraw();
+                } else if self.music_notice_button_hovered()
+                    || window_control_at(x, y).is_some()
+                    || (self.is_window_drag_region(x, y) && self.popup.is_none())
+                {
+                    self.touch_pressed = true;
+                    self.handle_left_mouse_pressed();
+                }
             }
             TouchPhase::Moved if self.touch_id == Some(touch.id) => {
                 self.handle_cursor_moved(touch.location);
+                if !self.touch_pressed {
+                    let scale = self.window_scale() as f64;
+                    let dx = touch.location.x - self.touch_start.x;
+                    let dy = touch.location.y - self.touch_start.y;
+                    if dx.hypot(dy) > 8.0 * scale {
+                        self.touch_scrolling = true;
+                    }
+                    if self.touch_scrolling
+                        && self.popup.is_none()
+                        && !self.resource_editor_open
+                        && self.logical_mouse_pos.0 >= SIDEBAR_W
+                        && self.logical_mouse_pos.1 >= SETTINGS_HEADER_H
+                    {
+                        let delta =
+                            (touch.location.y - self.touch_last.y) as f32 / self.window_scale();
+                        if self.active_page == PLUGINS_PAGE_INDEX
+                            && self.plugin_detail_contains(self.logical_mouse_pos.0)
+                        {
+                            self.plugin_detail_scroll = (self.plugin_detail_scroll - delta)
+                                .clamp(0.0, self.plugin_detail_max_scroll);
+                        } else {
+                            self.ensure_items_cache();
+                            self.target_scroll_y =
+                                (self.target_scroll_y - delta).clamp(0.0, self.cached_max_scroll);
+                            self.scroll_y = self.target_scroll_y;
+                        }
+                        self.request_redraw();
+                    }
+                }
+                self.touch_last = touch.location;
             }
-            TouchPhase::Ended | TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
+            TouchPhase::Ended if self.touch_id == Some(touch.id) => {
                 self.handle_cursor_moved(touch.location);
-                self.handle_left_mouse_released();
+                if self.touch_pressed {
+                    self.handle_left_mouse_released();
+                } else {
+                    let scale = self.window_scale() as f64;
+                    let dx = touch.location.x - self.touch_start.x;
+                    let dy = touch.location.y - self.touch_start.y;
+                    if !self.touch_scrolling && dx.hypot(dy) <= 8.0 * scale {
+                        self.handle_left_mouse_pressed();
+                        self.handle_left_mouse_released();
+                    }
+                }
+                self.touch_pressed = false;
+                self.touch_scrolling = false;
                 self.touch_id = None;
+            }
+            TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
+                self.music_notice_pressed = false;
+                self.scroll_dragging = false;
+                self.widget_dragging = None;
+                self.compact_widget_dragging = None;
+                self.widget_drag_hover_slot = None;
+                self.touch_pressed = false;
+                self.touch_scrolling = false;
+                self.touch_id = None;
+                self.request_redraw();
             }
             _ => {}
         }
+    }
+
+    fn suppress_synthetic_mouse(&self) -> bool {
+        self.touch_id.is_some()
+            || self
+                .last_touch_at
+                .is_some_and(|time| time.elapsed() < Duration::from_millis(250))
     }
 
     fn update_widget_hover(&mut self) -> bool {
@@ -820,6 +1028,10 @@ impl SettingsApp {
     }
 
     fn handle_cursor_left(&mut self) {
+        if self.active_page == 1 && self.show_music_notice() {
+            self.logical_mouse_pos = (-1.0, -1.0);
+            self.request_redraw();
+        }
         let hover_changed = self.set_widget_hover_target(None);
         let slot_changed = self.active_widget_preview_hover_slot().is_some();
         self.set_active_widget_preview_hover_slot(None);
@@ -857,6 +1069,7 @@ impl SettingsApp {
         } else if mouse_x >= SIDEBAR_W {
             self.target_scroll_y =
                 (self.target_scroll_y - delta).clamp(0.0, self.cached_max_scroll);
+            self.scroll_y = self.target_scroll_y;
             self.request_redraw();
         }
     }
@@ -907,6 +1120,15 @@ impl SettingsApp {
     }
 
     fn handle_left_mouse_released(&mut self) {
+        if std::mem::take(&mut self.music_notice_pressed) {
+            if self.music_notice_button_hovered() {
+                self.config.music_notice_acknowledged = true;
+                self.persist_settings_change();
+            } else {
+                self.request_redraw();
+            }
+            return;
+        }
         let scroll_released = std::mem::take(&mut self.scroll_dragging);
         if scroll_released || self.handle_widget_drag_release() {
             self.request_redraw();
@@ -1009,24 +1231,9 @@ impl SettingsApp {
         self.last_frame_time = now;
         redraw |= self.update_widget_interaction_animations(dt);
 
-        let diff = self.target_scroll_y - self.scroll_y;
-        let accel = diff * SCROLL_STIFFNESS - self.scroll_vel_y * SCROLL_DAMPING;
-        self.scroll_vel_y += accel * dt;
-        self.scroll_y += self.scroll_vel_y * dt;
-
-        if self.scroll_y < 0.0 {
-            self.scroll_y = 0.0;
-            self.scroll_vel_y = 0.0;
-        } else if self.scroll_y > max_scroll {
-            self.scroll_y = max_scroll;
-            self.scroll_vel_y = 0.0;
-        }
-
-        if diff.abs() > 0.05 || self.scroll_vel_y.abs() > 0.05 {
-            redraw = true;
-        } else if (self.scroll_y - self.target_scroll_y).abs() > f32::EPSILON {
+        if (self.scroll_y - self.target_scroll_y).abs() > f32::EPSILON {
             self.scroll_y = self.target_scroll_y;
-            self.scroll_vel_y = 0.0;
+            redraw = true;
         }
 
         if redraw {
@@ -1035,25 +1242,6 @@ impl SettingsApp {
             Some(self.next_frame_deadline)
         } else {
             None
-        }
-    }
-
-    pub(crate) fn is_idle(&self) -> bool {
-        !self.switch_anim.is_animating()
-            && !self.anim.is_animating()
-            && !self.widget_interaction_animating()
-            && self.popup.is_none()
-            && (self.target_scroll_y - self.scroll_y).abs() <= 0.1
-            && !self.widget_drag_active()
-            && self.number_input.is_none()
-    }
-
-    pub(crate) fn take_idle_memory_trim_request(&mut self) -> bool {
-        if self.memory_trim_pending && self.is_idle() {
-            self.memory_trim_pending = false;
-            true
-        } else {
-            false
         }
     }
 
@@ -1092,7 +1280,6 @@ impl SettingsApp {
         }
         self.scroll_dragging = true;
         self.scroll_drag_offset = mouse_y - scrollbar.y;
-        self.scroll_vel_y = 0.0;
         true
     }
 
@@ -1113,7 +1300,6 @@ impl SettingsApp {
         let scroll = (thumb_y - scrollbar.track_y) / travel * self.cached_max_scroll;
         self.target_scroll_y = scroll;
         self.scroll_y = scroll;
-        self.scroll_vel_y = 0.0;
         self.request_redraw();
     }
 
@@ -1234,7 +1420,6 @@ impl SettingsApp {
         if self.active_page != previous_active_page {
             self.scroll_y = 0.0;
             self.target_scroll_y = 0.0;
-            self.scroll_vel_y = 0.0;
         }
         let pending_is_current = self.pending_plugin_setting.as_ref().is_some_and(|pending| {
             self.plugin_settings_pages

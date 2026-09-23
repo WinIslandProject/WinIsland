@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
-use skia_safe::{Color, Image, ImageInfo, Surface, gpu};
+use skia_safe::{Color, Image, ImageInfo, Paint, Rect, Surface, gpu, image_filters};
 use winit::window::Window;
 
 use super::backdrop::HostBackdrop;
@@ -12,8 +11,6 @@ use super::d3d::{D3DDevice, RenderTarget};
 pub(crate) use super::backdrop::HostBackdropParams;
 
 const MAIN_TARGET: RendererTargetId = RendererTargetId(0);
-const RESOURCE_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
-const RESOURCE_MAX_IDLE_AGE: Duration = Duration::from_secs(10);
 
 static DWM_COMPOSITION_CHANGED: AtomicBool = AtomicBool::new(false);
 
@@ -64,7 +61,6 @@ pub(crate) struct Renderer {
     host_backdrop: Option<HostBackdrop>,
     device: D3DDevice,
     next_target_id: u64,
-    last_resource_cleanup: Instant,
     failure: Option<String>,
 }
 
@@ -77,6 +73,7 @@ impl Renderer {
     ) -> Result<Self, String> {
         let mut device = D3DDevice::new()?;
         let target = device.create_target(window, width, height)?;
+        Self::prewarm_expansion_effects(&mut device);
         let host_backdrop = match HostBackdrop::new(window, backdrop_window) {
             Ok(backdrop) => Some(backdrop),
             Err(error) => {
@@ -89,7 +86,6 @@ impl Renderer {
             host_backdrop,
             device,
             next_target_id: 1,
-            last_resource_cleanup: Instant::now(),
             failure: None,
         })
     }
@@ -107,6 +103,29 @@ impl Renderer {
         self.next_target_id += 1;
         self.targets.insert(id, target);
         Ok(id)
+    }
+
+    fn prewarm_expansion_effects(device: &mut D3DDevice) {
+        let info = ImageInfo::new_n32_premul((96, 96), None);
+        let mut drawing_context = DrawingContext {
+            direct_context: &mut device.context,
+        };
+        let Some(mut surface) = drawing_context.render_surface(&info) else {
+            return;
+        };
+        if let Some(filter) = image_filters::blur((12.0, 10.0), None, None, None) {
+            let mut paint = Paint::default();
+            paint.set_image_filter(filter);
+            let canvas = surface.canvas();
+            canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
+            canvas.draw_rect(Rect::from_xywh(8.0, 8.0, 80.0, 80.0), &Paint::default());
+            canvas.restore();
+            drawing_context.finish_surface(&mut surface);
+            drop(surface);
+            if let Err(error) = device.submit(gpu::SyncCpu::Yes) {
+                log::warn!("Expanded effect warm-up failed: {error}");
+            }
+        }
     }
 
     pub(crate) fn main_target(&self) -> RendererTargetId {
@@ -154,13 +173,6 @@ impl Renderer {
         let present_result = target.present();
         self.device.check_health()?;
         present_result?;
-        if self.last_resource_cleanup.elapsed() >= RESOURCE_CLEANUP_INTERVAL {
-            self.device.context.perform_deferred_cleanup(
-                RESOURCE_MAX_IDLE_AGE,
-                Some(gpu::PurgeResourceOptions::AllResources),
-            );
-            self.last_resource_cleanup = Instant::now();
-        }
         Ok(output)
     }
 

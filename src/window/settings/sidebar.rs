@@ -198,8 +198,9 @@ impl SettingsApp {
         canvas: &Canvas,
         theme: &SettingsTheme,
     ) {
+        let logical_height = self.logical_window_size().1;
         let mut paint = settings_paint(theme.sidebar_bg);
-        canvas.draw_rect(Rect::from_xywh(0.0, 0.0, SIDEBAR_W, self.win_h), &paint);
+        canvas.draw_rect(Rect::from_xywh(0.0, 0.0, SIDEBAR_W, logical_height), &paint);
 
         let inactive_fill = if self.is_light {
             Color::from_rgb(184, 184, 188)
@@ -251,7 +252,7 @@ impl SettingsApp {
         let mut sep = settings_paint(theme.separator);
         sep.set_stroke_width(0.5);
         sep.set_style(skia_safe::paint::Style::Stroke);
-        canvas.draw_line((SIDEBAR_W, 0.0), (SIDEBAR_W, self.win_h), &sep);
+        canvas.draw_line((SIDEBAR_W, 0.0), (SIDEBAR_W, logical_height), &sep);
 
         let pages = [
             tr("tab_general"),

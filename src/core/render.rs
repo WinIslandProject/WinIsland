@@ -2,6 +2,8 @@ mod background;
 mod expanded;
 mod mini;
 
+use std::cell::RefCell;
+
 pub(crate) use mini::{
     lyric_font_size as mini_lyric_font_size, lyric_insets as mini_lyric_insets,
     lyric_pair_height as mini_lyric_pair_height,
@@ -20,13 +22,14 @@ use crate::ui::compact::CompactOverlay;
 use crate::ui::expanded::music_view::{default_media_palette, get_media_palette};
 use crate::utils::shape::continuous_rounded_rect_path;
 use crate::window::renderer::DrawingContext;
-use skia_safe::{ClipOp, Color, Paint, Rect, Surface, image_filters};
+use skia_safe::{ClipOp, Color, Image, Paint, Rect, Surface, image_filters};
 
 pub struct LayoutParams {
     pub current_w: f32,
     pub current_h: f32,
     pub current_r: f32,
     pub sigmas: (f32, f32),
+    pub shadow_static: bool,
     pub expansion_progress: f32,
     pub view_offset: f32,
     pub compact_scale: f32,
@@ -81,6 +84,15 @@ const SOLID_STYLE: &str = "default";
 const SOLID_BORDER_ALPHA: u8 = 30;
 const EFFECT_BORDER_ALPHA: u8 = 40;
 
+struct CachedShadow {
+    key: (i32, i32, i32, i32, u8),
+    image: Image,
+}
+
+thread_local! {
+    static SHADOW_CACHE: RefCell<Option<CachedShadow>> = const { RefCell::new(None) };
+}
+
 pub struct DrawIslandParams<'a> {
     pub layout: LayoutParams,
     pub media: MediaParams<'a>,
@@ -88,6 +100,7 @@ pub struct DrawIslandParams<'a> {
     pub mini_content: Option<MiniContent<'a>>,
     pub compact_overlay: &'a CompactOverlay,
     pub style: StyleParams<'a>,
+    pub attention_alpha: f32,
 }
 
 pub fn draw_island(
@@ -159,6 +172,30 @@ pub fn draw_island(
     }
     canvas.restore();
     draw_island_border(canvas, &params);
+    if params.attention_alpha > 0.0 {
+        let layout = &params.layout;
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_style(skia_safe::PaintStyle::Stroke);
+        paint.set_stroke_width(2.5 * layout.compact_scale);
+        paint.set_color(Color::from_argb(
+            (220.0 * params.attention_alpha.clamp(0.0, 1.0)) as u8,
+            255,
+            207,
+            45,
+        ));
+        let inset = -2.0 * layout.compact_scale;
+        let outline = continuous_rounded_rect_path(
+            Rect::from_xywh(
+                layout.island_x + inset,
+                layout.island_y + inset,
+                layout.current_w - 2.0 * inset,
+                layout.current_h - 2.0 * inset,
+            ),
+            layout.current_r - inset,
+        );
+        canvas.draw_path(&outline, &paint);
+    }
     widget_animating
 }
 
@@ -184,9 +221,57 @@ fn draw_expanded_shadow(
         .min(surface.height() as f32 - bounds.bottom() - offset_y)
         .max(0.0);
     let sigma = (3.0 * scale).min(margin / 3.0);
+    let alpha = (28.0 * opacity) as u8;
+    if layout.shadow_static && sigma > 0.0 {
+        let key = (
+            (bounds.width() * 16.0).round() as i32,
+            (bounds.height() * 16.0).round() as i32,
+            (layout.current_r * 16.0).round() as i32,
+            (sigma * 16.0).round() as i32,
+            alpha,
+        );
+        let cached = SHADOW_CACHE.with(|cell| {
+            let mut cache = cell.borrow_mut();
+            if cache.as_ref().is_none_or(|entry| entry.key != key) {
+                let padding = (sigma * 3.0 + offset_y).ceil() as i32 + 2;
+                let width = bounds.width().ceil() as i32 + padding * 2;
+                let height = bounds.height().ceil() as i32 + padding * 2;
+                let mut surface = skia_safe::surfaces::raster_n32_premul((width, height))?;
+                let mut paint = Paint::default();
+                paint.set_anti_alias(true);
+                paint.set_color(Color::from_argb(alpha, 0, 0, 0));
+                paint.set_image_filter(image_filters::blur((sigma, sigma), None, None, None));
+                let raster = surface.canvas();
+                raster.clear(Color::TRANSPARENT);
+                raster.translate((
+                    padding as f32 - bounds.left(),
+                    padding as f32 - bounds.top(),
+                ));
+                raster.translate((0.0, offset_y));
+                raster.draw_path(island_path, &paint);
+                *cache = Some(CachedShadow {
+                    key,
+                    image: surface.image_snapshot(),
+                });
+            }
+            cache.as_ref().map(|entry| entry.image.clone())
+        });
+        if let Some(image) = cached {
+            let padding = (sigma * 3.0 + offset_y).ceil() + 2.0;
+            canvas.save();
+            canvas.clip_path(island_path, ClipOp::Difference, true);
+            canvas.draw_image(
+                &image,
+                (bounds.left() - padding, bounds.top() - padding),
+                None,
+            );
+            canvas.restore();
+            return;
+        }
+    }
     let mut paint = Paint::default();
     paint.set_anti_alias(true);
-    paint.set_color(Color::from_argb((28.0 * opacity) as u8, 0, 0, 0));
+    paint.set_color(Color::from_argb(alpha, 0, 0, 0));
     paint.set_image_filter(image_filters::blur((sigma, sigma), None, None, None));
     canvas.save();
     canvas.clip_path(island_path, ClipOp::Difference, true);
