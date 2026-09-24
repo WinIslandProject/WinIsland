@@ -5,7 +5,6 @@ mod plugin;
 mod ui;
 mod utils;
 mod window;
-use crate::core::i18n::{init_i18n, set_system_locale_provider};
 use crate::utils::logger;
 use crate::window::app::App;
 use std::env;
@@ -14,6 +13,7 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::{MSG, WM_DWMCOMPOSITIONCHANGED};
 use windows::core::w;
+use winisland_core::i18n::{init_i18n, set_system_locale_provider};
 use winit::event_loop::EventLoop;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
@@ -30,7 +30,7 @@ fn main() {
     let _ = utils::autostart::set_autostart(config.auto_start);
     logger::check_crash_flag();
     set_system_locale_provider(utils::locale::system_locale);
-    core::lyrics::set_simplify_hook(utils::cjk::to_simplified);
+    winisland_core::lyrics::set_simplify_hook(utils::cjk::to_simplified);
     init_i18n(&config.language);
 
     let args: Vec<String> = env::args().collect();

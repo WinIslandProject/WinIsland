@@ -1,4 +1,3 @@
-use crate::core::i18n::tr;
 use reqwest::header::{CACHE_CONTROL, PRAGMA};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -14,6 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IDOK, IDYES, MB_ICONINFORMATION, MB_OKCANCEL, MB_SETFOREGROUND, MB_TOPMOST, MessageBoxW,
 };
 use windows::core::PCWSTR;
+use winisland_core::i18n::tr;
 
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -344,12 +344,12 @@ async fn do_stable_check(app_dir: &Path, manual: bool) {
         .tag_name
         .trim_start_matches('v')
         .trim_start_matches('V');
-    let needs_update = is_version_newer(crate::core::config::APP_VERSION, remote_version);
+    let needs_update = is_version_newer(winisland_core::config::APP_VERSION, remote_version);
 
     if needs_update {
         log::info!(
             "Update available (Stable): {} -> {}",
-            crate::core::config::APP_VERSION,
+            winisland_core::config::APP_VERSION,
             remote_version
         );
 
@@ -382,7 +382,7 @@ async fn do_stable_check(app_dir: &Path, manual: bool) {
     } else {
         log::info!(
             "Update check (Stable): current version is up-to-date ({})",
-            crate::core::config::APP_VERSION
+            winisland_core::config::APP_VERSION
         );
         notify_up_to_date(manual).await;
     }

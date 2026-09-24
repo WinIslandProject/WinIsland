@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use windows::Foundation::TypedEventHandler;
 use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
 
-use crate::core::lyrics::LyricsMode;
+use winisland_core::lyrics::LyricsMode;
 
 use super::properties::{ThumbnailFetcher, TimelineCache, fetch_properties};
 use super::session::{auto_allow_new_apps, get_target_session};

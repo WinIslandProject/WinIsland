@@ -11,8 +11,8 @@ use windows::Media::Control::{
 };
 use windows::Storage::Streams::{Buffer, DataReader, InputStreamOptions};
 
-use crate::core::lyrics::LyricsMode;
 use crate::utils::cover::{compress_smtc_thumbnail, smtc_thumbnail_requires_compression};
+use winisland_core::lyrics::LyricsMode;
 
 use super::session::is_music_session;
 use super::{LyricsFetchRequest, MediaInfo, WinRtGuard, spawn_lyrics_fetch};

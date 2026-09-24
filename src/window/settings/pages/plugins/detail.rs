@@ -3,12 +3,12 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::PCWSTR;
 
-use crate::core::i18n::tr;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::MarketplacePlugin;
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::FontManager;
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
+use winisland_core::i18n::tr;
 
 use super::super::super::{
     PLUGIN_DETAIL_KEY, PluginPageTab, PluginSettingsRequest, SETTINGS_HEADER_H, SIDEBAR_W,

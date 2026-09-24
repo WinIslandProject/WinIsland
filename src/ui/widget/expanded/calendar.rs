@@ -1,7 +1,7 @@
 use super::{draw_widget_rounded_background, draw_widget_text_centered};
-use crate::core::i18n::tr;
 use skia_safe::{Canvas, Color, Paint, Rect};
 use std::cell::RefCell;
+use winisland_core::i18n::tr;
 
 struct CalendarText {
     year: u16,

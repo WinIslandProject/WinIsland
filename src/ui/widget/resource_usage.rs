@@ -15,7 +15,7 @@ use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTAT
 use windows::Win32::System::Threading::GetSystemTimes;
 use windows::core::{Interface, PCWSTR};
 
-use crate::core::config::{
+use winisland_core::config::{
     ResourceMetricConfig, ResourceMetricKind, default_resource_metrics, normalize_resource_metrics,
 };
 

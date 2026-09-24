@@ -5,10 +5,10 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::PCWSTR;
 
-use crate::core::config::{APP_AUTHOR, APP_HOMEPAGE, APP_VERSION};
-use crate::core::i18n::tr;
 use crate::utils::settings_ui::ClickResult;
 use crate::utils::settings_ui::items::SettingsItem;
+use winisland_core::config::{APP_AUTHOR, APP_HOMEPAGE, APP_VERSION};
+use winisland_core::i18n::tr;
 
 use super::super::SettingsApp;
 use super::{PageInput, SettingsPage};

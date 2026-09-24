@@ -7,11 +7,11 @@ use winit::platform::windows::WindowAttributesExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowButtons, WindowLevel};
 
-use crate::core::config::WINDOW_TITLE;
-use crate::core::i18n::tr;
 use crate::utils::icon::get_app_icon;
 use crate::utils::logger;
 use crate::window::tray::TrayManager;
+use winisland_core::config::WINDOW_TITLE;
+use winisland_core::i18n::tr;
 
 use super::App;
 

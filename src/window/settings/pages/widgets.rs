@@ -1,10 +1,5 @@
 use skia_safe::{Contains, Point, Rect};
 
-use crate::core::config::{
-    WidgetKind, clear_compact_widget_slot, clear_plugin_widget, clear_widget_slot,
-    place_builtin_widget, place_compact_widget, place_plugin_widget, plugin_widget_covering_slot,
-    widget_covering_slot,
-};
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{
     CompactWidgetPreviewHit, WidgetDropAnimation, WidgetDropTarget, WidgetEditorHover,
@@ -12,6 +7,11 @@ use crate::utils::settings_ui::{
     compact_widget_library_items, compact_widget_preview_height, compact_widget_preview_hit_test,
     widget_delete_button_hit, widget_edit_button_hit, widget_grid_geom, widget_library_items,
     widget_preview_height, widget_preview_hit_test,
+};
+use winisland_core::config::{
+    WidgetKind, clear_compact_widget_slot, clear_plugin_widget, clear_widget_slot,
+    place_builtin_widget, place_compact_widget, place_plugin_widget, plugin_widget_covering_slot,
+    widget_covering_slot,
 };
 
 use super::super::{SETTINGS_HEADER_H, SIDEBAR_W, SettingsApp, WIDGETS_PAGE_INDEX};
@@ -381,7 +381,7 @@ impl SettingsApp {
                 ) {
                     return false;
                 }
-                if widget == crate::core::config::CompactWidgetKind::ResourceUsage
+                if widget == winisland_core::config::CompactWidgetKind::ResourceUsage
                     && widget_edit_button_hit(
                         context.pointer,
                         (x, y, width, height),
@@ -547,7 +547,7 @@ impl SettingsApp {
             self.compact_widget_dragging,
         );
         let resource_edit = self.config.compact_widget_layout.iter().any(|entry| {
-            if entry.widget != Some(crate::core::config::CompactWidgetKind::ResourceUsage) {
+            if entry.widget != Some(winisland_core::config::CompactWidgetKind::ResourceUsage) {
                 return false;
             }
             let Some((x, y, width, height)) = geometry.slot_rect(entry.position()) else {

@@ -6,8 +6,10 @@ use winit::platform::windows::WindowExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::core::config::{DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, PADDING, TOP_OFFSET};
 use crate::utils::font::FontManager;
+use winisland_core::config::{
+    DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, PADDING, TOP_OFFSET,
+};
 
 use super::{App, DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ, IslandLayout};
 
@@ -327,7 +329,7 @@ impl App {
         } else {
             let hidden_width = if self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed
             {
-                crate::core::config::MIN_HIDDEN_WIDTH
+                winisland_core::config::MIN_HIDDEN_WIDTH
             } else {
                 self.config.hidden_width
             };
@@ -437,7 +439,7 @@ impl App {
             || !has_secondary_lyric
             || !matches!(
                 self.ctx_mgr.current_mini(),
-                Some(crate::core::context::MiniContent::Music)
+                Some(winisland_core::context::MiniContent::Music)
             )
         {
             return base_height;

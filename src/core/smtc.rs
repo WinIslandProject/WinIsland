@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 
-use crate::core::lyrics::{
+use winisland_core::lyrics::{
     LyricHighlight, LyricLine, LyricsMode, fetch_online_lyrics, load_local_lyrics,
 };
 

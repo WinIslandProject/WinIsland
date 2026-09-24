@@ -1,9 +1,6 @@
-use crate::core::config::AppConfig;
 use crate::core::plugin_settings::PluginSettingsPage;
-use crate::core::plugin_widget::PluginWidget;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::{MarketplaceCatalog, MarketplacePlugin};
-use crate::utils::anim::AnimPool;
 use crate::utils::color::{SettingsTheme, dark_settings_theme, light_settings_theme};
 use crate::utils::icon::get_app_icon;
 use crate::utils::settings_ui::items::{POPUP_MENU_R, SIDEBAR_PAD, SettingsItem};
@@ -16,6 +13,9 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
+use winisland_core::anim::AnimPool;
+use winisland_core::config::AppConfig;
+use winisland_core::widgets::PluginWidget;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -230,7 +230,7 @@ pub struct SettingsApp {
     pub(crate) widget_drag_hover_slot: Option<WidgetEditorSlot>,
     pub(crate) widget_preview_hover_slot: Option<WidgetEditorSlot>,
     pub(crate) widget_editor_mode: WidgetEditorMode,
-    pub(crate) compact_widget_dragging: Option<crate::core::config::CompactWidgetKind>,
+    pub(crate) compact_widget_dragging: Option<winisland_core::config::CompactWidgetKind>,
     pub(crate) widget_hover_target: Option<WidgetEditorHover>,
     pub(crate) widget_hover_visual: Option<WidgetEditorHover>,
     pub(crate) widget_hover_progress: f32,
@@ -285,11 +285,11 @@ impl SettingsApp {
 
     pub(crate) fn page_title(&self) -> String {
         match self.active_page {
-            0 => crate::core::i18n::tr("tab_general"),
-            1 => crate::core::i18n::tr("tab_music"),
-            2 => crate::core::i18n::tr("tab_widgets"),
-            3 => crate::core::i18n::tr("tab_plugins"),
-            4 => crate::core::i18n::tr("tab_about"),
+            0 => winisland_core::i18n::tr("tab_general"),
+            1 => winisland_core::i18n::tr("tab_music"),
+            2 => winisland_core::i18n::tr("tab_widgets"),
+            3 => winisland_core::i18n::tr("tab_plugins"),
+            4 => winisland_core::i18n::tr("tab_about"),
             _ => self
                 .active_plugin_settings_page()
                 .map(|page| page.title.clone())
@@ -307,7 +307,7 @@ impl SettingsApp {
             &config.resource_metrics,
             &config.compact_resource_metrics,
         );
-        crate::core::config::set_resource_widget_span(
+        winisland_core::config::set_resource_widget_span(
             config.resource_widget_columns,
             config.resource_widget_rows,
         );
@@ -1042,7 +1042,7 @@ impl SettingsApp {
     }
 
     fn handle_plugin_file_drop(&mut self, path: std::path::PathBuf) {
-        self.plugin_status = Some((crate::core::i18n::tr("plugin_installing"), false));
+        self.plugin_status = Some((winisland_core::i18n::tr("plugin_installing"), false));
         self.plugin_request = Some(PluginSettingsRequest::Install(path));
         self.mark_items_dirty();
         self.request_redraw();
@@ -1365,7 +1365,7 @@ impl SettingsApp {
 
     pub(crate) fn set_plugin_widgets(&mut self, plugin_widgets: Vec<PluginWidget>) {
         self.plugin_widgets = plugin_widgets;
-        let layout_changed = crate::core::config::normalize_active_plugin_widget_layout(
+        let layout_changed = winisland_core::config::normalize_active_plugin_widget_layout(
             &self.config.widget_layout,
             &mut self.config.plugin_widget_layout,
             &self.plugin_widgets,

@@ -1,14 +1,14 @@
 use skia_safe::{Canvas, Color, Paint, Rect};
 
 use super::draw_widget_rounded_background;
-use crate::core::config::{
-    ResourceMetricConfig, ResourceMetricKind, ResourceMetricStyle, default_resource_metrics,
-    resource_widget_span,
-};
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_expanded_config, with_resource_usage,
 };
 use crate::utils::font::{DrawTextCachedParams, FontManager};
+use winisland_core::config::{
+    ResourceMetricConfig, ResourceMetricKind, ResourceMetricStyle, default_resource_metrics,
+    resource_widget_span,
+};
 
 const CELL_GAP: f32 = 3.0;
 

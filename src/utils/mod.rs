@@ -1,4 +1,3 @@
-pub mod anim;
 pub mod autostart;
 pub mod backdrop;
 pub mod blur;
@@ -12,7 +11,6 @@ pub mod icon;
 pub mod locale;
 pub mod logger;
 pub mod mouse;
-pub mod physics;
 pub mod scroll;
 pub mod settings_ui;
 pub(crate) mod shape;

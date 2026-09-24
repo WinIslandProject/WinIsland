@@ -1,15 +1,10 @@
 use crate::core::audio::AudioProcessor;
-use crate::core::config::{AppConfig, LyricTransitionAnimation, LyricTransitionMode};
-use crate::core::context::ContextManager;
-use crate::core::lyrics::LyricHighlight;
 use crate::core::persistence::{get_config_path, load_config};
-use crate::core::plugin_widget::WidgetManager;
 use crate::core::smtc::{MediaInfo, SmtcListener};
 use crate::plugin::PluginManager;
 use crate::plugin::marketplace::MarketplaceCatalog;
 use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
-use crate::utils::physics::Spring;
 use crate::window::renderer::Renderer;
 use crate::window::settings::SettingsApp;
 use crate::window::tray::TrayManager;
@@ -17,6 +12,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use winisland_core::config::{AppConfig, LyricTransitionAnimation, LyricTransitionMode};
+use winisland_core::context::ContextManager;
+use winisland_core::lyrics::LyricHighlight;
+use winisland_core::physics::Spring;
+use winisland_core::widgets::WidgetManager;
 use winit::dpi::PhysicalPosition;
 use winit::window::Window;
 
@@ -132,14 +132,14 @@ impl Default for App {
         if config
             .widget_layout
             .iter()
-            .any(|slot| slot.widget == Some(crate::core::config::WidgetKind::ResourceUsage))
+            .any(|slot| slot.widget == Some(winisland_core::config::WidgetKind::ResourceUsage))
         {
             crate::ui::widget::resource_usage::with_resource_usage(
                 &config.resource_metrics,
                 |_| (),
             );
         }
-        crate::core::config::set_resource_widget_span(
+        winisland_core::config::set_resource_widget_span(
             config.resource_widget_columns,
             config.resource_widget_rows,
         );

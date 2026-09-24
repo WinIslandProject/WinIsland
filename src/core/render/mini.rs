@@ -4,14 +4,14 @@ use skia_safe::{
     image_filters,
 };
 
-use crate::core::config::LyricTransitionAnimation;
-use crate::core::context::MiniContent;
-use crate::core::lyrics::LyricHighlight;
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{
     DrawVisualizerParams, draw_text_cached, draw_visualizer, get_cached_media_image,
 };
 use crate::utils::font::{DrawTextCachedParams, FontManager};
+use winisland_core::config::LyricTransitionAnimation;
+use winisland_core::context::MiniContent;
+use winisland_core::lyrics::LyricHighlight;
 
 const PENDING_LYRIC_CHANNEL: u8 = 190;
 const SECONDARY_LYRIC_SCALE: f32 = 0.85;
@@ -338,7 +338,7 @@ fn plugin_text_x(text: &str, size: f32, bold: bool, text_x: f32, text_width: f32
 
 fn draw_plugin_content(
     params: &MiniContentParams<'_>,
-    context: &crate::core::context::PluginContext,
+    context: &winisland_core::context::PluginContext,
     alpha: u8,
 ) {
     let font_size = if params.font_size > 0.0 {

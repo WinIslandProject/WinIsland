@@ -60,18 +60,18 @@ impl From<&HostState> for HostStateV1 {
 pub fn context_from_ffi(
     id: ResourceId,
     value: &ContextDataV1,
-) -> crate::core::context::PluginContext {
+) -> winisland_core::context::PluginContext {
     let priority = match value.priority {
-        PRIORITY_LOW => crate::core::context::Priority::Low,
-        PRIORITY_HIGH => crate::core::context::Priority::High,
-        _ => crate::core::context::Priority::Medium,
+        PRIORITY_LOW => winisland_core::context::Priority::Low,
+        PRIORITY_HIGH => winisland_core::context::Priority::High,
+        _ => winisland_core::context::Priority::Medium,
     };
     let timeout = if value.timeout_ms == 0 {
         None
     } else {
         Some(std::time::Instant::now() + std::time::Duration::from_millis(value.timeout_ms as u64))
     };
-    crate::core::context::PluginContext {
+    winisland_core::context::PluginContext {
         id,
         priority,
         title: read_c_str(&value.title),
@@ -87,9 +87,9 @@ pub fn widget_from_ffi(
     plugin_id: &str,
     id: ResourceId,
     value: &WidgetDataV1,
-) -> crate::core::plugin_widget::PluginWidget {
+) -> winisland_core::widgets::PluginWidget {
     let key = read_c_str(&value.key);
-    crate::core::plugin_widget::PluginWidget {
+    winisland_core::widgets::PluginWidget {
         id,
         plugin_id: plugin_id.to_string(),
         key: (!key.is_empty()).then_some(key),

@@ -5,19 +5,19 @@ use skia_safe::{
     Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
 };
 
-use crate::core::config::{
-    CompactWidgetAlignment, CompactWidgetKind, CompactWidgetPosition, CompactWidgetSlot,
-    PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetKind, WidgetSlot, plugin_widget_slot, span_cells,
-    widget_footprint,
-};
-use crate::core::i18n::tr;
-use crate::core::plugin_widget::PluginWidget;
 use crate::ui::widget::expanded::{
     draw_mini_card, draw_widget_preview as draw_widget_card_preview,
 };
 use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::{SettingsPainter, settings_paint};
 use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
+use winisland_core::config::{
+    CompactWidgetAlignment, CompactWidgetKind, CompactWidgetPosition, CompactWidgetSlot,
+    PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetKind, WidgetSlot, plugin_widget_slot, span_cells,
+    widget_footprint,
+};
+use winisland_core::i18n::tr;
+use winisland_core::widgets::PluginWidget;
 
 use super::super::input::{
     COMPACT_WIDGET_ISLAND_PANEL_H, CompactWidgetGridGeom, WIDGET_ISLAND_PANEL_H,

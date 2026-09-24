@@ -16,13 +16,23 @@ WinIsland is a Windows desktop application that creates a Dynamic Island overlay
 ## Directory structure
 
 ```
-src/
-├── core/              Core business logic
+crates/
+├── winisland-core/    Platform-independent domain layer (no Windows API, no Skia, no winit, no UI)
+│   ├── config/        AppConfig, widget model, grid placement, version migration
+│   ├── context/       Plugin context manager
+│   ├── i18n/          Translation catalogue + plugin translation bundles
+│   ├── lyrics/        Lyrics model, LRC parsing, matching, online providers
+│   ├── anim.rs        Keyed animation pool
+│   ├── physics.rs     Spring physics for smooth animations
+│   ├── persistence.rs Config parse/migrate/atomic write (the config path is injected)
+│   └── widgets.rs     Plugin widget model (PluginWidget, WidgetManager)
+└── winisland-plugin-api/  Plugin C ABI types + optional packager
+
+src/                 Application crate "WinIsland"; it depends on winisland-core, never the reverse
+├── core/              Application-side logic that still owns platform calls
 │   ├── audio.rs       Audio loopback capture + FFT spectrum
-│   ├── config.rs      AppConfig struct and defaults
-│   ├── i18n.rs        Translation system (key-value .lang files)
-│   ├── lyrics.rs      Async lyrics fetcher (NetEase, lrclib, local .lrc)
-│   ├── persistence.rs Config save/load (~/.winisland/config.toml)
+│   ├── persistence.rs Config path adapter — resolves ~/.winisland/config.toml, forwards to winisland-core
+│   ├── plugin_settings.rs Plugin settings page model
 │   ├── render.rs      Main draw_island() — all Skia rendering lives here
 │   └── smtc.rs        SMTC session manager — polls media info, handles commands
 ├── icons/             Custom Skia path icons (arrows, controls, music, settings)
@@ -39,11 +49,12 @@ src/
 │   ├── autostart.rs   Registry-based auto-start
 │   ├── backdrop.rs    Dynamic color background effects
 │   ├── blur.rs        Motion blur sigma calculation
+│   ├── cjk.rs         Traditional to simplified Chinese conversion (LCMapStringEx)
 │   ├── color.rs       Adaptive island border color from screen pixels
 │   ├── font.rs        Font manager with caching
 │   ├── glass.rs       Frosted glass effect (GDI capture + blur + dark overlay)
+│   ├── locale.rs      System locale lookup (GetUserDefaultLocaleName)
 │   ├── mouse.rs       Global cursor position, hit-test, fullscreen detection
-│   ├── physics.rs     Spring physics for smooth animations
 │   ├── scroll.rs      Scroll container helpers
 │   ├── settings_ui/   Skia-rendered settings UI components
 │   ├── updater.rs     Nightly release check + download
@@ -57,6 +68,9 @@ src/
     ├── tray.rs        System tray icon + context menu
     └── settings/      Separate settings window
 ```
+
+`winisland-core` is a separate crate so that the domain layer cannot reach the Windows API, Skia or the window system. It declares no platform or rendering dependency, and the application injects the platform values it needs: the system locale through `i18n::set_system_locale_provider`, the CJK conversion through `lyrics::set_simplify_hook`, and the config path through `persistence::load_config_at` / `save_config_at`.
+
 
 ---
 
@@ -209,3 +223,8 @@ cargo test                            # Run all tests
 ```
 
 Build requirements: Windows SDK, LLVM/clang (via Visual Studio or `choco install llvm ninja`).
+
+### Version
+
+`[workspace.package] version` in the root `Cargo.toml` is the single source of truth (currently 1.3.9); both `WinIsland` and `winisland-core` inherit it through `version.workspace = true`, so `core::config::APP_VERSION` still reports the application version. The `release.yml` workflow takes its version as a manual input, so that input has to be bumped together with the manifest.
+

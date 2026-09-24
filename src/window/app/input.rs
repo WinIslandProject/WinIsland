@@ -3,7 +3,6 @@ use std::time::Instant;
 use winit::event::ElementState;
 use winit::event_loop::ActiveEventLoop;
 
-use crate::core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
 use crate::ui::expanded::music_view::{
     get_cover_rect, get_next_btn_rect, get_pause_btn_rect, get_prev_btn_rect,
     get_progress_bar_rect, trigger_cover_flip, trigger_next_click, trigger_pause_click,
@@ -13,6 +12,7 @@ use crate::ui::widget::expanded::{widget_corner_radius, widget_grid_layout};
 use crate::utils::mouse::{
     double_click_interval, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
+use winisland_core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
 
 use super::{App, DragAxis, IslandLayout, should_show_widget_view};
 

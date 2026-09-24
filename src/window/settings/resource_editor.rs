@@ -1,12 +1,12 @@
-use crate::core::config::{
-    ResourceMetricKind, ResourceMetricStyle, WIDGET_GRID_SLOTS, WidgetKind, place_builtin_widget,
-    set_resource_widget_span, span_cells,
-};
-use crate::core::i18n::tr;
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::settings_ui::settings_paint;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
+use winisland_core::config::{
+    ResourceMetricKind, ResourceMetricStyle, WIDGET_GRID_SLOTS, WidgetKind, place_builtin_widget,
+    set_resource_widget_span, span_cells,
+};
+use winisland_core::i18n::tr;
 
 use super::{PopupState, SettingsApp};
 use crate::utils::settings_ui::WidgetEditorMode;
@@ -46,7 +46,7 @@ enum EditorControl {
 }
 
 impl SettingsApp {
-    fn resource_editor_metrics(&self) -> &[crate::core::config::ResourceMetricConfig] {
+    fn resource_editor_metrics(&self) -> &[winisland_core::config::ResourceMetricConfig] {
         match self.widget_editor_mode {
             WidgetEditorMode::Expanded => &self.config.resource_metrics,
             WidgetEditorMode::Compact => &self.config.compact_resource_metrics,
@@ -55,7 +55,7 @@ impl SettingsApp {
 
     fn resource_editor_metrics_mut(
         &mut self,
-    ) -> &mut Vec<crate::core::config::ResourceMetricConfig> {
+    ) -> &mut Vec<winisland_core::config::ResourceMetricConfig> {
         match self.widget_editor_mode {
             WidgetEditorMode::Expanded => &mut self.config.resource_metrics,
             WidgetEditorMode::Compact => &mut self.config.compact_resource_metrics,
