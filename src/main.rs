@@ -5,7 +5,7 @@ mod plugin;
 mod ui;
 mod utils;
 mod window;
-use crate::core::i18n::init_i18n;
+use crate::core::i18n::{init_i18n, set_system_locale_provider};
 use crate::utils::logger;
 use crate::window::app::App;
 use std::env;
@@ -29,6 +29,7 @@ fn main() {
     let config = core::persistence::load_config();
     let _ = utils::autostart::set_autostart(config.auto_start);
     logger::check_crash_flag();
+    set_system_locale_provider(utils::locale::system_locale);
     init_i18n(&config.language);
 
     let args: Vec<String> = env::args().collect();

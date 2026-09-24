@@ -8,6 +8,7 @@ pub(crate) mod event_loop;
 pub mod font;
 pub mod gpu;
 pub mod icon;
+pub mod locale;
 pub mod logger;
 pub mod mouse;
 pub mod physics;
