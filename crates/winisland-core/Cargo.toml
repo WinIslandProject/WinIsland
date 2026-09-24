@@ -1,0 +1,5 @@
+[package]
+name = "winisland-core"
+version.workspace = true
+edition = "2024"
+publish = false
