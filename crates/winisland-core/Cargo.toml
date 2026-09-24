@@ -3,3 +3,6 @@ name = "winisland-core"
 version.workspace = true
 edition = "2024"
 publish = false
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

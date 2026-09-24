@@ -35,6 +35,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+ "winisland-core",
  "winisland-plugin-api",
  "winit",
  "winres",
@@ -5181,6 +5182,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 [[package]]
 name = "winisland-core"
 version = "1.3.9"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "winisland-plugin-api"

@@ -20,3 +20,6 @@
 //!
 //! The `WinIsland` application crate, which owns every platform-specific detail and injects the
 //! platform results this crate operates on.
+
+pub mod config;
+pub mod widgets;
