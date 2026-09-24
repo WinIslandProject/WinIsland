@@ -4,7 +4,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
 
 use super::{MOZILLA_UA, artist_matches, get_json, query_matches_song, url_encode};
-use crate::core::lyrics::{LyricLine, parse_lyrics};
+use crate::lyrics::{LyricLine, parse_lyrics};
 
 pub(super) async fn fetch(
     title: &str,

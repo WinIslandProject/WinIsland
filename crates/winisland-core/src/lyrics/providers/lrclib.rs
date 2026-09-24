@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::{get_json, query_matches_song, url_encode, winisland_ua};
-use crate::core::lyrics::{LyricLine, parse_lyrics};
+use crate::lyrics::{LyricLine, parse_lyrics};
 
 pub(super) async fn fetch(
     title: &str,

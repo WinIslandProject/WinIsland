@@ -8,7 +8,7 @@ use quick_xml::events::{BytesStart, BytesText, Event};
 use serde_json::Value;
 
 use super::{artist_matches, get_json, query_matches_song, url_encode, winisland_ua};
-use crate::core::lyrics::{LyricLine, LyricTiming, MatchKey};
+use crate::lyrics::{LyricLine, LyricTiming, MatchKey};
 
 const API_BASE: &str = "https://api.amll.dev/v1/lyrics";
 

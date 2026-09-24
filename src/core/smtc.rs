@@ -6,7 +6,9 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 
-use crate::core::lyrics::{LyricHighlight, LyricLine, LyricsMode, fetch_lyrics};
+use crate::core::lyrics::{
+    LyricHighlight, LyricLine, LyricsMode, fetch_online_lyrics, load_local_lyrics,
+};
 
 mod properties;
 mod session;
@@ -400,16 +402,32 @@ impl LyricsFetchRequest {
 pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: LyricsFetchRequest) {
     let info_tx = info_tx.clone();
     tokio::spawn(async move {
-        let lyrics = fetch_lyrics(
-            &request.title,
-            &request.artist,
-            request.duration_secs,
-            request.mode,
-            &request.source,
-            request.local_dir.as_deref(),
-        )
-        .await
-        .map(crate::plugin::manager::apply_lyrics_transforms);
+        let lyrics = if request.mode == LyricsMode::Lrc {
+            let local_dir = request
+                .local_dir
+                .clone()
+                .filter(|dir| !dir.trim().is_empty());
+            match local_dir {
+                Some(dir) => {
+                    let title = request.title.clone();
+                    let artist = request.artist.clone();
+                    tokio::task::spawn_blocking(move || load_local_lyrics(&title, &artist, &dir))
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                None => None,
+            }
+        } else {
+            fetch_online_lyrics(
+                &request.title,
+                &request.artist,
+                request.duration_secs,
+                &request.source,
+            )
+            .await
+        };
+        let lyrics = lyrics.map(crate::plugin::manager::apply_lyrics_transforms);
         let applied = info_tx.send_if_modified(|current| {
             if !request.matches(current) {
                 return false;

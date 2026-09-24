@@ -30,6 +30,7 @@ fn main() {
     let _ = utils::autostart::set_autostart(config.auto_start);
     logger::check_crash_flag();
     set_system_locale_provider(utils::locale::system_locale);
+    core::lyrics::set_simplify_hook(utils::cjk::to_simplified);
     init_i18n(&config.language);
 
     let args: Vec<String> = env::args().collect();

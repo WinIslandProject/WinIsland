@@ -5,6 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
+base64 = "0.23.1"
+encoding_rs = "0.8"
+fuzzengine = "0.2.1"
 log = { version = "0.4", features = ["std"] }
+lrc = "0.2.0"
+quick-xml = "0.41.0"
+reqwest = { version = "0.13.4", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.149"
 toml = "1.1.2"

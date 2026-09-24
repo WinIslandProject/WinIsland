@@ -2,6 +2,7 @@ pub mod anim;
 pub mod autostart;
 pub mod backdrop;
 pub mod blur;
+pub mod cjk;
 pub mod color;
 pub(crate) mod cover;
 pub(crate) mod event_loop;
