@@ -5183,7 +5183,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 name = "winisland-core"
 version = "1.3.9"
 dependencies = [
+ "log",
  "serde",
+ "toml 1.1.4+spec-1.1.0",
 ]
 
 [[package]]
