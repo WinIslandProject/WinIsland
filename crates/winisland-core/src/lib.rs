@@ -23,5 +23,6 @@
 
 pub mod anim;
 pub mod config;
+pub mod context;
 pub mod physics;
 pub mod widgets;
