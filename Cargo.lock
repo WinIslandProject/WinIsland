@@ -5214,6 +5214,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "winisland-render"
+version = "1.3.9"
+dependencies = [
+ "image",
+ "skia-safe",
+]
+
+[[package]]
 name = "winit"
 version = "0.30.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"

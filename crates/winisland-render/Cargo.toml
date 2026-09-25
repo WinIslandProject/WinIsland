@@ -1,0 +1,9 @@
+[package]
+name = "winisland-render"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+image = "0.25"
+skia-safe = { version = "0.99.0", features = ["d3d"] }
