@@ -107,4 +107,8 @@ impl Image {
     pub fn is_texture_backed(&self) -> bool {
         self.inner.is_texture_backed()
     }
+
+    pub(crate) fn as_skia(&self) -> &skia_safe::Image {
+        &self.inner
+    }
 }

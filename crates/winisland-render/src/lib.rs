@@ -22,9 +22,13 @@
 //! （`Renderer::prepare_image`）只允许在渲染线程调用。
 
 mod backend;
+mod convert;
 mod error;
 mod frame;
 mod image;
+#[cfg(feature = "legacy-canvas-bridge")]
+mod legacy;
+mod painter;
 mod path;
 mod surface;
 mod types;
@@ -32,6 +36,7 @@ mod types;
 pub use error::{RenderError, RenderResult};
 pub use frame::{DrawingContext, Renderer, RendererOptions, RendererTargetId};
 pub use image::Image;
+pub use painter::Painter;
 pub use path::{Path, PathBuilder};
 pub use surface::{NativeSurface, SURFACE_TAG_WIN32_HWND};
 pub use types::{

@@ -25,6 +25,10 @@ impl Path {
         self.inner.is_empty()
     }
 
+    pub(crate) fn as_skia(&self) -> &SkPath {
+        &self.inner
+    }
+
     pub(crate) fn from_skia(inner: SkPath) -> Self {
         Self { inner }
     }
