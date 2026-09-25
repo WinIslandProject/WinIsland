@@ -27,7 +27,8 @@ All code, comments, and commit messages are in **English** unless the project co
 ## Module responsibility
 
 Each module has a single responsibility:
-- `src/core/render.rs` — all Skia drawing, and only drawing
+- `src/ui/island.rs` — island composition through `winisland_render::Painter`
+- `crates/winisland-render/` — Skia backend, drawing primitives, images, text, and frame lifecycle
 - `src/window/app.rs` — event loop, state, input handling
 - `src/utils/glass.rs` — frosted glass effect (and nothing else)
 
@@ -68,13 +69,12 @@ Group imports in this order, separated by blank lines:
 - Propagate errors with `?` where possible
 - Log errors with `error!()` macro for unexpected failures
 
-## Skia conventions
+## Rendering conventions
 
-- Use cached `gpu::surfaces::render_target` surfaces for offscreen rendering
-- `Paint::default()` then configure only what differs from defaults
-- Anti-alias shape-drawing paints via `paint.set_anti_alias(true)`
-- Use `image_filters::blur` for blur effects, not manual convolution
-- Cache compiled `RuntimeEffect` (SKSL) in thread-locals
+- Use `winisland_render` value types and `Painter` in application UI code
+- Keep Skia calls inside `crates/winisland-render/`, except the plugin ABI v1 bridge in `src/plugin/manager.rs`
+- Preserve sampling, alpha, anti-aliasing, clip, and blur settings when migrating drawing calls
+- Keep expensive image, path, and text caches scoped to their rendering module
 
 ## Windows API conventions
 

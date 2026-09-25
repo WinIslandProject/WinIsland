@@ -26,21 +26,22 @@ crates/
 │   ├── physics.rs     Spring physics for smooth animations
 │   ├── persistence.rs Config parse/migrate/atomic write (the config path is injected)
 │   └── widgets.rs     Plugin widget model (PluginWidget, WidgetManager)
-└── winisland-plugin-api/  Plugin C ABI types + optional packager
+├── winisland-plugin-api/  Plugin C ABI types + optional packager
+└── winisland-render/      Rendering values, Painter, images, text, D3D12 targets, and frame lifecycle
 
 src/                 Application crate "WinIsland"; it depends on winisland-core, never the reverse
 ├── core/              Application-side logic that still owns platform calls
 │   ├── audio.rs       Audio loopback capture + FFT spectrum
 │   ├── persistence.rs Config path adapter — resolves ~/.winisland/config.toml, forwards to winisland-core
 │   ├── plugin_settings.rs Plugin settings page model
-│   ├── render.rs      Main draw_island() — all Skia rendering lives here
 │   └── smtc.rs        SMTC session manager — polls media info, handles commands
-├── icons/             Custom Skia path icons (arrows, controls, music, settings)
+├── icons/             Custom vector path icons (arrows, controls, music, settings)
 ├── plugin/            Native plugin system
 │   ├── loader.rs      NativePlugin — wraps DLL via libloading, C ABI vtable
 │   ├── manager.rs     PluginManager — RwLock registry, discover/install/unload
 │   ├── types.rs       Host-side Rust types mirroring C ABI structs
 │   └── zip_loader.rs  Plugin package extraction + manifest validation
+├── ui/island.rs       Main draw_island() composition and island views
 ├── ui/expanded/       Expanded island views
 │   ├── music_view.rs  Music player page (album art, controls, progress)
 │   └── widget_view.rs Widget/page view for additional content
@@ -51,20 +52,16 @@ src/                 Application crate "WinIsland"; it depends on winisland-core
 │   ├── blur.rs        Motion blur sigma calculation
 │   ├── cjk.rs         Traditional to simplified Chinese conversion (LCMapStringEx)
 │   ├── color.rs       Adaptive island border color from screen pixels
-│   ├── font.rs        Font manager with caching
 │   ├── glass.rs       Frosted glass effect (GDI capture + blur + dark overlay)
 │   ├── locale.rs      System locale lookup (GetUserDefaultLocaleName)
 │   ├── mouse.rs       Global cursor position, hit-test, fullscreen detection
 │   ├── scroll.rs      Scroll container helpers
-│   ├── settings_ui/   Skia-rendered settings UI components
+│   ├── settings_ui/   Settings UI components drawn through Painter
 │   ├── updater.rs     Nightly release check + download
 │   └── win32.rs       Raw Win32 API wrappers (topmost, window styles, etc.)
 └── window/
     ├── app.rs         Main App struct — event loop, state, input, orchestration
     ├── backdrop.rs    Shared Windows Composition host-backdrop window
-    ├── renderer.rs    Shared drawing context, frame isolation, and target lifecycle
-    ├── d3d.rs         D3D12 device, Skia context, and GPU synchronization
-    ├── d3d/target.rs  DXGI swap chains and DirectComposition targets
     ├── tray.rs        System tray icon + context menu
     └── settings/      Separate settings window
 ```
@@ -94,7 +91,7 @@ about_to_wait() [display refresh rate while active, throttled while idle]:
   8. Request redraw if animating
   9. Schedule the next deadline from animation, playback, interaction, or idle state
 
-RedrawRequested → draw_island():
+RedrawRequested → winisland_render::Renderer::frame() → ui::island::draw_island():
   1. Compute dt, motion blur sigmas
   2. Get current MediaInfo from SMTC
   3. Get spectrum from AudioProcessor
@@ -112,7 +109,9 @@ Each style draws its background differently:
 - **dynamic**: Cached blurred album art rendered by the active Skia backend
 - **default**: Solid black
 
-D3D12 is the only rendering backend. Each frame starts with an unclipped transparent clear and
+D3D12 is the only rendering backend. `winisland-render` owns Skia, image handles, font caches,
+the D3D12 device, and frame presentation. The plugin ABI v1 adapter retains a hidden Skia
+re-export until its drawing bridge is replaced. Each frame starts with an unclipped transparent clear and
 isolates the drawing callback's canvas state. Resizing waits for GPU work and releases back-buffer
 references before calling ResizeBuffers. Renderer failures invalidate both windows' GPU caches
 and recreate their targets together. The companion backdrop window remains independent.
@@ -227,4 +226,3 @@ Build requirements: Windows SDK, LLVM/clang (via Visual Studio or `choco install
 ### Version
 
 `[workspace.package] version` in the root `Cargo.toml` is the single source of truth (currently 1.3.9); both `WinIsland` and `winisland-core` inherit it through `version.workspace = true`, so `core::config::APP_VERSION` still reports the application version. The `release.yml` workflow takes its version as a manual input, so that input has to be bumped together with the manifest.
-
