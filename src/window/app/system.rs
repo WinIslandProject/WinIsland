@@ -12,9 +12,28 @@ use winit::window::Window;
 use crate::core::persistence::{get_config_path, load_config};
 use crate::plugin::marketplace::{self, MarketplacePlugin};
 use crate::plugin::zip_loader;
+use crate::window::backdrop::{HostBackdrop, HostBackdropParams};
+use crate::window::renderer::RendererOptions;
 use crate::window::tray::TrayAction;
 
 use super::App;
+
+/// 更新宿主背景合成。失败时永久丢弃 `HostBackdrop`（与迁移前的 `Renderer` 行为一致）。
+/// 之所以是自由函数：调用点同时持有 `App` 其他字段的不可变借用，无法取 `&mut self`。
+pub(super) fn update_host_backdrop(
+    host_backdrop: &mut Option<HostBackdrop>,
+    params: HostBackdropParams,
+) -> bool {
+    let Some(backdrop) = host_backdrop.as_ref() else {
+        return false;
+    };
+    if let Err(error) = backdrop.update(params) {
+        log::warn!("Host backdrop update failed: {error}");
+        *host_backdrop = None;
+        return false;
+    }
+    true
+}
 
 impl App {
     pub(super) fn handle_plugin_settings_request(&mut self, event_loop: &ActiveEventLoop) {
@@ -103,9 +122,30 @@ impl App {
         }
         crate::utils::backdrop::clear_blurred_cover_cache();
         crate::ui::expanded::music_view::clear_cover_cache();
+        self.host_backdrop = None;
         drop(renderer);
         self.renderer_retry_at = Some(now);
         self.next_frame_deadline = now;
+    }
+
+    pub(super) fn create_host_backdrop(
+        &mut self,
+        window: &Arc<Window>,
+        backdrop_window: &Arc<Window>,
+    ) {
+        self.host_backdrop = match HostBackdrop::new(window, backdrop_window) {
+            Ok(backdrop) => Some(backdrop),
+            Err(error) => {
+                log::warn!("Host backdrop is unavailable: {error}");
+                None
+            }
+        };
+    }
+
+    pub(super) fn hide_host_backdrop(&self) {
+        if let Some(host_backdrop) = self.host_backdrop.as_ref() {
+            host_backdrop.hide();
+        }
     }
 
     pub(super) fn recover_renderer(
@@ -128,10 +168,16 @@ impl App {
             return;
         };
         match crate::window::renderer::Renderer::new(
-            window,
-            &backdrop_window,
-            self.geom.os_w,
-            self.geom.os_h,
+            match crate::window::native_surface(window) {
+                Ok(surface) => surface,
+                Err(error) => {
+                    log::warn!("Renderer recovery failed: {error}");
+                    self.renderer_retry_at = Some(now + retry_interval);
+                    self.next_frame_deadline = now + retry_interval;
+                    return;
+                }
+            },
+            RendererOptions::new(self.geom.os_w, self.geom.os_h),
         ) {
             Ok(mut renderer) => {
                 if let Some(settings) = self.settings.as_mut()
@@ -143,6 +189,7 @@ impl App {
                     return;
                 }
                 self.renderer = Some(renderer);
+                self.create_host_backdrop(window, &backdrop_window);
                 self.renderer_retry_at = None;
                 self.last_render_time = now;
                 window.request_redraw();
@@ -365,9 +412,7 @@ impl App {
                     self.visible = !self.visible;
                     window.set_visible(self.visible);
                     if !self.visible {
-                        if let Some(renderer) = self.renderer.as_ref() {
-                            renderer.hide_host_backdrop();
-                        }
+                        self.hide_host_backdrop();
                     } else {
                         window.request_redraw();
                     }

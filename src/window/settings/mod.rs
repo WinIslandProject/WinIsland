@@ -573,7 +573,13 @@ impl SettingsApp {
         let scale = window.scale_factor();
         self.logical_win_w = size.width as f64 / scale;
         self.logical_win_h = size.height as f64 / scale;
-        self.renderer_target = match renderer.create_target(&window, size.width, size.height) {
+        self.renderer_target = match crate::window::native_surface(&window)
+            .map_err(|error| error.to_string())
+            .and_then(|surface| {
+                renderer
+                    .create_target(surface, size.width, size.height)
+                    .map_err(|error| error.to_string())
+            }) {
             Ok(target) => Some(target),
             Err(error) => {
                 log::error!("Settings renderer initialization failed: {error}");
@@ -601,7 +607,12 @@ impl SettingsApp {
             return Ok(());
         };
         let size = window.inner_size();
-        self.renderer_target = Some(renderer.create_target(window, size.width, size.height)?);
+        let surface = crate::window::native_surface(window)?;
+        self.renderer_target = Some(
+            renderer
+                .create_target(surface, size.width, size.height)
+                .map_err(|error| error.to_string())?,
+        );
         window.request_redraw();
         Ok(())
     }

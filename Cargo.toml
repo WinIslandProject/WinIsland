@@ -38,6 +38,7 @@ log = { version = "0.4", features = ["std"] }
 lrc = "0.2.0"
 winisland-plugin-api = { path = "crates/winisland-plugin-api" }
 winisland-core = { path = "crates/winisland-core" }
+winisland-render = { path = "crates/winisland-render" }
 zip = "8.6.0"
 serde_yaml = "0.9"
 pulldown-cmark = { version = "0.13.4", default-features = false }

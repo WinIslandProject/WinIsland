@@ -21,12 +21,19 @@
 //! `Image::from_encoded`/`Image::from_rgba8`）可在任意线程调用；GPU 上传
 //! （`Renderer::prepare_image`）只允许在渲染线程调用。
 
+mod backend;
+mod error;
+mod frame;
 mod image;
 mod path;
+mod surface;
 mod types;
 
+pub use error::{RenderError, RenderResult};
+pub use frame::{DrawingContext, Renderer, RendererOptions, RendererTargetId};
 pub use image::Image;
 pub use path::{Path, PathBuilder};
+pub use surface::{NativeSurface, SURFACE_TAG_WIN32_HWND};
 pub use types::{
     Angle, BlurSpec, FontStyle, FontWeight, FontWidth, GradientStop, ImageFit, ImageOptions,
     LayerSpec, Mipmapped, PaintStyle, Point, Radius, Rect, Rgba, Sampling, Slant, SrcConstraint,

@@ -37,6 +37,7 @@ dependencies = [
  "windows-numerics",
  "winisland-core",
  "winisland-plugin-api",
+ "winisland-render",
  "winit",
  "winres",
  "zip",
@@ -5218,7 +5219,10 @@ name = "winisland-render"
 version = "1.3.9"
 dependencies = [
  "image",
+ "log",
  "skia-safe",
+ "thiserror 2.0.20",
+ "windows",
 ]
 
 [[package]]

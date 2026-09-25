@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use skia_safe::gpu::{self, ContextOptions, DirectContext, Protected, d3d::BackendContext};
 use windows::Win32::Graphics::{
     Direct3D::D3D_FEATURE_LEVEL_11_0,
@@ -12,23 +10,25 @@ use windows::Win32::Graphics::{
         DXGI_ERROR_NOT_FOUND, IDXGIAdapter1, IDXGIFactory4,
     },
 };
-use winit::window::Window;
+
+use crate::error::RenderResult;
+use crate::surface::NativeSurface;
 
 mod target;
-pub(super) use target::RenderTarget;
+pub(crate) use target::RenderTarget;
 
 const GPU_RESOURCE_CACHE_LIMIT: usize = 12 * 1024 * 1024;
 const GPU_GLYPH_CACHE_LIMIT: usize = 2 * 1024 * 1024;
 
-pub(super) struct D3DDevice {
-    pub(super) context: DirectContext,
+pub(crate) struct D3DDevice {
+    pub(crate) context: DirectContext,
     composition: IDCompositionDevice,
     backend: BackendContext,
     factory: IDXGIFactory4,
 }
 
 impl D3DDevice {
-    pub(super) fn new() -> Result<Self, String> {
+    pub(crate) fn new() -> RenderResult<Self> {
         // SAFETY: DXGI returns an owned COM interface without retaining any caller pointers.
         let factory: IDXGIFactory4 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }
             .map_err(|error| format!("CreateDXGIFactory2 failed: {error}"))?;
@@ -38,7 +38,9 @@ impl D3DDevice {
             let adapter = match unsafe { factory.EnumAdapters1(index) } {
                 Ok(adapter) => adapter,
                 Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
-                Err(error) => return Err(format!("DXGI adapter enumeration failed: {error}")),
+                Err(error) => {
+                    return Err(format!("DXGI adapter enumeration failed: {error}").into());
+                }
             };
             // SAFETY: This only queries the live adapter returned by DXGI.
             let desc = unsafe { adapter.GetDesc1() }
@@ -57,13 +59,10 @@ impl D3DDevice {
                 Err(error) => errors.push(format!("{name}: {error}")),
             }
         }
-        Err(format!(
-            "No usable hardware D3D12 adapter: {}",
-            errors.join("; ")
-        ))
+        Err(format!("No usable hardware D3D12 adapter: {}", errors.join("; ")).into())
     }
 
-    fn from_adapter(factory: IDXGIFactory4, adapter: IDXGIAdapter1) -> Result<Self, String> {
+    fn from_adapter(factory: IDXGIFactory4, adapter: IDXGIAdapter1) -> RenderResult<Self> {
         let mut device: Option<ID3D12Device> = None;
         // SAFETY: The adapter is live and the output is an initialized Option owned by this call.
         unsafe { D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_11_0, &mut device) }
@@ -102,22 +101,22 @@ impl D3DDevice {
         })
     }
 
-    pub(super) fn create_target(
+    pub(crate) fn create_target(
         &mut self,
-        window: &Arc<Window>,
+        surface: NativeSurface,
         width: u32,
         height: u32,
-    ) -> Result<RenderTarget, String> {
+    ) -> RenderResult<RenderTarget> {
         self.check_health()?;
-        RenderTarget::new(self, window, width.max(1), height.max(1))
+        RenderTarget::new(self, surface, width.max(1), height.max(1))
     }
 
-    pub(super) fn resize_target(
+    pub(crate) fn resize_target(
         &mut self,
         target: &mut RenderTarget,
         width: u32,
         height: u32,
-    ) -> Result<(), String> {
+    ) -> RenderResult<()> {
         if width == 0 || height == 0 || target.size() == (width, height) {
             return Ok(());
         }
@@ -131,38 +130,38 @@ impl D3DDevice {
         self.check_health()
     }
 
-    fn validate_size(&self, width: u32, height: u32) -> Result<(), String> {
+    fn validate_size(&self, width: u32, height: u32) -> RenderResult<()> {
         let limit = self.context.max_render_target_size() as u32;
         if width == 0 || height == 0 || width > limit || height > limit {
-            return Err(format!(
-                "Invalid D3D12 target size {width}x{height} (limit {limit})"
-            ));
+            return Err(
+                format!("Invalid D3D12 target size {width}x{height} (limit {limit})").into(),
+            );
         }
         Ok(())
     }
 
-    pub(super) fn check_health(&mut self) -> Result<(), String> {
+    pub(crate) fn check_health(&mut self) -> RenderResult<()> {
         // SAFETY: This only queries the retained D3D12 device's removal status.
         unsafe { self.backend.device.GetDeviceRemovedReason() }
             .map_err(|error| format!("D3D12 device removed: {error}"))?;
         if self.context.abandoned() || self.context.is_device_lost() {
-            return Err("Skia D3D12 context is unavailable".to_string());
+            return Err("Skia D3D12 context is unavailable".to_string().into());
         }
         if self.context.oomed() {
-            return Err("Skia D3D12 allocation failed".to_string());
+            return Err("Skia D3D12 allocation failed".to_string().into());
         }
         Ok(())
     }
 
-    pub(super) fn submit(&mut self, sync: gpu::SyncCpu) -> Result<(), String> {
+    pub(crate) fn submit(&mut self, sync: gpu::SyncCpu) -> RenderResult<()> {
         if !self.context.submit(sync) {
             self.check_health()?;
-            return Err("Skia D3D12 submission failed".to_string());
+            return Err("Skia D3D12 submission failed".to_string().into());
         }
         self.check_health()
     }
 
-    pub(super) fn synchronize(&mut self) -> Result<(), String> {
+    pub(crate) fn synchronize(&mut self) -> RenderResult<()> {
         self.check_health()?;
         self.context.flush(&gpu::FlushInfo::default());
         self.submit(gpu::SyncCpu::Yes)

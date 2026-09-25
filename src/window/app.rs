@@ -5,6 +5,7 @@ use crate::plugin::PluginManager;
 use crate::plugin::marketplace::MarketplaceCatalog;
 use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
+use crate::window::backdrop::HostBackdrop;
 use crate::window::renderer::Renderer;
 use crate::window::settings::SettingsApp;
 use crate::window::tray::TrayManager;
@@ -54,6 +55,7 @@ struct PluginMediaSource {
 
 pub struct App {
     window: Option<Arc<Window>>,
+    host_backdrop: Option<HostBackdrop>,
     renderer: Option<Renderer>,
     backdrop_window: Option<Arc<Window>>,
     settings: Option<SettingsApp>,
@@ -150,6 +152,7 @@ impl Default for App {
             .set_custom_font_path(config.custom_font_path.as_deref());
         Self {
             window: None,
+            host_backdrop: None,
             renderer: None,
             backdrop_window: None,
             settings: None,

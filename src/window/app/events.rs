@@ -324,9 +324,8 @@ impl App {
                                 ("", "")
                             };
 
-                        let main_target = renderer.main_target();
-                        let host_backdrop = renderer.update_host_backdrop(
-                            main_target,
+                        let host_backdrop = super::system::update_host_backdrop(
+                            &mut self.host_backdrop,
                             HostBackdropParams {
                                 enabled: !compact_components_hidden
                                     && matches!(
@@ -342,6 +341,7 @@ impl App {
                                 radius: self.springs.r.value,
                             },
                         );
+                        let main_target = renderer.main_target();
                         let render_result =
                             renderer.draw(main_target, |drawing_context, surface| {
                                 draw_island(
@@ -427,7 +427,7 @@ impl App {
                             });
                         self.renderer = Some(renderer);
                         if let Err(error) = render_result {
-                            self.invalidate_renderer(&error, Instant::now());
+                            self.invalidate_renderer(&error.to_string(), Instant::now());
                         }
                     }
                 }

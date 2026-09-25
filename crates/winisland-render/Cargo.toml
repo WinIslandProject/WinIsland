@@ -6,4 +6,14 @@ publish = false
 
 [dependencies]
 image = "0.25"
+log = { version = "0.4", features = ["std"] }
 skia-safe = { version = "0.99.0", features = ["d3d"] }
+thiserror = "2.0"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
