@@ -1,14 +1,12 @@
 use crate::utils::color::SettingsTheme;
-use crate::utils::color::rgba_of_paint;
-use crate::utils::settings_ui::settings_paint;
-use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
+use crate::utils::settings_ui::settings_color;
 use winisland_core::config::{
     ResourceMetricKind, ResourceMetricStyle, WIDGET_GRID_SLOTS, WidgetKind, place_builtin_widget,
     set_resource_widget_span, span_cells,
 };
 use winisland_core::i18n::tr;
-use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{Painter, Point, Radius, Rect, Rgba, StrokeCap};
 
 use super::{PopupState, SettingsApp};
 use crate::utils::settings_ui::WidgetEditorMode;
@@ -263,7 +261,7 @@ impl SettingsApp {
 
     pub(crate) fn draw_resource_editor(
         &self,
-        canvas: &Canvas,
+        painter: Painter<'_>,
         theme: &SettingsTheme,
         win_w: f32,
         win_h: f32,
@@ -271,30 +269,31 @@ impl SettingsApp {
         if !self.resource_editor_open {
             return;
         }
-        canvas.draw_rect(
+        painter.fill_rect(
             Rect::from_xywh(0.0, 0.0, win_w, win_h),
-            &settings_paint(Color::from_argb(138, 0, 0, 0)),
+            Rgba::from_argb(138, 0, 0, 0),
         );
         let dialog = self.resource_editor_rect();
-        canvas.draw_round_rect(
+        painter.fill_round_rect(
             Rect::from_xywh(
                 dialog.left,
                 dialog.top + 8.0,
                 dialog.width(),
                 dialog.height(),
             ),
-            20.0,
-            20.0,
-            &settings_paint(theme.shadow),
+            Radius::uniform(20.0),
+            settings_color(theme.shadow),
         );
-        canvas.draw_round_rect(dialog, 20.0, 20.0, &settings_paint(theme.win_bg));
-        let mut border = settings_paint(theme.popup_border);
-        border.set_style(skia_safe::paint::Style::Stroke);
-        border.set_stroke_width(1.0);
-        canvas.draw_round_rect(dialog, 20.0, 20.0, &border);
+        painter.fill_round_rect(dialog, Radius::uniform(20.0), settings_color(theme.win_bg));
+        painter.stroke_round_rect(
+            dialog,
+            Radius::uniform(20.0),
+            1.0,
+            settings_color(theme.popup_border),
+        );
 
         draw_text(
-            canvas,
+            painter,
             &tr(match self.widget_editor_mode {
                 WidgetEditorMode::Expanded => "resource_editor_title_expanded",
                 WidgetEditorMode::Compact => "resource_editor_title_compact",
@@ -303,35 +302,41 @@ impl SettingsApp {
             dialog.top + 41.0,
             21.0,
             true,
-            theme.text_pri,
+            settings_color(theme.text_pri),
         );
         draw_text(
-            canvas,
+            painter,
             &tr("resource_editor_hint"),
             dialog.left + 20.0,
             dialog.top + 65.0,
             12.0,
             false,
-            theme.text_sec,
+            settings_color(theme.text_sec),
         );
         if self.widget_editor_mode == WidgetEditorMode::Expanded {
             draw_text(
-                canvas,
+                painter,
                 &tr("resource_size"),
                 dialog.left + 20.0,
                 dialog.top + 98.0,
                 12.0,
                 true,
-                theme.text_sec,
+                settings_color(theme.text_sec),
             );
             let button = resource_size_button(dialog);
-            canvas.draw_round_rect(button, 8.0, 8.0, &settings_paint(theme.control_bg));
-            let mut button_border = settings_paint(theme.control_border);
-            button_border.set_style(skia_safe::paint::Style::Stroke);
-            button_border.set_stroke_width(0.75);
-            canvas.draw_round_rect(button, 8.0, 8.0, &button_border);
+            painter.fill_round_rect(
+                button,
+                Radius::uniform(8.0),
+                settings_color(theme.control_bg),
+            );
+            painter.stroke_round_rect(
+                button,
+                Radius::uniform(8.0),
+                0.75,
+                settings_color(theme.control_border),
+            );
             draw_text(
-                canvas,
+                painter,
                 &format!(
                     "{} × {}",
                     self.config.resource_widget_columns, self.config.resource_widget_rows
@@ -340,29 +345,29 @@ impl SettingsApp {
                 button.center_y() + 4.0,
                 12.0,
                 false,
-                theme.text_pri,
+                settings_color(theme.text_pri),
             );
-            draw_dropdown_arrow(canvas, button.right - 15.0, button.center_y(), theme);
+            draw_dropdown_arrow(painter, button.right - 15.0, button.center_y(), theme);
         }
         let close = Rect::from_xywh(dialog.right - 50.0, dialog.top + 24.0, 30.0, 30.0);
-        canvas.draw_circle(
-            (close.center_x(), close.center_y()),
+        painter.fill_circle(
+            Point::new(close.center_x(), close.center_y()),
             15.0,
-            &settings_paint(theme.control_bg),
+            settings_color(theme.control_bg),
         );
-        let mut close_paint = settings_paint(theme.text_sec);
-        close_paint.set_style(skia_safe::paint::Style::Stroke);
-        close_paint.set_stroke_width(1.8);
-        close_paint.set_stroke_cap(skia_safe::paint::Cap::Round);
-        canvas.draw_line(
-            (close.center_x() - 4.0, close.center_y() - 4.0),
-            (close.center_x() + 4.0, close.center_y() + 4.0),
-            &close_paint,
+        painter.stroke_line(
+            Point::new(close.center_x() - 4.0, close.center_y() - 4.0),
+            Point::new(close.center_x() + 4.0, close.center_y() + 4.0),
+            1.8,
+            settings_color(theme.text_sec),
+            StrokeCap::Round,
         );
-        canvas.draw_line(
-            (close.center_x() + 4.0, close.center_y() - 4.0),
-            (close.center_x() - 4.0, close.center_y() + 4.0),
-            &close_paint,
+        painter.stroke_line(
+            Point::new(close.center_x() + 4.0, close.center_y() - 4.0),
+            Point::new(close.center_x() - 4.0, close.center_y() + 4.0),
+            1.8,
+            settings_color(theme.text_sec),
+            StrokeCap::Round,
         );
 
         let rows_top = dialog.top + self.resource_editor_header_height();
@@ -374,10 +379,10 @@ impl SettingsApp {
                 dialog.width() - 40.0,
                 ROW_HEIGHT,
             );
-            canvas.draw_round_rect(row, 13.0, 13.0, &settings_paint(theme.group_bg));
+            painter.fill_round_rect(row, Radius::uniform(13.0), settings_color(theme.group_bg));
             let center_y = row.center_y();
             draw_order_button(
-                canvas,
+                painter,
                 row.left + 10.0,
                 center_y - 13.0,
                 true,
@@ -385,7 +390,7 @@ impl SettingsApp {
                 theme,
             );
             draw_order_button(
-                canvas,
+                painter,
                 row.left + 36.0,
                 center_y - 13.0,
                 false,
@@ -393,28 +398,32 @@ impl SettingsApp {
                 theme,
             );
             draw_switch(
-                canvas,
+                painter,
                 row.left + 72.0,
                 center_y - 11.0,
                 metric.enabled,
                 theme,
             );
             draw_text(
-                canvas,
+                painter,
                 metric_name(metric.kind),
                 row.left + 122.0,
                 center_y + 5.0,
                 14.0,
                 true,
                 if metric.enabled {
-                    theme.text_pri
+                    settings_color(theme.text_pri)
                 } else {
-                    theme.disabled
+                    settings_color(theme.disabled)
                 },
             );
 
             let style = Rect::from_xywh(row.right - 190.0, center_y - 15.0, 120.0, 30.0);
-            canvas.draw_round_rect(style, 8.0, 8.0, &settings_paint(theme.control_bg));
+            painter.fill_round_rect(
+                style,
+                Radius::uniform(8.0),
+                settings_color(theme.control_bg),
+            );
             let selected = match metric.style {
                 ResourceMetricStyle::Bar => {
                     Rect::from_xywh(style.left + 2.0, style.top + 2.0, 58.0, 26.0)
@@ -423,9 +432,9 @@ impl SettingsApp {
                     Rect::from_xywh(style.left + 60.0, style.top + 2.0, 58.0, 26.0)
                 }
             };
-            canvas.draw_round_rect(selected, 6.0, 6.0, &settings_paint(theme.accent));
+            painter.fill_round_rect(selected, Radius::uniform(6.0), settings_color(theme.accent));
             draw_centered_text(
-                canvas,
+                painter,
                 &tr("resource_style_bar"),
                 Rect::from_xywh(style.left, style.top, 60.0, 30.0),
                 11.0,
@@ -433,7 +442,7 @@ impl SettingsApp {
                 theme,
             );
             draw_centered_text(
-                canvas,
+                painter,
                 &tr("resource_style_ring"),
                 Rect::from_xywh(style.left + 60.0, style.top, 60.0, 30.0),
                 11.0,
@@ -442,16 +451,13 @@ impl SettingsApp {
             );
 
             let color = rgb(metric.color);
-            canvas.draw_circle((row.right - 32.0, center_y), 14.0, &settings_paint(color));
-            let mut color_border = settings_paint(Color::from_argb(
-                90,
-                theme.text_pri.r(),
-                theme.text_pri.g(),
-                theme.text_pri.b(),
-            ));
-            color_border.set_style(skia_safe::paint::Style::Stroke);
-            color_border.set_stroke_width(1.0);
-            canvas.draw_circle((row.right - 32.0, center_y), 14.0, &color_border);
+            painter.fill_circle(Point::new(row.right - 32.0, center_y), 14.0, color);
+            painter.stroke_circle(
+                Point::new(row.right - 32.0, center_y),
+                14.0,
+                1.0,
+                settings_color(theme.text_pri).with_alpha(90),
+            );
         }
     }
 }
@@ -480,36 +486,43 @@ fn select_resource_size(app: &mut SettingsApp, value: &str) {
     app.resize_resource_widget(columns, rows);
 }
 
-fn draw_dropdown_arrow(canvas: &Canvas, x: f32, y: f32, theme: &SettingsTheme) {
-    let mut paint = settings_paint(theme.text_sec);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(1.5);
-    paint.set_stroke_cap(skia_safe::paint::Cap::Round);
-    paint.set_stroke_join(skia_safe::paint::Join::Round);
-    canvas.draw_line((x - 4.0, y - 2.0), (x, y + 2.0), &paint);
-    canvas.draw_line((x, y + 2.0), (x + 4.0, y - 2.0), &paint);
+fn draw_dropdown_arrow(painter: Painter<'_>, x: f32, y: f32, theme: &SettingsTheme) {
+    let color = settings_color(theme.text_sec);
+    painter.stroke_line(
+        Point::new(x - 4.0, y - 2.0),
+        Point::new(x, y + 2.0),
+        1.5,
+        color,
+        StrokeCap::Round,
+    );
+    painter.stroke_line(
+        Point::new(x, y + 2.0),
+        Point::new(x + 4.0, y - 2.0),
+        1.5,
+        color,
+        StrokeCap::Round,
+    );
 }
 
-fn rgb(value: u32) -> Color {
-    Color::from_rgb((value >> 16) as u8, (value >> 8) as u8, value as u8)
+fn rgb(value: u32) -> Rgba {
+    Rgba::from_rgb((value >> 16) as u8, (value >> 8) as u8, value as u8)
 }
 
-fn draw_text(canvas: &Canvas, text: &str, x: f32, y: f32, size: f32, bold: bool, color: Color) {
-    let paint = settings_paint(color);
+fn draw_text(painter: Painter<'_>, text: &str, x: f32, y: f32, size: f32, bold: bool, color: Rgba) {
     FontManager::global().draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text,
         x,
         y,
         size,
         bold,
-        color: rgba_of_paint(&paint),
+        color,
         blur: None,
     });
 }
 
 fn draw_centered_text(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     text: &str,
     rect: Rect,
     size: f32,
@@ -527,41 +540,40 @@ fn draw_centered_text(
         },
     );
     draw_text(
-        canvas,
+        painter,
         text,
         rect.center_x() - width / 2.0,
         rect.center_y() + 4.0,
         size,
         selected,
-        if selected {
+        settings_color(if selected {
             theme.selection_text
         } else {
             theme.text_sec
-        },
+        }),
     );
 }
 
-fn draw_switch(canvas: &Canvas, x: f32, y: f32, enabled: bool, theme: &SettingsTheme) {
+fn draw_switch(painter: Painter<'_>, x: f32, y: f32, enabled: bool, theme: &SettingsTheme) {
     let rect = Rect::from_xywh(x, y, 38.0, 22.0);
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         rect,
-        11.0,
-        11.0,
-        &settings_paint(if enabled {
+        Radius::uniform(11.0),
+        settings_color(if enabled {
             theme.toggle_on
         } else {
             theme.toggle_off
         }),
     );
-    canvas.draw_circle(
-        (if enabled { x + 27.0 } else { x + 11.0 }, y + 11.0),
+    painter.fill_circle(
+        Point::new(if enabled { x + 27.0 } else { x + 11.0 }, y + 11.0),
         8.0,
-        &settings_paint(Color::WHITE),
+        Rgba::WHITE,
     );
 }
 
 fn draw_order_button(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     up: bool,
@@ -569,37 +581,34 @@ fn draw_order_button(
     theme: &SettingsTheme,
 ) {
     let rect = Rect::from_xywh(x, y, 24.0, 26.0);
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         rect,
-        6.0,
-        6.0,
-        &settings_paint(if enabled {
+        Radius::uniform(6.0),
+        settings_color(if enabled {
             theme.control_bg
         } else {
             theme.control_disabled
         }),
     );
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(if enabled {
+    let color = settings_color(if enabled {
         theme.text_pri
     } else {
         theme.disabled
     });
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(1.6);
-    paint.set_stroke_cap(skia_safe::paint::Cap::Round);
-    paint.set_stroke_join(skia_safe::paint::Join::Round);
     let cy = y + 13.0;
     let direction = if up { -1.0 } else { 1.0 };
-    canvas.draw_line(
-        (x + 8.0, cy - 3.0 * direction),
-        (x + 12.0, cy + 2.0 * direction),
-        &paint,
+    painter.stroke_line(
+        Point::new(x + 8.0, cy - 3.0 * direction),
+        Point::new(x + 12.0, cy + 2.0 * direction),
+        1.6,
+        color,
+        StrokeCap::Round,
     );
-    canvas.draw_line(
-        (x + 12.0, cy + 2.0 * direction),
-        (x + 16.0, cy - 3.0 * direction),
-        &paint,
+    painter.stroke_line(
+        Point::new(x + 12.0, cy + 2.0 * direction),
+        Point::new(x + 16.0, cy - 3.0 * direction),
+        1.6,
+        color,
+        StrokeCap::Round,
     );
 }

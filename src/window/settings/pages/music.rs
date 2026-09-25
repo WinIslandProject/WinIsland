@@ -1,16 +1,16 @@
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
-use skia_safe::Contains;
 use winisland_core::config::LyricTransitionMode;
 use winisland_core::i18n::{current_lang, tr};
+use winisland_render::{Point, Rect};
 
 use super::super::{NumberInputHandler, PopupState, SettingsApp};
 use super::{PageInput, SettingsPage};
 
 pub(super) const MUSIC_NOTICE_HEIGHT: f32 = 150.0;
 
-pub(crate) fn music_notice_button_rect(width: f32, start_y: f32) -> skia_safe::Rect {
-    skia_safe::Rect::from_xywh(width - 24.0 - 14.0 - 86.0, start_y + 102.0, 86.0, 26.0)
+pub(crate) fn music_notice_button_rect(width: f32, start_y: f32) -> Rect {
+    Rect::from_xywh(width - 24.0 - 14.0 - 86.0, start_y + 102.0, 86.0, 26.0)
 }
 
 #[derive(Clone)]
@@ -185,7 +185,7 @@ impl SettingsApp {
     pub(crate) fn handle_music_click(&mut self, input: PageInput) {
         if self.show_music_notice() {
             let button = music_notice_button_rect(input.width, input.start_y);
-            if button.contains(skia_safe::Point::new(input.x, input.y)) {
+            if button.contains(Point::new(input.x, input.y)) {
                 self.music_notice_pressed = true;
                 self.request_redraw();
                 return;

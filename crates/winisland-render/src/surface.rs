@@ -1,14 +1,15 @@
 use std::any::Any;
 use std::sync::Arc;
 
-/// 表面标签：Win32 `HWND`。Windows 上唯一支持的值。
+use skia_safe::Surface;
+
+use crate::convert::to_skia_color;
+use crate::image::Image;
+use crate::painter::Painter;
+use crate::types::Rgba;
+
 pub const SURFACE_TAG_WIN32_HWND: u32 = 1;
 
-/// 后端原生的绘制目标描述。
-///
-/// 不变量：`handle` 的解释由 `tag` 决定（`SURFACE_TAG_WIN32_HWND` 时为 `HWND` 的数值）。
-/// `keepalive` 是该原生句柄的所有者，渲染层不解析它，只保证句柄在 `NativeSurface`
-/// 存活期间有效；它承担的是原先 `RenderTarget` 持有 `Arc<Window>` 的同一职责。
 #[derive(Clone)]
 pub struct NativeSurface {
     tag: u32,
@@ -17,7 +18,6 @@ pub struct NativeSurface {
 }
 
 impl NativeSurface {
-    /// `hwnd` 为 `HWND` 的数值（`HWND.0 as usize`）；`keepalive` 必须持有该窗口的所有权。
     pub fn from_win32_hwnd(hwnd: usize, keepalive: Option<Arc<dyn Any + Send + Sync>>) -> Self {
         Self {
             tag: SURFACE_TAG_WIN32_HWND,
@@ -36,5 +36,32 @@ impl NativeSurface {
 
     pub(crate) fn into_keepalive(self) -> Option<Arc<dyn Any + Send + Sync>> {
         self.keepalive
+    }
+}
+
+pub struct RasterSurface {
+    surface: Surface,
+}
+
+impl RasterSurface {
+    pub fn new(width: i32, height: i32) -> Option<Self> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        skia_safe::surfaces::raster_n32_premul((width, height)).map(|surface| Self { surface })
+    }
+
+    pub fn painter(&mut self) -> Painter<'_> {
+        Painter {
+            canvas: self.surface.canvas(),
+        }
+    }
+
+    pub fn clear(&mut self, color: Rgba) {
+        self.surface.canvas().clear(to_skia_color(color));
+    }
+
+    pub fn snapshot(&mut self) -> Image {
+        Image::from_skia(self.surface.image_snapshot())
     }
 }

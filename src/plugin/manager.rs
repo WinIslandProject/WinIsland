@@ -23,6 +23,7 @@ use super::types::{
 };
 use super::zip_loader::{self, PluginManifest};
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
+use winisland_render::plugin_v1_backend as skia_safe;
 
 const MAX_COVER_BYTES: u32 = 16 * 1024 * 1024;
 const MAX_CONTEXTS_PER_PLUGIN: usize = 64;
@@ -1233,13 +1234,18 @@ unsafe extern "C" fn ffi_draw_text(
         let font_manager = winisland_render::text::FontManager::global();
         let scaled_size = size * ctx.scale;
         let baseline = (y + ty) * ctx.scale - font_manager.ascent(scaled_size, bold != 0);
-        font_manager.draw_str(
-            winisland_render::Painter::from_canvas(canvas),
+        font_manager.draw_plugin_str_v1(
+            canvas,
             text,
             winisland_render::Point::new((x + tx) * ctx.scale, baseline),
             scaled_size,
             bold != 0,
-            crate::utils::color::rgba_of_paint(&argb_paint(color, ctx.alpha)),
+            winisland_render::Rgba::from_argb(
+                (((color >> 24) & 0xff) as u8 as u32 * ctx.alpha as u32 / 255) as u8,
+                (color >> 16) as u8,
+                (color >> 8) as u8,
+                color as u8,
+            ),
         );
     });
 }

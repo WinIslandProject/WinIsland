@@ -8,7 +8,6 @@ use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
-use crate::window::renderer::{Renderer, RendererTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
@@ -16,6 +15,7 @@ use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use winisland_core::anim::AnimPool;
 use winisland_core::config::AppConfig;
 use winisland_core::widgets::PluginWidget;
+use winisland_render::{Renderer, RendererTargetId};
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -155,7 +155,7 @@ pub(crate) struct PendingPluginSetting {
 }
 
 pub(crate) struct NumberInput {
-    pub(crate) rect: skia_safe::Rect,
+    pub(crate) rect: winisland_render::Rect,
     pub(crate) text: String,
     pub(crate) on_commit: NumberInputHandler,
 }

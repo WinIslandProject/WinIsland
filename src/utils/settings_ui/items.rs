@@ -1,4 +1,6 @@
-use skia_safe::{Color, Image, Rect};
+use winisland_render::Image;
+use winisland_render::Rect;
+use winisland_render::Rgba;
 
 pub const CONTENT_PADDING: f32 = 24.0;
 pub const ROW_HEIGHT: f32 = 48.0;
@@ -101,12 +103,12 @@ pub enum SettingsItem {
     },
     CenterLink {
         label: String,
-        color: Color,
+        color: Rgba,
     },
     CenterText {
         text: String,
         size: f32,
-        color: Color,
+        color: Rgba,
     },
     CenterImage {
         image: Image,

@@ -3,7 +3,7 @@ mod notification;
 mod notification_event;
 mod volume;
 
-use skia_safe::{Canvas, Rect};
+use winisland_render::{Painter, Rect};
 
 use self::brightness::BrightnessMonitor;
 use self::notification::{NotificationIndicator, NotificationMonitor};
@@ -56,11 +56,11 @@ impl ActiveCompactOverlay<'_> {
         }
     }
 
-    fn draw(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
+    fn draw(&self, painter: Painter<'_>, rect: Rect, scale: f32, alpha: f32) {
         match self {
-            Self::Notification(indicator) => indicator.draw(canvas, rect, scale, alpha),
-            Self::Volume(indicator) => indicator.draw(canvas, rect, scale, alpha),
-            Self::Brightness(indicator) => indicator.draw_brightness(canvas, rect, scale, alpha),
+            Self::Notification(indicator) => indicator.draw(painter, rect, scale, alpha),
+            Self::Volume(indicator) => indicator.draw(painter, rect, scale, alpha),
+            Self::Brightness(indicator) => indicator.draw_brightness(painter, rect, scale, alpha),
         }
     }
 }
@@ -230,9 +230,9 @@ impl CompactOverlay {
         }
     }
 
-    pub fn draw(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
+    pub fn draw(&self, painter: Painter<'_>, rect: Rect, scale: f32, alpha: f32) {
         if let Some(overlay) = self.active() {
-            overlay.draw(canvas, rect, scale, alpha);
+            overlay.draw(painter, rect, scale, alpha);
         }
     }
 

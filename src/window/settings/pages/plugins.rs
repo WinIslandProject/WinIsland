@@ -1,16 +1,16 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use winisland_render::FontStyle;
-
-use skia_safe::{Canvas, ClipOp, Color, Contains, Data, Image, Paint, Point, RRect, Rect};
+use winisland_render::{Image, ImageOptions, Mipmapped, Painter, Point, Radius, Rect, Rgba, Vec2};
 
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::MarketplacePlugin;
 use crate::utils::color::SettingsTheme;
+use crate::utils::color::settings_color;
 use crate::utils::settings_ui::items::{CONTENT_PADDING, SettingsItem};
-use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
-use crate::window::renderer::DrawingContext;
+use crate::utils::settings_ui::{SettingsPainter, ellipsize_text};
 use winisland_core::i18n::tr;
+use winisland_render::DrawingContext;
 use winisland_render::text::FontManager;
 
 use super::super::{
@@ -91,41 +91,37 @@ impl SettingsApp {
     pub(crate) fn draw_plugins_page(
         &mut self,
         drawing_context: &mut DrawingContext<'_>,
-        canvas: &Canvas,
+        painter: Painter<'_>,
         theme: &SettingsTheme,
         width: f32,
         height: f32,
     ) {
         let content_width = width - SIDEBAR_W;
-        canvas.save();
-        canvas.clip_rect(
-            Rect::from_xywh(
-                SIDEBAR_W,
-                PLUGIN_LIST_TOP,
-                content_width,
-                height - PLUGIN_LIST_TOP,
-            ),
-            ClipOp::Intersect,
-            true,
-        );
-        canvas.translate((SIDEBAR_W, -self.scroll_y));
+        painter.save();
+        painter.clip_rect(Rect::from_xywh(
+            SIDEBAR_W,
+            PLUGIN_LIST_TOP,
+            content_width,
+            height - PLUGIN_LIST_TOP,
+        ));
+        painter.translate(Vec2::new(SIDEBAR_W, -self.scroll_y));
         match self.plugin_page_tab {
             PluginPageTab::Installed => {
-                self.draw_installed_plugins(drawing_context, canvas, theme, content_width)
+                self.draw_installed_plugins(drawing_context, painter, theme, content_width)
             }
             PluginPageTab::Marketplace => {
-                self.draw_marketplace_plugins(drawing_context, canvas, theme, content_width)
+                self.draw_marketplace_plugins(drawing_context, painter, theme, content_width)
             }
         }
-        canvas.restore();
+        painter.restore();
 
-        draw_plugin_tabs(canvas, theme, self.plugin_page_tab);
+        draw_plugin_tabs(painter, theme, self.plugin_page_tab);
 
         let detail_progress = self.anim.get(PLUGIN_DETAIL_KEY);
         if detail_progress > 0.005 {
             self.draw_plugin_detail(
                 drawing_context,
-                canvas,
+                painter,
                 theme,
                 width,
                 height,
@@ -137,26 +133,31 @@ impl SettingsApp {
     fn draw_installed_plugins(
         &self,
         drawing_context: &mut DrawingContext<'_>,
-        canvas: &Canvas,
+        painter: Painter<'_>,
         theme: &SettingsTheme,
         width: f32,
     ) {
-        let mut y = draw_section_title(canvas, theme, tr("plugin_installed"));
+        let mut y = draw_section_title(painter, theme, tr("plugin_installed"));
         if self.plugins.is_empty() {
-            draw_empty_state(canvas, theme, width, y + 48.0, &tr("plugin_empty"), None);
+            draw_empty_state(painter, theme, width, y + 48.0, &tr("plugin_empty"), None);
             y += 126.0;
         } else {
             for plugin in &self.plugins {
                 let card = plugin_card(width, y);
-                draw_card_background(canvas, theme, card, self.card_hovered(card));
+                draw_card_background(painter, theme, card, self.card_hovered(card));
                 draw_plugin_icon(
                     drawing_context,
-                    canvas,
+                    painter,
                     plugin,
-                    Rect::from_xywh(card.left + 12.0, card.top + 12.0, 52.0, 52.0),
+                    winisland_render::Rect::from_xywh(
+                        card.left + 12.0,
+                        card.top + 12.0,
+                        52.0,
+                        52.0,
+                    ),
                 );
                 draw_card_text(
-                    canvas,
+                    painter,
                     theme,
                     card,
                     &plugin.name,
@@ -164,7 +165,7 @@ impl SettingsApp {
                     142.0,
                 );
                 draw_toggle(
-                    canvas,
+                    painter,
                     theme,
                     plugin.enabled,
                     card.right - 50.0,
@@ -173,21 +174,21 @@ impl SettingsApp {
                 y += PLUGIN_CARD_H + PLUGIN_CARD_GAP;
             }
         }
-        self.draw_plugin_status(canvas, theme, width, y);
+        self.draw_plugin_status(painter, theme, width, y);
     }
 
     fn draw_marketplace_plugins(
         &self,
         drawing_context: &mut DrawingContext<'_>,
-        canvas: &Canvas,
+        painter: Painter<'_>,
         theme: &SettingsTheme,
         width: f32,
     ) {
-        let mut y = draw_section_title(canvas, theme, tr("plugin_tab_marketplace"));
+        let mut y = draw_section_title(painter, theme, tr("plugin_tab_marketplace"));
         match &self.marketplace_state {
             MarketplaceViewState::NotLoaded | MarketplaceViewState::Loading => {
                 draw_empty_state(
-                    canvas,
+                    painter,
                     theme,
                     width,
                     y + 48.0,
@@ -198,19 +199,19 @@ impl SettingsApp {
             }
             MarketplaceViewState::Failed(error) => {
                 draw_empty_state(
-                    canvas,
+                    painter,
                     theme,
                     width,
                     y + 39.0,
                     &tr("plugin_marketplace_failed"),
                     Some(error),
                 );
-                draw_retry_button(canvas, theme, width, y + 84.0);
+                draw_retry_button(painter, theme, width, y + 84.0);
                 y += 126.0;
             }
             MarketplaceViewState::Loaded(plugins) if plugins.is_empty() => {
                 draw_empty_state(
-                    canvas,
+                    painter,
                     theme,
                     width,
                     y + 48.0,
@@ -222,20 +223,25 @@ impl SettingsApp {
             MarketplaceViewState::Loaded(plugins) => {
                 for plugin in plugins {
                     let card = plugin_card(width, y);
-                    draw_card_background(canvas, theme, card, self.card_hovered(card));
+                    draw_card_background(painter, theme, card, self.card_hovered(card));
                     draw_plugin_icon_data(
                         drawing_context,
-                        canvas,
+                        painter,
                         &plugin.id,
                         &plugin.name,
                         plugin.icon.as_deref(),
-                        Rect::from_xywh(card.left + 12.0, card.top + 12.0, 52.0, 52.0),
+                        winisland_render::Rect::from_xywh(
+                            card.left + 12.0,
+                            card.top + 12.0,
+                            52.0,
+                            52.0,
+                        ),
                     );
                     let action = self.marketplace_action(plugin);
                     let label = action.label();
                     let action_width = action_button_width(&label);
                     draw_card_text(
-                        canvas,
+                        painter,
                         theme,
                         card,
                         &plugin.name,
@@ -243,7 +249,7 @@ impl SettingsApp {
                         action_width + 106.0,
                     );
                     draw_marketplace_action(
-                        canvas,
+                        painter,
                         theme,
                         marketplace_action_rect(card, action_width),
                         &label,
@@ -253,27 +259,25 @@ impl SettingsApp {
                 }
             }
         }
-        self.draw_plugin_status(canvas, theme, width, y);
+        self.draw_plugin_status(painter, theme, width, y);
     }
 
-    fn draw_plugin_status(&self, canvas: &Canvas, theme: &SettingsTheme, width: f32, y: f32) {
+    fn draw_plugin_status(&self, painter: Painter<'_>, theme: &SettingsTheme, width: f32, y: f32) {
         let Some((message, restart)) = &self.plugin_status else {
             return;
         };
         let fm = FontManager::global();
-        let paint = settings_paint(Color::from_argb(
-            28,
-            theme.accent.r(),
-            theme.accent.g(),
-            theme.accent.b(),
-        ));
         let status = Rect::from_xywh(
             CONTENT_PADDING,
             y + 6.0,
             width - CONTENT_PADDING * 2.0,
             48.0,
         );
-        canvas.draw_round_rect(status, 12.0, 12.0, &paint);
+        painter.fill_round_rect(
+            status,
+            Radius::uniform(12.0),
+            settings_color(theme.accent).with_alpha(28),
+        );
         let label = restart.then(|| tr("plugin_restart_now"));
         let label_w = label.as_ref().map_or(0.0, |label| {
             fm.measure_text_cached(label, 12.0, FontStyle::bold())
@@ -285,7 +289,7 @@ impl SettingsApp {
             FontStyle::normal(),
             (status.width() - 28.0 - label_w - if *restart { 24.0 } else { 0.0 }).max(20.0),
         );
-        SettingsPainter::new(canvas).text(
+        SettingsPainter::new(painter).text(
             &message,
             (status.left + 14.0, status.top + 29.0),
             12.0,
@@ -293,7 +297,7 @@ impl SettingsApp {
             theme.text_pri,
         );
         if let Some(label) = label {
-            SettingsPainter::new(canvas).text(
+            SettingsPainter::new(painter).text(
                 &label,
                 (status.right - label_w - 14.0, status.top + 29.0),
                 12.0,
@@ -529,37 +533,38 @@ impl SettingsApp {
     }
 }
 
-fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, active: PluginPageTab) {
-    let mut paint = settings_paint(theme.control_bg);
+fn draw_plugin_tabs(painter: Painter<'_>, theme: &SettingsTheme, active: PluginPageTab) {
     let background = Rect::from_xywh(
         SIDEBAR_W + CONTENT_PADDING,
         PLUGIN_TABS_Y,
         PLUGIN_TAB_W * 2.0,
         PLUGIN_TABS_H,
     );
-    canvas.draw_round_rect(background, 9.0, 9.0, &paint);
+    painter.fill_round_rect(
+        background,
+        Radius::uniform(9.0),
+        settings_color(theme.control_bg),
+    );
     for tab in [PluginPageTab::Installed, PluginPageTab::Marketplace] {
         let rect = plugin_tab_rect(tab);
         if tab == active {
-            paint.set_color(theme.card_highlight);
-            canvas.draw_round_rect(
+            painter.fill_round_rect(
                 Rect::from_xywh(
                     rect.left + 2.0,
                     rect.top + 2.0,
                     rect.width() - 4.0,
                     rect.height() - 4.0,
                 ),
-                7.0,
-                7.0,
-                &paint,
+                Radius::uniform(7.0),
+                settings_color(theme.card_highlight),
             );
         }
-        paint.set_color(if tab == active {
+        let text_color = if tab == active {
             theme.text_pri
         } else {
             theme.text_sec
-        });
-        SettingsPainter::new(canvas).centered_text(
+        };
+        SettingsPainter::new(painter).centered_text(
             &tr(match tab {
                 PluginPageTab::Installed => "plugin_tab_installed",
                 PluginPageTab::Marketplace => "plugin_tab_marketplace",
@@ -567,7 +572,7 @@ fn draw_plugin_tabs(canvas: &Canvas, theme: &SettingsTheme, active: PluginPageTa
             (rect.center_x(), rect.top + 21.0),
             12.0,
             tab == active,
-            paint.color(),
+            text_color,
         );
     }
 }
@@ -587,8 +592,8 @@ fn plugin_tab_rect(tab: PluginPageTab) -> Rect {
     )
 }
 
-fn draw_section_title(canvas: &Canvas, theme: &SettingsTheme, title: String) -> f32 {
-    SettingsPainter::new(canvas).text(
+fn draw_section_title(painter: Painter<'_>, theme: &SettingsTheme, title: String) -> f32 {
+    SettingsPainter::new(painter).text(
         &title,
         (CONTENT_PADDING + 4.0, PLUGIN_LIST_TOP + 18.0),
         13.0,
@@ -607,31 +612,28 @@ fn plugin_card(width: f32, y: f32) -> Rect {
     )
 }
 
-fn draw_card_background(canvas: &Canvas, theme: &SettingsTheme, card: Rect, hovered: bool) {
-    let mut paint = settings_paint(if hovered {
+fn draw_card_background(painter: Painter<'_>, theme: &SettingsTheme, card: Rect, hovered: bool) {
+    let fill = if hovered {
         theme.card_highlight
     } else {
         theme.group_bg
-    });
-    canvas.draw_round_rect(card, 13.0, 13.0, &paint);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(0.75);
-    paint.set_color(theme.group_border);
-    canvas.draw_round_rect(
+    };
+    painter.fill_round_rect(card, Radius::uniform(13.0), settings_color(fill));
+    painter.stroke_round_rect(
         Rect::from_xywh(
             card.left + 0.375,
             card.top + 0.375,
             card.width() - 0.75,
             card.height() - 0.75,
         ),
-        12.625,
-        12.625,
-        &paint,
+        Radius::uniform(12.625),
+        0.75,
+        settings_color(theme.group_border),
     );
 }
 
 fn draw_card_text(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     theme: &SettingsTheme,
     card: Rect,
     name: &str,
@@ -641,7 +643,7 @@ fn draw_card_text(
     let fm = FontManager::global();
     let available = (card.width() - reserved_width).max(20.0);
     let name = ellipsize_text(fm, name, 14.0, FontStyle::bold(), available);
-    SettingsPainter::new(canvas).text(
+    SettingsPainter::new(painter).text(
         &name,
         (card.left + 76.0, card.top + 29.0),
         14.0,
@@ -649,7 +651,7 @@ fn draw_card_text(
         theme.text_pri,
     );
     let subtitle = ellipsize_text(fm, subtitle, 11.5, FontStyle::normal(), available);
-    SettingsPainter::new(canvas).text(
+    SettingsPainter::new(painter).text(
         &subtitle,
         (card.left + 76.0, card.top + 51.0),
         11.5,
@@ -659,24 +661,24 @@ fn draw_card_text(
 }
 
 fn draw_marketplace_action(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     theme: &SettingsTheme,
     rect: Rect,
     label: &str,
     action: MarketplaceAction,
 ) {
-    let paint = settings_paint(if action.is_available() {
-        Color::from_argb(32, theme.accent.r(), theme.accent.g(), theme.accent.b())
+    let fill = if action.is_available() {
+        settings_color(theme.accent).with_alpha(32)
     } else {
-        theme.control_bg
-    });
-    canvas.draw_round_rect(rect, rect.height() / 2.0, rect.height() / 2.0, &paint);
+        settings_color(theme.control_bg)
+    };
+    painter.fill_round_rect(rect, Radius::uniform(rect.height() / 2.0), fill);
     let text_color = if action.is_available() {
         theme.accent
     } else {
         theme.text_sec
     };
-    SettingsPainter::new(canvas).centered_text(
+    SettingsPainter::new(painter).centered_text(
         label,
         (rect.center_x(), rect.top + 19.0),
         11.0,
@@ -702,15 +704,15 @@ fn marketplace_subtitle(plugin: &MarketplacePlugin) -> String {
 }
 
 fn draw_empty_state(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     theme: &SettingsTheme,
     width: f32,
     baseline: f32,
     title: &str,
     detail: Option<&str>,
 ) {
-    let painter = SettingsPainter::new(canvas);
-    painter.centered_text(title, (width / 2.0, baseline), 13.0, false, theme.text_sec);
+    let text_painter = SettingsPainter::new(painter);
+    text_painter.centered_text(title, (width / 2.0, baseline), 13.0, false, theme.text_sec);
     if let Some(detail) = detail {
         let detail = ellipsize_text(
             FontManager::global(),
@@ -719,13 +721,8 @@ fn draw_empty_state(
             FontStyle::normal(),
             width - CONTENT_PADDING * 4.0,
         );
-        let detail_color = Color::from_argb(
-            150,
-            theme.text_sec.r(),
-            theme.text_sec.g(),
-            theme.text_sec.b(),
-        );
-        painter.centered_text(
+        let detail_color = settings_color(theme.text_sec).with_alpha(150);
+        text_painter.centered_text(
             &detail,
             (width / 2.0, baseline + 21.0),
             10.5,
@@ -735,11 +732,14 @@ fn draw_empty_state(
     }
 }
 
-fn draw_retry_button(canvas: &Canvas, theme: &SettingsTheme, width: f32, y: f32) {
+fn draw_retry_button(painter: Painter<'_>, theme: &SettingsTheme, width: f32, y: f32) {
     let rect = retry_button_rect(width, y);
-    let paint = settings_paint(theme.control_bg);
-    canvas.draw_round_rect(rect, rect.height() / 2.0, rect.height() / 2.0, &paint);
-    SettingsPainter::new(canvas).centered_text(
+    painter.fill_round_rect(
+        rect,
+        Radius::uniform(rect.height() / 2.0),
+        settings_color(theme.control_bg),
+    );
+    SettingsPainter::new(painter).centered_text(
         &tr("plugin_marketplace_retry"),
         (rect.center_x(), rect.top + 18.0),
         11.0,
@@ -752,30 +752,33 @@ fn retry_button_rect(width: f32, y: f32) -> Rect {
     Rect::from_xywh(width / 2.0 - 42.0, y, 84.0, 28.0)
 }
 
-fn draw_toggle(canvas: &Canvas, theme: &SettingsTheme, enabled: bool, x: f32, y: f32) {
-    let mut paint = settings_paint(if enabled {
+fn draw_toggle(painter: Painter<'_>, theme: &SettingsTheme, enabled: bool, x: f32, y: f32) {
+    let fill = if enabled {
         theme.toggle_on
     } else {
         theme.toggle_off
-    });
-    canvas.draw_round_rect(Rect::from_xywh(x, y, 36.0, 20.0), 10.0, 10.0, &paint);
-    paint.set_color(Color::WHITE);
-    canvas.draw_circle(
-        (x + if enabled { 26.0 } else { 10.0 }, y + 10.0),
+    };
+    painter.fill_round_rect(
+        Rect::from_xywh(x, y, 36.0, 20.0),
+        Radius::uniform(10.0),
+        settings_color(fill),
+    );
+    painter.fill_circle(
+        Point::new(x + if enabled { 26.0 } else { 10.0 }, y + 10.0),
         8.0,
-        &paint,
+        Rgba::WHITE,
     );
 }
 
 pub(super) fn draw_plugin_icon(
     drawing_context: &mut DrawingContext<'_>,
-    canvas: &Canvas,
+    painter: Painter<'_>,
     plugin: &InstalledPlugin,
     rect: Rect,
 ) {
     draw_plugin_icon_data(
         drawing_context,
-        canvas,
+        painter,
         &plugin.id,
         &plugin.name,
         plugin.icon.as_deref(),
@@ -785,7 +788,7 @@ pub(super) fn draw_plugin_icon(
 
 pub(super) fn draw_plugin_icon_data(
     drawing_context: &mut DrawingContext<'_>,
-    canvas: &Canvas,
+    painter: Painter<'_>,
     id: &str,
     name: &str,
     icon: Option<&[u8]>,
@@ -796,35 +799,39 @@ pub(super) fn draw_plugin_icon_data(
             if let Some(image) = cache.borrow().get(id) {
                 return Some(image.clone());
             }
-            let image = Image::from_encoded(Data::new_copy(bytes))?;
-            let image = drawing_context.prepare_image(image, skia_safe::gpu::Mipmapped::Yes)?;
+            let image = Image::from_encoded(bytes)?;
+            let image = drawing_context.prepare_image(image, Mipmapped::Yes)?;
             cache.borrow_mut().insert(id.to_string(), image.clone());
             Some(image)
         })
     }) {
-        let save_count = canvas.save();
-        canvas.clip_rrect(
-            RRect::new_rect_xy(rect, rect.width() * 0.22, rect.height() * 0.22),
-            ClipOp::Intersect,
-            true,
+        let radius = Radius::uniform_vec(Vec2::new(rect.width() * 0.22, rect.height() * 0.22));
+        let save_count = painter.save();
+        painter.clip_round_rect(rect, radius);
+        painter.draw_image(
+            &image,
+            rect,
+            &ImageOptions::default().with_anti_alias(false),
         );
-        canvas.draw_image_rect(image, None, rect, &Paint::default());
-        canvas.restore_to_count(save_count);
+        painter.restore_to(save_count);
         return;
     }
-    let paint = settings_paint(Color::from_rgb(175, 82, 222));
-    canvas.draw_round_rect(rect, rect.width() * 0.22, rect.height() * 0.22, &paint);
+    painter.fill_round_rect(
+        rect,
+        Radius::uniform(rect.width() * 0.22),
+        Rgba::from_rgb(175, 82, 222),
+    );
     let initial = name
         .chars()
         .next()
         .unwrap_or('P')
         .to_uppercase()
         .to_string();
-    SettingsPainter::new(canvas).centered_text(
+    SettingsPainter::new(painter).centered_text(
         &initial,
         (rect.center_x(), rect.center_y() + rect.height() * 0.16),
         rect.height() * 0.44,
         true,
-        Color::WHITE,
+        Rgba::WHITE,
     );
 }

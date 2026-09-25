@@ -43,7 +43,7 @@ impl App {
         if let Some(error) = self
             .renderer
             .as_mut()
-            .and_then(crate::window::renderer::Renderer::take_failure)
+            .and_then(winisland_render::Renderer::take_failure)
         {
             self.invalidate_renderer(&error, now);
         }

@@ -1,12 +1,18 @@
-use crate::utils::color::rgba_of_paint;
-use skia_safe::{
-    Canvas, Color, Contains, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
-};
 use winisland_render::FontStyle;
+use winisland_render::Image;
+use winisland_render::ImageOptions;
+use winisland_render::Painter;
+use winisland_render::Point;
+use winisland_render::Radius;
+use winisland_render::Rect;
+use winisland_render::Rgba;
+use winisland_render::Sampling;
+use winisland_render::StrokeCap;
+use winisland_render::StrokeJoin;
+use winisland_render::text::{DrawTextInRectParams, FontManager};
 
 use crate::utils::color::SettingsTheme;
-use winisland_render::Painter;
-use winisland_render::text::{DrawTextInRectParams, FontManager};
+use crate::utils::color::settings_color;
 
 use super::super::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, GROUP_RADIUS, POPUP_BTN_H, POPUP_BTN_R, POPUP_BTN_W,
@@ -15,13 +21,13 @@ use super::super::items::{
 };
 use super::controls::{
     PillBtnParams, SettingsPainter, draw_pill_btn, draw_row_separator, draw_stepper_btn,
-    draw_switch, ellipsize_text, settings_paint,
+    draw_switch, ellipsize_text,
 };
 use super::widget_preview::{WidgetPreviewParams, draw_widget_preview};
 use super::{ActiveStepperValue, DrawItemsParams};
 
 struct ItemCtx<'a> {
-    canvas: &'a Canvas,
+    painter: Painter<'a>,
     theme: &'a SettingsTheme,
     content_w: f32,
     width: f32,
@@ -48,19 +54,19 @@ struct GroupRows {
     current_row: usize,
 }
 
-fn row_text_color(ctx: &ItemCtx, enabled: bool) -> Color {
-    if enabled {
+fn row_text_color(ctx: &ItemCtx, enabled: bool) -> Rgba {
+    settings_color(if enabled {
         ctx.theme.text_pri
     } else {
         ctx.theme.text_sec
-    }
+    })
 }
 
-fn draw_row_text(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Color) -> (f32, bool) {
+fn draw_row_text(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Rgba) -> (f32, bool) {
     let cy = y + height / 2.0;
     let visible = ctx.row_visible(y, height);
     if visible {
-        SettingsPainter::new(ctx.canvas).text(
+        SettingsPainter::new(ctx.painter).text(
             label,
             (CONTENT_PADDING + GROUP_INNER_PAD, cy + 5.0),
             13.0,
@@ -80,7 +86,7 @@ fn draw_row_stepper(
     active_stepper_value: &Option<ActiveStepperValue>,
     groups: &mut GroupRows,
 ) {
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let (cy, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
@@ -92,44 +98,42 @@ fn draw_row_stepper(
     if visible {
         let control_x = btn_dec_x;
         let control_w = STEPPER_BTN_SIZE * 2.0 + STEPPER_VALUE_W;
-        let mut control = settings_paint(if enabled {
-            theme.control_bg
-        } else {
-            theme.control_disabled
-        });
-        canvas.draw_round_rect(
+        painter.fill_round_rect(
             Rect::from_xywh(control_x, btn_y, control_w, STEPPER_BTN_SIZE),
-            POPUP_BTN_R,
-            POPUP_BTN_R,
-            &control,
+            Radius::uniform(POPUP_BTN_R),
+            settings_color(if enabled {
+                theme.control_bg
+            } else {
+                theme.control_disabled
+            }),
         );
-        control.set_style(skia_safe::paint::Style::Stroke);
-        control.set_stroke_width(0.75);
-        control.set_color(theme.control_border);
-        canvas.draw_round_rect(
+        painter.stroke_round_rect(
             Rect::from_xywh(
                 control_x + 0.375,
                 btn_y + 0.375,
                 control_w - 0.75,
                 STEPPER_BTN_SIZE - 0.75,
             ),
-            POPUP_BTN_R,
-            POPUP_BTN_R,
-            &control,
+            Radius::uniform(POPUP_BTN_R),
+            0.75,
+            settings_color(theme.control_border),
         );
-        control.set_color(theme.separator);
-        canvas.draw_line(
-            (value_x, btn_y + 4.0),
-            (value_x, btn_y + STEPPER_BTN_SIZE - 4.0),
-            &control,
+        painter.stroke_line(
+            Point::new(value_x, btn_y + 4.0),
+            Point::new(value_x, btn_y + STEPPER_BTN_SIZE - 4.0),
+            0.75,
+            settings_color(theme.separator),
+            StrokeCap::Butt,
         );
-        canvas.draw_line(
-            (btn_inc_x, btn_y + 4.0),
-            (btn_inc_x, btn_y + STEPPER_BTN_SIZE - 4.0),
-            &control,
+        painter.stroke_line(
+            Point::new(btn_inc_x, btn_y + 4.0),
+            Point::new(btn_inc_x, btn_y + STEPPER_BTN_SIZE - 4.0),
+            0.75,
+            settings_color(theme.separator),
+            StrokeCap::Butt,
         );
         draw_stepper_btn(
-            canvas,
+            painter,
             btn_dec_x,
             btn_y,
             "−",
@@ -143,7 +147,7 @@ fn draw_row_stepper(
             )),
         );
         draw_stepper_btn(
-            canvas,
+            painter,
             btn_inc_x,
             btn_y,
             "+",
@@ -173,35 +177,30 @@ fn draw_row_stepper(
             .as_ref()
             .is_some_and(|input| is_editing && input.show_caret);
         if is_editing {
-            let mut input_paint = settings_paint(theme.card_highlight);
-            canvas.draw_round_rect(
+            painter.fill_round_rect(
                 Rect::from_xywh(value_x, btn_y, STEPPER_VALUE_W, STEPPER_BTN_SIZE),
-                5.0,
-                5.0,
-                &input_paint,
+                Radius::uniform(5.0),
+                settings_color(theme.card_highlight),
             );
-            input_paint.set_style(skia_safe::paint::Style::Stroke);
-            input_paint.set_stroke_width(1.0);
-            input_paint.set_color(theme.accent);
-            canvas.draw_round_rect(
+            painter.stroke_round_rect(
                 Rect::from_xywh(
                     value_x + 0.5,
                     btn_y + 0.5,
                     STEPPER_VALUE_W - 1.0,
                     STEPPER_BTN_SIZE - 1.0,
                 ),
-                4.5,
-                4.5,
-                &input_paint,
+                Radius::uniform(4.5),
+                1.0,
+                settings_color(theme.accent),
             );
         }
-        let text_color = if enabled {
+        let text_color = settings_color(if enabled {
             theme.text_pri
         } else {
             theme.text_sec
-        };
+        });
         let val_w = fm.measure_text_cached(display_value, 13.0, FontStyle::normal());
-        SettingsPainter::new(canvas).text(
+        SettingsPainter::new(painter).text(
             display_value,
             (val_center - val_w / 2.0, cy + 5.0),
             13.0,
@@ -209,13 +208,13 @@ fn draw_row_stepper(
             text_color,
         );
         if show_caret {
-            let mut caret_paint = settings_paint(theme.accent);
-            caret_paint.set_stroke_width(1.0);
             let caret_x = val_center + val_w / 2.0 + 1.5;
-            canvas.draw_line(
-                (caret_x, btn_y + 5.0),
-                (caret_x, btn_y + STEPPER_BTN_SIZE - 5.0),
-                &caret_paint,
+            painter.stroke_line(
+                Point::new(caret_x, btn_y + 5.0),
+                Point::new(caret_x, btn_y + STEPPER_BTN_SIZE - 5.0),
+                1.0,
+                settings_color(theme.accent),
+                StrokeCap::Butt,
             );
         }
     }
@@ -231,14 +230,14 @@ fn draw_row_switch(
     switch_pos: f32,
     groups: &mut GroupRows,
 ) {
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let (_, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
 
     let toggle = trailing_control_rect(y, ROW_HEIGHT, content_w, TOGGLE_W, TOGGLE_H);
     if visible {
-        draw_switch(canvas, toggle.left, toggle.top, switch_pos, enabled, theme);
+        draw_switch(painter, toggle.left, toggle.top, switch_pos, enabled, theme);
     }
 
     advance_group_row(ctx, y + ROW_HEIGHT, groups, visible);
@@ -252,32 +251,32 @@ fn draw_row_font_picker(
     reset_label: &Option<String>,
     groups: &mut GroupRows,
 ) {
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
-    let (_, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, theme.text_pri);
+    let (_, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, settings_color(theme.text_pri));
     if visible {
         let (select, reset) = picker_button_rects(y, ROW_HEIGHT, content_w);
         draw_pill_btn(PillBtnParams {
-            canvas,
+            painter,
             rect: select,
             label: btn_label,
-            text_color: theme.text_pri,
-            bg_color: theme.card_highlight,
-            hover_bg_color: theme.control_hover,
-            border_color: theme.control_border,
+            text_color: settings_color(theme.text_pri),
+            bg_color: settings_color(theme.card_highlight),
+            hover_bg_color: settings_color(theme.control_hover),
+            border_color: settings_color(theme.control_border),
             hovered: ctx.hovered(select),
         });
 
         if let Some(rl) = reset_label {
             draw_pill_btn(PillBtnParams {
-                canvas,
+                painter,
                 rect: reset,
                 label: rl,
-                text_color: theme.danger,
-                bg_color: theme.card_highlight,
-                hover_bg_color: theme.control_hover,
-                border_color: theme.control_border,
+                text_color: settings_color(theme.danger),
+                bg_color: settings_color(theme.card_highlight),
+                hover_bg_color: settings_color(theme.control_hover),
+                border_color: settings_color(theme.control_border),
                 hovered: ctx.hovered(reset),
             });
         }
@@ -295,7 +294,7 @@ fn draw_row_folder_picker(
     groups: &mut GroupRows,
 ) {
     let (label, btn_label, clear_label) = labels;
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let fm = FontManager::global();
@@ -310,51 +309,51 @@ fn draw_row_folder_picker(
         {
             let max_w = content_w - GROUP_INNER_PAD * 2.0 - 140.0;
             let display = ellipsize_text(fm, path, 11.0, FontStyle::normal(), max_w);
-            SettingsPainter::new(canvas).text(
+            SettingsPainter::new(painter).text(
                 &display,
                 (row_x, cy + 17.0),
                 11.0,
                 false,
-                theme.text_sec,
+                settings_color(theme.text_sec),
             );
         }
 
-        let label_color = if enabled {
+        let label_color = settings_color(if enabled {
             theme.text_pri
         } else {
             theme.text_sec
-        };
-        let bg_color = if enabled {
+        });
+        let bg_color = settings_color(if enabled {
             theme.card_highlight
         } else {
             theme.disabled
-        };
+        });
 
         let (select, clear) = picker_button_rects(y, row_h, content_w);
         draw_pill_btn(PillBtnParams {
-            canvas,
+            painter,
             rect: select,
             label: btn_label,
             text_color: label_color,
             bg_color,
-            hover_bg_color: theme.control_hover,
-            border_color: theme.control_border,
+            hover_bg_color: settings_color(theme.control_hover),
+            border_color: settings_color(theme.control_border),
             hovered: enabled && ctx.hovered(select),
         });
 
         if let Some(cl) = clear_label {
             draw_pill_btn(PillBtnParams {
-                canvas,
+                painter,
                 rect: clear,
                 label: cl,
-                text_color: if enabled {
+                text_color: settings_color(if enabled {
                     theme.danger
                 } else {
                     theme.text_sec
-                },
+                }),
                 bg_color,
-                hover_bg_color: theme.control_hover,
-                border_color: theme.control_border,
+                hover_bg_color: settings_color(theme.control_hover),
+                border_color: settings_color(theme.control_border),
                 hovered: enabled && ctx.hovered(clear),
             });
         }
@@ -372,7 +371,7 @@ fn draw_row_source_select(
     active_source_button: Option<Rect>,
     groups: &mut GroupRows,
 ) {
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let fm = FontManager::global();
@@ -392,51 +391,49 @@ fn draw_row_source_select(
     });
 
     if visible {
-        let mut p = settings_paint(if enabled {
-            if ctx.hovered(button) {
-                theme.control_hover
+        painter.fill_round_rect(
+            button,
+            Radius::uniform(POPUP_BTN_R),
+            settings_color(if enabled {
+                if ctx.hovered(button) {
+                    theme.control_hover
+                } else {
+                    theme.control_bg
+                }
             } else {
-                theme.control_bg
-            }
-        } else {
-            theme.control_disabled
-        });
-        canvas.draw_round_rect(button, POPUP_BTN_R, POPUP_BTN_R, &p);
-        p.set_color(if is_open {
-            theme.accent
-        } else {
-            theme.control_border
-        });
-        p.set_style(skia_safe::paint::Style::Stroke);
-        p.set_stroke_width(if is_open { 1.25 } else { 0.75 });
-        canvas.draw_round_rect(
+                theme.control_disabled
+            }),
+        );
+        painter.stroke_round_rect(
             Rect::from_xywh(
                 btn_x + 0.5,
                 btn_y + 0.5,
                 POPUP_BTN_W - 1.0,
                 POPUP_BTN_H - 1.0,
             ),
-            POPUP_BTN_R,
-            POPUP_BTN_R,
-            &p,
+            Radius::uniform(POPUP_BTN_R),
+            if is_open { 1.25 } else { 0.75 },
+            settings_color(if is_open {
+                theme.accent
+            } else {
+                theme.control_border
+            }),
         );
-        p.set_style(skia_safe::paint::Style::Fill);
 
-        p.set_color(if enabled {
-            theme.text_pri
-        } else {
-            theme.text_sec
-        });
         let text_w = POPUP_BTN_W - 22.0;
         fm.draw_text_in_rect(DrawTextInRectParams {
-            painter: Painter::from_canvas(canvas),
+            painter,
             text: selected_label,
             x: btn_x + 4.0,
             y: btn_y + 17.0,
             w: text_w,
             size: 13.0,
             bold: false,
-            color: rgba_of_paint(&p),
+            color: settings_color(if enabled {
+                theme.text_pri
+            } else {
+                theme.text_sec
+            }),
             blur: None,
         });
 
@@ -456,15 +453,18 @@ fn draw_row_source_select(
             chev_cx + 3.0,
             bottom_y,
         );
-        p.set_color(if enabled {
-            theme.text_sec
-        } else {
-            theme.disabled
-        });
-        p.set_style(skia_safe::paint::Style::Stroke);
-        p.set_stroke_width(1.5);
-        if let Some(chev_path) = skia_safe::Path::from_svg(&chev_svg) {
-            canvas.draw_path(&chev_path, &p);
+        if let Some(chev_path) = winisland_render::Path::from_svg(&chev_svg) {
+            painter.stroke_path(
+                &chev_path,
+                1.5,
+                settings_color(if enabled {
+                    theme.text_sec
+                } else {
+                    theme.disabled
+                }),
+                StrokeCap::Butt,
+                StrokeJoin::Miter,
+            );
         }
     }
 
@@ -479,31 +479,31 @@ fn draw_row_button(
     enabled: bool,
     groups: &mut GroupRows,
 ) {
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let (_, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, row_text_color(ctx, enabled));
     if visible {
-        let label_color = if enabled {
+        let label_color = settings_color(if enabled {
             theme.text_pri
         } else {
             theme.text_sec
-        };
-        let bg_color = if enabled {
+        });
+        let bg_color = settings_color(if enabled {
             theme.control_bg
         } else {
             theme.control_disabled
-        };
+        });
 
         let button = trailing_control_rect(y, ROW_HEIGHT, content_w, POPUP_BTN_W, POPUP_BTN_H);
         draw_pill_btn(PillBtnParams {
-            canvas,
+            painter,
             rect: button,
             label: btn_label,
             text_color: label_color,
             bg_color,
-            hover_bg_color: theme.control_hover,
-            border_color: theme.control_border,
+            hover_bg_color: settings_color(theme.control_hover),
+            border_color: settings_color(theme.control_border),
             hovered: enabled && ctx.hovered(button),
         });
     }
@@ -519,7 +519,7 @@ fn draw_row_app_item(
     enabled: bool,
     groups: &mut GroupRows,
 ) {
-    let canvas = ctx.canvas;
+    let painter = ctx.painter;
     let theme = ctx.theme;
     let content_w = ctx.content_w;
     let fm = FontManager::global();
@@ -531,19 +531,12 @@ fn draw_row_app_item(
     let check_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - check_size;
     let check_y = cy - check_size / 2.0;
 
-    let mut p = Paint::default();
-    p.set_anti_alias(true);
     if visible && active && enabled {
-        p.set_color(theme.accent);
-        canvas.draw_round_rect(
+        painter.fill_round_rect(
             Rect::from_xywh(check_x, check_y, check_size, check_size),
-            5.0,
-            5.0,
-            &p,
+            Radius::uniform(5.0),
+            settings_color(theme.accent),
         );
-        p.set_color(Color::WHITE);
-        p.set_stroke_width(2.0);
-        p.set_style(skia_safe::paint::Style::Stroke);
         let svg = format!(
             "M {} {} L {} {} L {} {}",
             check_x + 5.0,
@@ -553,41 +546,44 @@ fn draw_row_app_item(
             check_x + 15.0,
             check_y + 6.0,
         );
-        if let Some(path) = skia_safe::Path::from_svg(&svg) {
-            canvas.draw_path(&path, &p);
+        if let Some(path) = winisland_render::Path::from_svg(&svg) {
+            painter.stroke_path(&path, 2.0, Rgba::WHITE, StrokeCap::Butt, StrokeJoin::Miter);
         }
     } else if visible {
-        p.set_color(if enabled {
-            theme.card_highlight
-        } else {
-            theme.disabled
-        });
-        p.set_style(skia_safe::paint::Style::Stroke);
-        p.set_stroke_width(1.5);
-        canvas.draw_round_rect(
+        painter.stroke_round_rect(
             Rect::from_xywh(check_x, check_y, check_size, check_size),
-            5.0,
-            5.0,
-            &p,
+            Radius::uniform(5.0),
+            1.5,
+            settings_color(if enabled {
+                theme.card_highlight
+            } else {
+                theme.disabled
+            }),
         );
     }
 
     if visible {
-        let text_color = if enabled {
+        let text_color = settings_color(if enabled {
             theme.text_pri
         } else {
             theme.text_sec
-        };
+        });
         let max_label_w = check_x - row_x - 8.0;
         let display = ellipsize_text(fm, label, 13.0, FontStyle::normal(), max_label_w);
-        SettingsPainter::new(canvas).text(&display, (row_x, cy + 5.0), 13.0, false, text_color);
+        SettingsPainter::new(painter).text(&display, (row_x, cy + 5.0), 13.0, false, text_color);
     }
 
     advance_group_row(ctx, y + ROW_HEIGHT, groups, visible);
 }
 
 fn draw_row_label(ctx: &ItemCtx, y: f32, label: &str, groups: &mut GroupRows) {
-    let (_, visible) = draw_row_text(ctx, y, ROW_HEIGHT, label, ctx.theme.text_sec);
+    let (_, visible) = draw_row_text(
+        ctx,
+        y,
+        ROW_HEIGHT,
+        label,
+        settings_color(ctx.theme.text_sec),
+    );
     advance_group_row(ctx, y + ROW_HEIGHT, groups, visible);
 }
 
@@ -604,22 +600,18 @@ fn draw_center_image(ctx: &ItemCtx, y: f32, height: f32, image: &Image, size: f3
         width,
         image_height,
     );
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    ctx.canvas.draw_image_rect_with_sampling_options(
+    ctx.painter.draw_image(
         image,
-        None,
         rect,
-        SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
-        &paint,
+        &ImageOptions::default().with_sampling(Sampling::LinearLinear),
     );
 }
 
-fn draw_center_link(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Color) {
+fn draw_center_link(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Rgba) {
     if !ctx.row_visible(y, height) {
         return;
     }
-    SettingsPainter::new(ctx.canvas).centered_text(
+    SettingsPainter::new(ctx.painter).centered_text(
         label,
         (ctx.width / 2.0, y + 24.0),
         13.0,
@@ -628,11 +620,11 @@ fn draw_center_link(ctx: &ItemCtx, y: f32, height: f32, label: &str, color: Colo
     );
 }
 
-fn draw_center_text(ctx: &ItemCtx, y: f32, height: f32, text: &str, size: f32, color: Color) {
+fn draw_center_text(ctx: &ItemCtx, y: f32, height: f32, text: &str, size: f32, color: Rgba) {
     if !ctx.row_visible(y, height) {
         return;
     }
-    SettingsPainter::new(ctx.canvas).centered_text(
+    SettingsPainter::new(ctx.painter).centered_text(
         text,
         (ctx.width / 2.0, y + 22.0),
         size,
@@ -647,7 +639,7 @@ fn advance_group_row(ctx: &ItemCtx, sep_y: f32, groups: &mut GroupRows, visible:
     }
     groups.current_row += 1;
     if groups.current_row < groups.row_count && visible {
-        draw_row_separator(ctx.canvas, ctx.theme, ctx.content_w, sep_y);
+        draw_row_separator(ctx.painter, ctx.theme, ctx.content_w, sep_y);
     }
 }
 
@@ -660,7 +652,7 @@ pub fn content_height(items: &[SettingsItem], start_y: f32) -> f32 {
 }
 
 pub fn draw_items(params: DrawItemsParams<'_>) {
-    let canvas = params.canvas;
+    let painter = params.painter;
     let items = params.items;
     let start_y = params.start_y;
     let width = params.width;
@@ -693,7 +685,7 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
     let mut groups = GroupRows::default();
     let content_w = width - CONTENT_PADDING * 2.0;
     let ctx = ItemCtx {
-        canvas,
+        painter,
         theme,
         content_w,
         width,
@@ -712,12 +704,12 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             SettingsItem::SectionHeader { label } => {
                 let h = item.height();
                 if y + h >= visible_min_y && y <= visible_max_y {
-                    SettingsPainter::new(canvas).text(
+                    SettingsPainter::new(painter).text(
                         label,
                         (CONTENT_PADDING + 4.0, y + 22.0),
                         13.0,
                         true,
-                        theme.text_pri,
+                        settings_color(theme.text_pri),
                     );
                 }
             }
@@ -731,33 +723,26 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                     .filter(|item| item.is_row())
                     .count();
                 if y + total_h >= visible_min_y && y <= visible_max_y {
-                    let shadow = settings_paint(theme.shadow);
-                    canvas.draw_round_rect(
+                    painter.fill_round_rect(
                         Rect::from_xywh(CONTENT_PADDING, y + 2.0, content_w, total_h),
-                        GROUP_RADIUS,
-                        GROUP_RADIUS,
-                        &shadow,
+                        Radius::uniform(GROUP_RADIUS),
+                        settings_color(theme.shadow),
                     );
-                    let mut bg = settings_paint(theme.group_bg);
-                    canvas.draw_round_rect(
+                    painter.fill_round_rect(
                         Rect::from_xywh(CONTENT_PADDING, y, content_w, total_h),
-                        GROUP_RADIUS,
-                        GROUP_RADIUS,
-                        &bg,
+                        Radius::uniform(GROUP_RADIUS),
+                        settings_color(theme.group_bg),
                     );
-                    bg.set_style(skia_safe::paint::Style::Stroke);
-                    bg.set_stroke_width(0.75);
-                    bg.set_color(theme.group_border);
-                    canvas.draw_round_rect(
+                    painter.stroke_round_rect(
                         Rect::from_xywh(
                             CONTENT_PADDING + 0.375,
                             y + 0.375,
                             content_w - 0.75,
                             total_h - 0.75,
                         ),
-                        GROUP_RADIUS,
-                        GROUP_RADIUS,
-                        &bg,
+                        Radius::uniform(GROUP_RADIUS),
+                        0.75,
+                        settings_color(theme.group_border),
                     );
                 }
             }
@@ -859,7 +844,7 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
             SettingsItem::Custom { .. } => {}
             SettingsItem::WidgetPreview { .. } => {
                 draw_widget_preview(WidgetPreviewParams {
-                    canvas,
+                    painter,
                     item_y: y,
                     width,
                     content_width: content_w,

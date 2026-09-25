@@ -13,4 +13,4 @@ pub use input::{
     widget_preview_hit_test, widget_source_span,
 };
 pub use renderer::{ActiveStepperValue, DrawItemsParams, content_height, draw_items};
-pub(crate) use renderer::{SettingsPainter, ellipsize_text, settings_paint};
+pub(crate) use renderer::{SettingsPainter, ellipsize_text, settings_color};

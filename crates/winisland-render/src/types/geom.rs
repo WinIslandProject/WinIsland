@@ -1,4 +1,3 @@
-/// 平面上的一个点，单位逻辑像素。
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Point {
     pub x: f32,
@@ -17,7 +16,6 @@ impl From<(f32, f32)> for Point {
     }
 }
 
-/// 位移或尺寸增量，单位逻辑像素。
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Vec2 {
     pub x: f32,
@@ -38,9 +36,6 @@ impl From<(f32, f32)> for Vec2 {
     }
 }
 
-/// 轴对齐矩形，字段与 `skia_safe::Rect` 同名同义（`left`/`top` 为左上角，单位逻辑像素）。
-///
-/// 不变量：不要求 `left <= right`；`is_empty`/`contains` 与 Skia 的行为逐条一致。
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Rect {
     pub left: f32,
@@ -84,7 +79,6 @@ impl Rect {
         (self.top + self.bottom) * 0.5
     }
 
-    /// 与 `SkRect::contains(SkPoint)` 相同：左闭右开、上闭下开。
     pub fn contains(&self, point: Point) -> bool {
         point.x >= self.left && point.x < self.right && point.y >= self.top && point.y < self.bottom
     }
@@ -107,7 +101,6 @@ impl Rect {
             && self.bottom.is_finite()
     }
 
-    /// 平移后返回新矩形。
     pub fn offset(self, delta: Vec2) -> Self {
         Self {
             left: self.left + delta.x,
@@ -117,7 +110,6 @@ impl Rect {
         }
     }
 
-    /// 四边同时内缩/外扩 `delta` 后返回新矩形。
     pub fn inset(self, delta: f32) -> Self {
         Self {
             left: self.left + delta,
@@ -127,7 +119,6 @@ impl Rect {
         }
     }
 
-    /// 交集；无交集时返回 `None`（与 `SkRect::intersect` 失败时的行为一致）。
     pub fn intersect(self, other: Rect) -> Option<Self> {
         let result = Self {
             left: self.left.max(other.left),
@@ -139,10 +130,6 @@ impl Rect {
     }
 }
 
-/// 圆角半径。四角各自可不同，且每角是 `(x, y)` 半轴对，以表达椭圆角。
-///
-/// 不变量：不做夹取；半径超过半边长时的缩放行为由后端（Skia `RRect`）决定，
-/// 预夹取会改变观感，因此禁止在构造时夹取。
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Radius {
     pub top_left: Vec2,
@@ -159,12 +146,10 @@ impl Radius {
         bottom_left: Vec2::ZERO,
     };
 
-    /// 四角相同的圆角，`x == y == radius`。
     pub const fn uniform(radius: f32) -> Self {
         Self::uniform_vec(Vec2::new(radius, radius))
     }
 
-    /// 四角相同的椭圆角，`x` 与 `y` 半轴分别给定。
     pub const fn uniform_vec(radius: Vec2) -> Self {
         Self {
             top_left: radius,
@@ -181,11 +166,6 @@ impl Radius {
     }
 }
 
-/// 角度，单位为度。
-///
-/// 约定：**0° 指向 12 点钟方向，顺时针为正**。Skia 的 `draw_arc` 以 3 点钟为 0°，
-/// 换算 `skia_degrees = as_degrees() - 90.0`。该偏移只适用于弧线起始/扫过角，
-/// **不适用于** `skia_safe::Canvas::rotate`（那是普通旋转，单位同样是度，但无偏移）。
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Default)]
 pub struct Angle(f32);
 

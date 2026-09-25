@@ -102,9 +102,9 @@ impl App {
                 );
             }
             let renderer = match crate::window::native_surface(&window).and_then(|surface| {
-                crate::window::renderer::Renderer::new(
+                winisland_render::Renderer::new(
                     surface,
-                    crate::window::renderer::RendererOptions::new(self.geom.os_w, self.geom.os_h),
+                    winisland_render::RendererOptions::new(self.geom.os_w, self.geom.os_h),
                 )
                 .map_err(|error| error.to_string())
             }) {

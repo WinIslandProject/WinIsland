@@ -1,18 +1,12 @@
-use skia_safe::canvas::SrcRectConstraint;
-use skia_safe::{
-    Canvas, ClipOp, Color, FilterMode, Image, MipmapMode, Paint, RRect, Rect, SamplingOptions,
-};
-
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{
     DrawVisualizerParams, draw_text_cached, draw_visualizer, get_cached_media_image,
 };
-use crate::utils::color::rgba;
 use winisland_core::config::LyricTransitionAnimation;
 use winisland_core::context::MiniContent;
 use winisland_core::lyrics::LyricHighlight;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
-use winisland_render::{BlurSpec, Painter, Rgba};
+use winisland_render::{BlurSpec, Image, ImageOptions, Painter, Radius, Rect, Rgba, Sampling};
 
 const PENDING_LYRIC_CHANNEL: u8 = 190;
 const SECONDARY_LYRIC_SCALE: f32 = 0.85;
@@ -60,7 +54,7 @@ pub(crate) fn lyric_pair_height(font_size: f32, global_scale: f32) -> f32 {
 }
 
 pub(super) struct MiniContentParams<'a> {
-    pub(super) canvas: &'a Canvas,
+    pub(super) painter: Painter<'a>,
     pub(super) content: Option<MiniContent<'a>>,
     pub(super) mini_alpha: f32,
     pub(super) current_w: f32,
@@ -69,7 +63,7 @@ pub(super) struct MiniContentParams<'a> {
     pub(super) offset_x: f32,
     pub(super) stable_offset_y: f32,
     pub(super) base_h: f32,
-    pub(super) palette: &'a [Color],
+    pub(super) palette: &'a [Rgba],
     pub(super) viz_h_scale: f32,
     pub(super) current_lyric: &'a str,
     pub(super) current_secondary_lyric: &'a str,
@@ -82,7 +76,7 @@ pub(super) struct MiniContentParams<'a> {
     pub(super) lyric_side_gap: f32,
     pub(super) lyric_transition: f32,
     pub(super) lyric_transition_animation: LyricTransitionAnimation,
-    pub(super) text_color: Color,
+    pub(super) text_color: Rgba,
 }
 
 pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
@@ -104,7 +98,7 @@ pub(super) fn draw_mini_content(params: MiniContentParams<'_>) {
 fn draw_music_content(params: &MiniContentParams<'_>, alpha: u8) {
     draw_mini_cover(params, alpha);
     draw_visualizer(DrawVisualizerParams {
-        canvas: params.canvas,
+        painter: params.painter,
         x: params.offset_x + params.current_w - MINI_VISUALIZER_RIGHT_INSET * params.global_scale,
         y: params.stable_offset_y + params.base_h / 2.0,
         alpha,
@@ -125,32 +119,21 @@ fn draw_mini_cover(params: &MiniContentParams<'_>, alpha: u8) {
     let size = MINI_COVER_SIZE * params.global_scale;
     let x = params.offset_x + MINI_COVER_LEFT_INSET * params.global_scale;
     let y = params.stable_offset_y + (params.base_h - size) / 2.0;
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_alpha_f(f32::from(alpha) / f32::from(u8::MAX));
-
-    params.canvas.save();
-    params.canvas.clip_rrect(
-        RRect::new_rect_xy(
-            Rect::from_xywh(x, y, size, size),
-            MINI_COVER_RADIUS * params.global_scale,
-            MINI_COVER_RADIUS * params.global_scale,
-        ),
-        ClipOp::Intersect,
-        true,
-    );
-    let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
-    let source_rect = center_crop_rect(&image);
-    params.canvas.draw_image_rect_with_sampling_options(
-        &image,
-        source_rect
-            .as_ref()
-            .map(|rect| (rect, SrcRectConstraint::Fast)),
+    let painter = params.painter;
+    painter.save();
+    painter.clip_round_rect(
         Rect::from_xywh(x, y, size, size),
-        sampling,
-        &paint,
+        Radius::uniform(MINI_COVER_RADIUS * params.global_scale),
     );
-    params.canvas.restore();
+    let source_rect = center_crop_rect(&image);
+    let mut options = ImageOptions::default()
+        .with_sampling(Sampling::LinearLinear)
+        .with_alpha_f(f32::from(alpha) / f32::from(u8::MAX));
+    if let Some(source) = source_rect {
+        options = options.with_src(source);
+    }
+    painter.draw_image(&image, Rect::from_xywh(x, y, size, size), &options);
+    painter.restore();
 }
 
 fn center_crop_rect(image: &Image) -> Option<Rect> {
@@ -201,24 +184,20 @@ fn draw_mini_lyrics(params: &MiniContentParams<'_>, alpha: u8) {
         primary_centered: !scrolling,
     };
 
-    params.canvas.save();
-    params.canvas.clip_rect(
-        Rect::from_xywh(
-            space_left,
-            params.stable_offset_y,
-            available_width,
-            params.base_h,
-        ),
-        ClipOp::Intersect,
-        true,
-    );
+    params.painter.save();
+    params.painter.clip_rect(Rect::from_xywh(
+        space_left,
+        params.stable_offset_y,
+        available_width,
+        params.base_h,
+    ));
     draw_lyric_transition(
         params,
         layout,
         lyric_alpha,
         params.lyric_transition_animation,
     );
-    params.canvas.restore();
+    params.painter.restore();
 }
 
 fn has_lyrics(params: &MiniContentParams<'_>) -> bool {
@@ -268,7 +247,7 @@ fn draw_lyric_transition(
             transition.powi(2) * blur_sigma * params.global_scale,
         );
         draw_lyric_pair(LyricPairParams {
-            canvas: params.canvas,
+            painter: params.painter,
             primary: params.old_lyric,
             secondary: params.old_secondary_lyric,
             primary_anchor_x: layout.primary_anchor_x,
@@ -290,7 +269,7 @@ fn draw_lyric_transition(
         (1.0 - transition).powi(2) * blur_sigma * params.global_scale,
     );
     draw_lyric_pair(LyricPairParams {
-        canvas: params.canvas,
+        painter: params.painter,
         primary: params.current_lyric,
         secondary: params.current_secondary_lyric,
         primary_anchor_x: layout.primary_anchor_x,
@@ -309,8 +288,8 @@ fn lyric_transition_progress(progress: f32) -> f32 {
     progress * progress * (3.0 - 2.0 * progress)
 }
 
-fn lyric_style(color: Color, alpha: u8, blur_sigma: f32) -> (Rgba, Option<BlurSpec>) {
-    let color = rgba(Color::from_argb(alpha, color.r(), color.g(), color.b()));
+fn lyric_style(color: Rgba, alpha: u8, blur_sigma: f32) -> (Rgba, Option<BlurSpec>) {
+    let color = Rgba::from_argb(alpha, color.r(), color.g(), color.b());
     let blur = (blur_sigma > MIN_BLUR_SIGMA).then_some(BlurSpec {
         sigma: (blur_sigma * LYRIC_TRANSITION_BLUR_X_SCALE, blur_sigma),
         tile: None,
@@ -319,7 +298,6 @@ fn lyric_style(color: Color, alpha: u8, blur_sigma: f32) -> (Rgba, Option<BlurSp
 }
 
 /// Horizontal position of one line of plugin text.
-///
 /// Plugin content is centred in the compact island, matching the default
 /// alignment of the built-in compact widgets. A line wider than the island keeps
 /// the left inset so its leading characters stay readable.
@@ -354,14 +332,15 @@ fn draw_plugin_content(
     };
     let (color, blur) = lyric_style(params.text_color, alpha, 0.0);
 
-    params.canvas.save();
-    params.canvas.clip_rect(
-        Rect::from_xywh(text_x, params.stable_offset_y, text_width, params.base_h),
-        ClipOp::Intersect,
-        true,
-    );
+    params.painter.save();
+    params.painter.clip_rect(Rect::from_xywh(
+        text_x,
+        params.stable_offset_y,
+        text_width,
+        params.base_h,
+    ));
     draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(params.canvas),
+        painter: params.painter,
         text,
         x: plugin_text_x(text, font_size, true, text_x, text_width),
         y: text_y,
@@ -377,7 +356,7 @@ fn draw_plugin_content(
             0.0,
         );
         draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(params.canvas),
+            painter: params.painter,
             text: &context.body,
             x: plugin_text_x(
                 &context.body,
@@ -393,7 +372,7 @@ fn draw_plugin_content(
             blur: secondary_blur,
         });
     }
-    params.canvas.restore();
+    params.painter.restore();
 }
 
 fn scaled_alpha(alpha: u8, factor: f32) -> u8 {
@@ -401,7 +380,7 @@ fn scaled_alpha(alpha: u8, factor: f32) -> u8 {
 }
 
 struct LyricPairParams<'a> {
-    canvas: &'a Canvas,
+    painter: Painter<'a>,
     primary: &'a str,
     secondary: &'a str,
     primary_anchor_x: f32,
@@ -416,7 +395,7 @@ struct LyricPairParams<'a> {
 
 fn draw_lyric_pair(params: LyricPairParams<'_>) {
     let LyricPairParams {
-        canvas,
+        painter,
         primary,
         secondary,
         primary_anchor_x,
@@ -457,7 +436,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
 
     if !primary.is_empty() {
         draw_highlighted_lyric(
-            canvas,
+            painter,
             primary,
             text_x(primary, size, primary_anchor_x, primary_centered),
             primary_y,
@@ -475,7 +454,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
             SECONDARY_LYRIC_CHANNEL,
         );
         draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(canvas),
+            painter,
             text: secondary,
             x: text_x(secondary, secondary_size, secondary_center_x, true),
             y: secondary_y,
@@ -489,7 +468,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
 
 #[allow(clippy::too_many_arguments)]
 fn draw_highlighted_lyric(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     text: &str,
     x: f32,
     y: f32,
@@ -505,7 +484,7 @@ fn draw_highlighted_lyric(
             && text.is_char_boundary(highlight.end_byte)
     }) else {
         draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(canvas),
+            painter,
             text,
             x,
             y,
@@ -524,7 +503,7 @@ fn draw_highlighted_lyric(
         PENDING_LYRIC_CHANNEL,
     );
     draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text,
         x,
         y,
@@ -547,14 +526,15 @@ fn draw_highlighted_lyric(
         if clip_right <= clip_left {
             return;
         }
-        canvas.save();
-        canvas.clip_rect(
-            Rect::from_ltrb(clip_left, y - size * 1.5, clip_right, y + size * 0.5),
-            ClipOp::Intersect,
-            true,
-        );
+        painter.save();
+        painter.clip_rect(Rect::from_ltrb(
+            clip_left,
+            y - size * 1.5,
+            clip_right,
+            y + size * 0.5,
+        ));
         draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(canvas),
+            painter,
             text,
             x,
             y,
@@ -563,7 +543,7 @@ fn draw_highlighted_lyric(
             color,
             blur,
         });
-        canvas.restore();
+        painter.restore();
     };
     draw_layer(active_color, x, x + completed_width);
 

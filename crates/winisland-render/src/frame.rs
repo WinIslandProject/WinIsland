@@ -1,19 +1,20 @@
 use std::collections::HashMap;
 
-use skia_safe::{Color, Image, ImageInfo, Paint, Rect, Surface, gpu, image_filters};
+use skia_safe::{Color, ImageInfo, Paint, Rect, Surface, gpu, image_filters};
 
 use crate::backend::{D3DDevice, RenderTarget, check_surface_supported};
 use crate::error::{RenderError, RenderResult};
+use crate::image::Image;
+use crate::painter::Painter;
 use crate::surface::NativeSurface;
+use crate::types::Mipmapped;
+use crate::types::{Sampling, TileMode};
 
 const MAIN_TARGET: RendererTargetId = RendererTargetId(0);
 
-/// 渲染器创建参数。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct RendererOptions {
-    /// 主目标的初始宽度（物理像素）。
     pub width: u32,
-    /// 主目标的初始高度（物理像素）。
     pub height: u32,
 }
 
@@ -23,23 +24,23 @@ impl RendererOptions {
     }
 }
 
-/// 帧回调可用的即时上下文：GPU 上传与离屏 surface。
-///
-/// 生命周期：只在 `Renderer::draw` 的回调期间有效，不可保存。
-/// 失败语义：所有方法返回 `Option`，`None` 表示后端拒绝该操作，调用方需走降级路径。
-/// 线程要求：仅渲染线程可构造与使用。
 pub struct DrawingContext<'a> {
     direct_context: &'a mut gpu::DirectContext,
 }
 
 impl DrawingContext<'_> {
-    /// GPU 上传；`mipmapped` 决定是否为纹理生成 mipmap（实测 4 处调用点全部传 `Yes`）。
-    pub fn prepare_image(&mut self, image: Image, mipmapped: gpu::Mipmapped) -> Option<Image> {
-        image.new_texture_image(self.direct_context, mipmapped)
+    pub fn prepare_image(&mut self, image: Image, mipmapped: Mipmapped) -> Option<Image> {
+        let mipmapped = match mipmapped {
+            Mipmapped::No => gpu::Mipmapped::No,
+            Mipmapped::Yes => gpu::Mipmapped::Yes,
+        };
+        image
+            .as_skia()
+            .new_texture_image(self.direct_context, mipmapped)
+            .map(Image::from_skia)
     }
 
-    /// 申请一个 GPU 离屏渲染目标。
-    pub fn render_surface(&mut self, info: &ImageInfo) -> Option<Surface> {
+    fn render_surface(&mut self, info: &ImageInfo) -> Option<Surface> {
         gpu::surfaces::render_target(
             self.direct_context,
             gpu::Budgeted::Yes,
@@ -52,21 +53,63 @@ impl DrawingContext<'_> {
         )
     }
 
-    /// 把离屏 surface 的内容提交到后端队列。
-    pub fn finish_surface(&mut self, surface: &mut Surface) {
+    fn finish_surface(&mut self, surface: &mut Surface) {
         self.direct_context.flush_surface(surface);
+    }
+
+    pub fn scale_image(&mut self, image: &Image, width: i32, height: i32) -> Option<Image> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let info = ImageInfo::new_n32_premul((width, height), None);
+        let mut surface = self.render_surface(&info)?;
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        surface.canvas().draw_image_rect_with_sampling_options(
+            image.as_skia(),
+            None,
+            Rect::from_xywh(0.0, 0.0, width as f32, height as f32),
+            crate::convert::to_skia_sampling(Sampling::LinearNone),
+            &paint,
+        );
+        self.finish_surface(&mut surface);
+        Some(Image::from_skia(surface.image_snapshot()))
+    }
+
+    pub fn blur_image(
+        &mut self,
+        image: &Image,
+        width: i32,
+        height: i32,
+        sigma: (f32, f32),
+        tile: Option<TileMode>,
+    ) -> Option<Image> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let info = ImageInfo::new_n32_premul((width, height), None);
+        let mut surface = self.render_surface(&info)?;
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        if let Some(filter) = image_filters::blur(
+            sigma,
+            tile.map(crate::convert::to_skia_tile_mode),
+            None,
+            None,
+        ) {
+            paint.set_image_filter(filter);
+        }
+        surface
+            .canvas()
+            .draw_image(image.as_skia(), (0, 0), Some(&paint));
+        self.finish_surface(&mut surface);
+        Some(Image::from_skia(surface.image_snapshot()))
     }
 }
 
-/// 渲染目标句柄。`Copy`、newtype，不可由裸整数构造。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RendererTargetId(u64);
 
-/// 设备 + 渲染目标表 + 帧生命周期。
-///
-/// 线程要求：`Renderer` 只在渲染线程使用。
-/// 失败语义：任何操作失败都会被 `record_result` 记住，此后所有请求都会返回首个错误
-/// （"失败即整体不可用"），直到重建 `Renderer`。
 pub struct Renderer {
     targets: HashMap<RendererTargetId, RenderTarget>,
     device: D3DDevice,
@@ -131,13 +174,28 @@ impl Renderer {
         MAIN_TARGET
     }
 
-    pub fn draw<T>(
+    fn draw<T>(
         &mut self,
         target_id: RendererTargetId,
         draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
     ) -> RenderResult<T> {
         let result = self.draw_inner(target_id, draw);
         self.record_result(result)
+    }
+
+    pub fn frame<T>(
+        &mut self,
+        target_id: RendererTargetId,
+        draw: impl FnOnce(&mut DrawingContext<'_>, Painter<'_>) -> T,
+    ) -> RenderResult<T> {
+        self.draw(target_id, |drawing_context, surface| {
+            draw(
+                drawing_context,
+                Painter {
+                    canvas: surface.canvas(),
+                },
+            )
+        })
     }
 
     fn draw_inner<T>(
@@ -197,7 +255,6 @@ impl Renderer {
         self.device.resize_target(target, width, height)
     }
 
-    /// 取出并清除首个失败原因（供上层记录日志并重建渲染器）。
     pub fn take_failure(&mut self) -> Option<String> {
         self.failure.take()
     }

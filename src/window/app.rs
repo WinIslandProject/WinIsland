@@ -6,7 +6,6 @@ use crate::plugin::marketplace::MarketplaceCatalog;
 use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
 use crate::window::backdrop::HostBackdrop;
-use crate::window::renderer::Renderer;
 use crate::window::settings::SettingsApp;
 use crate::window::tray::TrayManager;
 use std::path::PathBuf;
@@ -18,6 +17,7 @@ use winisland_core::context::ContextManager;
 use winisland_core::lyrics::LyricHighlight;
 use winisland_core::physics::Spring;
 use winisland_core::widgets::WidgetManager;
+use winisland_render::Renderer;
 use winit::dpi::PhysicalPosition;
 use winit::window::Window;
 

@@ -1,67 +1,58 @@
-use skia_safe::{Color, Paint};
 use winisland_render::Rgba;
 
-/// 把后端 8 位颜色转成渲染语义颜色。
-///
-/// 过渡用：`SettingsTheme` 与 `COLOR_*` 仍在用后端 `Color`，等它们换成 `Rgba` 后本函数删除。
-pub(crate) fn rgba(color: Color) -> Rgba {
-    Rgba::from_argb(color.a(), color.r(), color.g(), color.b())
+pub(crate) fn settings_color(color: Rgba) -> Rgba {
+    color
 }
 
-/// 取一个 Paint 的颜色并转成渲染语义颜色。
-pub(crate) fn rgba_of_paint(paint: &Paint) -> Rgba {
-    rgba(paint.color())
+pub const COLOR_CARD_HIGHLIGHT: Rgba = Rgba::from_rgb(72, 72, 74);
+pub const COLOR_ACCENT: Rgba = Rgba::from_rgb(10, 132, 255);
+pub const COLOR_TEXT_PRI: Rgba = Rgba::from_rgb(245, 245, 247);
+pub const COLOR_TEXT_SEC: Rgba = Rgba::from_rgb(174, 174, 178);
+pub const COLOR_DANGER: Rgba = Rgba::from_rgb(230, 55, 45);
+pub const COLOR_DISABLED: Rgba = Rgba::from_rgb(99, 99, 102);
+
+pub const COLOR_WIN_BG: Rgba = Rgba::from_rgb(28, 28, 30);
+pub const COLOR_SIDEBAR_BG: Rgba = Rgba::from_rgb(36, 36, 38);
+pub const COLOR_GROUP_BG: Rgba = Rgba::from_rgb(44, 44, 46);
+pub const COLOR_TOGGLE_ON: Rgba = Rgba::from_rgb(48, 209, 88);
+pub const COLOR_TOGGLE_OFF: Rgba = Rgba::from_rgb(99, 99, 102);
+
+pub fn color_sidebar_hover() -> Rgba {
+    Rgba::from_argb(20, 255, 255, 255)
 }
 
-pub const COLOR_CARD_HIGHLIGHT: Color = Color::from_rgb(72, 72, 74);
-pub const COLOR_ACCENT: Color = Color::from_rgb(10, 132, 255);
-pub const COLOR_TEXT_PRI: Color = Color::from_rgb(245, 245, 247);
-pub const COLOR_TEXT_SEC: Color = Color::from_rgb(174, 174, 178);
-pub const COLOR_DANGER: Color = Color::from_rgb(230, 55, 45);
-pub const COLOR_DISABLED: Color = Color::from_rgb(99, 99, 102);
-
-pub const COLOR_WIN_BG: Color = Color::from_rgb(28, 28, 30);
-pub const COLOR_SIDEBAR_BG: Color = Color::from_rgb(36, 36, 38);
-pub const COLOR_GROUP_BG: Color = Color::from_rgb(44, 44, 46);
-pub const COLOR_TOGGLE_ON: Color = Color::from_rgb(48, 209, 88);
-pub const COLOR_TOGGLE_OFF: Color = Color::from_rgb(99, 99, 102);
-
-pub fn color_sidebar_hover() -> Color {
-    Color::from_argb(20, 255, 255, 255)
-}
-
-pub fn color_separator() -> Color {
-    Color::from_argb(26, 255, 255, 255)
+pub fn color_separator() -> Rgba {
+    Rgba::from_argb(26, 255, 255, 255)
 }
 
 pub struct SettingsTheme {
-    pub win_bg: Color,
-    pub sidebar_bg: Color,
-    pub group_bg: Color,
-    pub card_highlight: Color,
-    pub text_pri: Color,
-    pub text_sec: Color,
-    pub disabled: Color,
-    pub accent: Color,
-    pub danger: Color,
-    pub toggle_on: Color,
-    pub toggle_off: Color,
-    pub selection_bg: Color,
-    pub selection_text: Color,
+    pub win_bg: Rgba,
+    pub sidebar_bg: Rgba,
+    pub group_bg: Rgba,
+    pub card_highlight: Rgba,
+    pub text_pri: Rgba,
+    pub text_sec: Rgba,
+    pub disabled: Rgba,
+    pub accent: Rgba,
+    pub danger: Rgba,
+    pub toggle_on: Rgba,
+    pub toggle_off: Rgba,
+    pub selection_bg: Rgba,
+    pub selection_text: Rgba,
 
-    pub sidebar_hover: Color,
-    pub separator: Color,
-    pub popup_bg: Color,
-    pub popup_border: Color,
-    pub popup_shadow: Color,
-    pub popup_separator: Color,
-    pub control_bg: Color,
-    pub control_hover: Color,
-    pub control_disabled: Color,
-    pub control_border: Color,
-    pub group_border: Color,
-    pub shadow: Color,
-    pub scrollbar: Color,
+    pub sidebar_hover: Rgba,
+    pub separator: Rgba,
+    pub popup_bg: Rgba,
+    pub popup_border: Rgba,
+    pub popup_shadow: Rgba,
+    pub popup_separator: Rgba,
+    pub control_bg: Rgba,
+    pub control_hover: Rgba,
+    pub control_disabled: Rgba,
+    pub control_border: Rgba,
+    pub group_border: Rgba,
+    pub shadow: Rgba,
+    pub scrollbar: Rgba,
 }
 
 pub fn dark_settings_theme() -> SettingsTheme {
@@ -82,48 +73,48 @@ pub fn dark_settings_theme() -> SettingsTheme {
 
         sidebar_hover: color_sidebar_hover(),
         separator: color_separator(),
-        popup_bg: Color::from_rgb(50, 50, 52),
-        popup_border: Color::from_argb(40, 255, 255, 255),
-        popup_shadow: Color::from_argb(60, 0, 0, 0),
-        popup_separator: Color::from_argb(30, 255, 255, 255),
-        control_bg: Color::from_rgb(58, 58, 60),
-        control_hover: Color::from_rgb(72, 72, 74),
-        control_disabled: Color::from_rgb(48, 48, 50),
-        control_border: Color::from_argb(36, 255, 255, 255),
-        group_border: Color::from_argb(24, 255, 255, 255),
-        shadow: Color::from_argb(45, 0, 0, 0),
-        scrollbar: Color::from_argb(60, 255, 255, 255),
+        popup_bg: Rgba::from_rgb(50, 50, 52),
+        popup_border: Rgba::from_argb(40, 255, 255, 255),
+        popup_shadow: Rgba::from_argb(60, 0, 0, 0),
+        popup_separator: Rgba::from_argb(30, 255, 255, 255),
+        control_bg: Rgba::from_rgb(58, 58, 60),
+        control_hover: Rgba::from_rgb(72, 72, 74),
+        control_disabled: Rgba::from_rgb(48, 48, 50),
+        control_border: Rgba::from_argb(36, 255, 255, 255),
+        group_border: Rgba::from_argb(24, 255, 255, 255),
+        shadow: Rgba::from_argb(45, 0, 0, 0),
+        scrollbar: Rgba::from_argb(60, 255, 255, 255),
     }
 }
 
 pub fn light_settings_theme() -> SettingsTheme {
     SettingsTheme {
-        win_bg: Color::from_rgb(244, 245, 247),
-        sidebar_bg: Color::from_rgb(250, 250, 252),
-        group_bg: Color::from_rgb(255, 255, 255),
-        card_highlight: Color::from_rgb(239, 242, 247),
-        text_pri: Color::from_rgb(31, 34, 40),
-        text_sec: Color::from_rgb(91, 98, 110),
-        disabled: Color::from_rgb(146, 151, 161),
-        accent: Color::from_rgb(0, 103, 192),
-        danger: Color::from_rgb(196, 43, 28),
-        toggle_on: Color::from_rgb(0, 120, 212),
-        toggle_off: Color::from_rgb(176, 181, 190),
-        selection_bg: Color::from_rgb(224, 238, 250),
-        selection_text: Color::from_rgb(0, 85, 153),
+        win_bg: Rgba::from_rgb(244, 245, 247),
+        sidebar_bg: Rgba::from_rgb(250, 250, 252),
+        group_bg: Rgba::from_rgb(255, 255, 255),
+        card_highlight: Rgba::from_rgb(239, 242, 247),
+        text_pri: Rgba::from_rgb(31, 34, 40),
+        text_sec: Rgba::from_rgb(91, 98, 110),
+        disabled: Rgba::from_rgb(146, 151, 161),
+        accent: Rgba::from_rgb(0, 103, 192),
+        danger: Rgba::from_rgb(196, 43, 28),
+        toggle_on: Rgba::from_rgb(0, 120, 212),
+        toggle_off: Rgba::from_rgb(176, 181, 190),
+        selection_bg: Rgba::from_rgb(224, 238, 250),
+        selection_text: Rgba::from_rgb(0, 85, 153),
 
-        sidebar_hover: Color::from_argb(14, 20, 32, 48),
-        separator: Color::from_argb(18, 24, 32, 44),
-        popup_bg: Color::from_rgb(255, 255, 255),
-        popup_border: Color::from_argb(24, 20, 28, 40),
-        popup_shadow: Color::from_argb(20, 20, 28, 40),
-        popup_separator: Color::from_argb(12, 20, 28, 40),
-        control_bg: Color::from_rgb(247, 248, 250),
-        control_hover: Color::from_rgb(235, 239, 244),
-        control_disabled: Color::from_rgb(241, 242, 245),
-        control_border: Color::from_argb(24, 20, 28, 40),
-        group_border: Color::from_argb(14, 20, 28, 40),
-        shadow: Color::from_argb(20, 20, 28, 40),
-        scrollbar: Color::from_argb(52, 52, 58, 68),
+        sidebar_hover: Rgba::from_argb(14, 20, 32, 48),
+        separator: Rgba::from_argb(18, 24, 32, 44),
+        popup_bg: Rgba::from_rgb(255, 255, 255),
+        popup_border: Rgba::from_argb(24, 20, 28, 40),
+        popup_shadow: Rgba::from_argb(20, 20, 28, 40),
+        popup_separator: Rgba::from_argb(12, 20, 28, 40),
+        control_bg: Rgba::from_rgb(247, 248, 250),
+        control_hover: Rgba::from_rgb(235, 239, 244),
+        control_disabled: Rgba::from_rgb(241, 242, 245),
+        control_border: Rgba::from_argb(24, 20, 28, 40),
+        group_border: Rgba::from_argb(14, 20, 28, 40),
+        shadow: Rgba::from_argb(20, 20, 28, 40),
+        scrollbar: Rgba::from_argb(52, 52, 58, 68),
     }
 }

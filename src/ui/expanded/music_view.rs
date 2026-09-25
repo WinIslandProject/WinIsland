@@ -15,19 +15,13 @@ use self::palette::get_palette_from_image;
 use crate::core::smtc::MediaInfo;
 use crate::icons::arrows::draw_arrow_right;
 use crate::icons::controls::{draw_control_triangle, draw_pause_button, draw_play_button};
-use crate::utils::color::rgba;
-use crate::utils::color::rgba_of_paint;
 use crate::utils::cover::decode_cover_image;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
-use crate::utils::shape::continuous_rounded_rect_path;
-use skia_safe::canvas::SrcRectConstraint;
-use skia_safe::{
-    Canvas, Color, FilterMode, Image, MipmapMode, Paint, Point, RRect, Rect, SamplingOptions,
-    image_filters,
-};
-use winisland_render::FontStyle;
-use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{
+    BlurSpec, FontStyle, Image, ImageOptions, LayerSpec, Painter, Path, Radius, Rect, Rgba,
+    Sampling, Vec2,
+};
 
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -143,7 +137,7 @@ pub fn get_cached_media_image_with_key(media: &MediaInfo) -> Option<(Image, u64)
             return;
         }
         if let Some(data) = media.thumbnail.as_ref() {
-            let image = decode_cover_image(data);
+            let image = decode_cover_image(data.as_ref());
             *cache_mut = Some((cache_key, image.clone()));
             result = image.map(|image| (image, cache_key));
             has_current_image = true;
@@ -170,7 +164,7 @@ pub fn get_cached_media_image_with_key(media: &MediaInfo) -> Option<(Image, u64)
     result
 }
 
-pub fn get_media_palette(media: &MediaInfo) -> Arc<[Color]> {
+pub fn get_media_palette(media: &MediaInfo) -> Arc<[Rgba]> {
     if let Some((img, cache_key)) = get_cached_media_image_with_key(media) {
         get_palette_from_image(&img, cache_key)
     } else {
@@ -178,15 +172,10 @@ pub fn get_media_palette(media: &MediaInfo) -> Arc<[Color]> {
     }
 }
 
-pub fn default_media_palette() -> Arc<[Color]> {
-    static DEFAULT_PALETTE: OnceLock<Arc<[Color]>> = OnceLock::new();
+pub fn default_media_palette() -> Arc<[Rgba]> {
+    static DEFAULT_PALETTE: OnceLock<Arc<[Rgba]>> = OnceLock::new();
     DEFAULT_PALETTE
-        .get_or_init(|| {
-            Arc::from([
-                Color::from_rgb(180, 180, 180),
-                Color::from_rgb(100, 100, 100),
-            ])
-        })
+        .get_or_init(|| Arc::from([Rgba::from_rgb(180, 180, 180), Rgba::from_rgb(100, 100, 100)]))
         .clone()
 }
 
@@ -200,7 +189,7 @@ pub fn clear_cover_cache() {
 }
 
 pub struct DrawMusicPageParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub ox: f32,
     pub oy: f32,
     pub w: f32,
@@ -216,14 +205,14 @@ pub struct DrawMusicPageParams<'a> {
     pub use_blur: bool,
     pub font_size: f32,
     pub dt: f32,
-    pub text_color: Color,
-    pub text_color_sec: Color,
-    pub palette: &'a [Color],
+    pub text_color: Rgba,
+    pub text_color_sec: Rgba,
+    pub palette: &'a [Rgba],
 }
 
 pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
     let DrawMusicPageParams {
-        canvas,
+        painter,
         ox,
         oy,
         w,
@@ -248,12 +237,12 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
         (alpha as f32 * (1.0 - view_offset * PAGE_ARROW_FADE_RATE).clamp(0.0, 1.0)) as u8;
     if arrow_alpha > 0 {
         draw_arrow_right(
-            Painter::from_canvas(canvas),
+            painter,
             ox + w - PAGE_ARROW_RIGHT_INSET * scale,
             oy + h / 2.0,
             arrow_alpha,
             scale,
-            rgba(text_color),
+            text_color,
         );
     }
     let base_img_size = COVER_SIZE * scale;
@@ -263,7 +252,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
         oy + CONTENT_PADDING * scale,
     );
     let pause_t = draw_cover(CoverParams {
-        canvas,
+        painter,
         media,
         music_active,
         img_x,
@@ -280,7 +269,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
     let max_text_w = w - (text_x - ox) - TRACK_TEXT_RIGHT_INSET * scale;
     let title_y = img_y + TRACK_TITLE_BASELINE_OFFSET * scale;
     draw_track_text(TrackTextParams {
-        canvas,
+        painter,
         media,
         music_active,
         text_x,
@@ -374,14 +363,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
 
         let time_alpha_factor =
             PROGRESS_TIME_IDLE_ALPHA + (1.0 - PROGRESS_TIME_IDLE_ALPHA) * hover_t;
-        let mut time_paint = Paint::default();
-        time_paint.set_anti_alias(true);
-        time_paint.set_color(Color::from_argb(
-            (alpha as f32 * time_alpha_factor) as u8,
-            text_color.r(),
-            text_color.g(),
-            text_color.b(),
-        ));
+        let time_color = text_color.with_alpha((alpha as f32 * time_alpha_factor) as u8);
 
         PROGRESS_TEXT_CACHE.with(|cell| {
             let mut cache = cell.borrow_mut();
@@ -399,13 +381,13 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             }
 
             draw_text_cached(DrawTextCachedParams {
-                painter: Painter::from_canvas(canvas),
+                painter,
                 text: &cache.elapsed_text,
                 x: bar_full_left,
                 y: text_baseline_y,
                 size: time_font_size,
                 bold: false,
-                color: rgba_of_paint(&time_paint),
+                color: time_color,
                 blur: None,
             });
 
@@ -415,63 +397,47 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
                 FontStyle::normal(),
             );
             draw_text_cached(DrawTextCachedParams {
-                painter: Painter::from_canvas(canvas),
+                painter,
                 text: &cache.remaining_text,
                 x: bar_full_right - remaining_w,
                 y: text_baseline_y,
                 size: time_font_size,
                 bold: false,
-                color: rgba_of_paint(&time_paint),
+                color: time_color,
                 blur: None,
             });
         });
 
-        let mut track_paint = Paint::default();
-        track_paint.set_anti_alias(true);
-        track_paint.set_color(Color::from_argb(
-            (alpha as f32 * PROGRESS_TRACK_ALPHA) as u8,
-            text_color.r(),
-            text_color.g(),
-            text_color.b(),
-        ));
+        let track_color = text_color.with_alpha((alpha as f32 * PROGRESS_TRACK_ALPHA) as u8);
         let track_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, bar_total_w, bar_h);
-        canvas.draw_round_rect(track_rect, bar_radius, bar_radius, &track_paint);
+        painter.fill_round_rect(track_rect, Radius::uniform(bar_radius), track_color);
 
         let filled_w = (bar_total_w * progress.clamp(0.0, 1.0)).min(bar_total_w);
-        let mut fill_paint = Paint::default();
-        fill_paint.set_anti_alias(true);
         let fill_hover_t = ((hover_t - PROGRESS_FILL_BRIGHTEN_DELAY)
             / (1.0 - PROGRESS_FILL_BRIGHTEN_DELAY))
             .clamp(0.0, 1.0);
         let fill_hover_t = fill_hover_t * fill_hover_t * (3.0 - 2.0 * fill_hover_t);
         let fill_brightness =
             PROGRESS_FILL_IDLE_BRIGHTNESS + (1.0 - PROGRESS_FILL_IDLE_BRIGHTNESS) * fill_hover_t;
-        fill_paint.set_color(Color::from_argb(
+        let fill_color = Rgba::from_argb(
             alpha,
             (text_color.r() as f32 * fill_brightness).round() as u8,
             (text_color.g() as f32 * fill_brightness).round() as u8,
             (text_color.b() as f32 * fill_brightness).round() as u8,
-        ));
+        );
         if filled_w > 0.0 {
             let fill_rect = Rect::from_xywh(bar_left, bar_center_y - bar_h / 2.0, filled_w, bar_h);
             let fill_radius = bar_radius.min(filled_w / 2.0);
-            let fill_rrect = RRect::new_rect_radii(
-                fill_rect,
-                &[
-                    Point::new(fill_radius, fill_radius),
-                    Point::new(0.0, 0.0),
-                    Point::new(0.0, 0.0),
-                    Point::new(fill_radius, fill_radius),
-                ],
-            );
-            canvas.save();
-            canvas.clip_rrect(
-                RRect::new_rect_xy(track_rect, bar_radius, bar_radius),
-                skia_safe::ClipOp::Intersect,
-                true,
-            );
-            canvas.draw_rrect(fill_rrect, &fill_paint);
-            canvas.restore();
+            let radius = Radius {
+                top_left: Vec2::new(fill_radius, fill_radius),
+                top_right: Vec2::new(0.0, 0.0),
+                bottom_right: Vec2::new(0.0, 0.0),
+                bottom_left: Vec2::new(fill_radius, fill_radius),
+            };
+            painter.save();
+            painter.clip_round_rect(track_rect, Radius::uniform(bar_radius));
+            painter.fill_round_rect(fill_rect, radius, fill_color);
+            painter.restore();
         }
 
         let btn_cx = ox + w / 2.0;
@@ -495,7 +461,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
 
         if available_controls & crate::plugin::types::MEDIA_CONTROL_PREVIOUS != 0 {
             draw_skip_button(
-                canvas,
+                painter,
                 btn_cx - skip_gap,
                 btn_cy,
                 true,
@@ -509,7 +475,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
 
         if available_controls & crate::plugin::types::MEDIA_CONTROL_TOGGLE_PLAY != 0 {
             draw_pause_control(
-                canvas, btn_cx, btn_cy, pause_t, alpha, scale, use_blur, dt, text_color,
+                painter, btn_cx, btn_cy, pause_t, alpha, scale, use_blur, dt, text_color,
             );
         }
 
@@ -530,7 +496,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
 
         if available_controls & crate::plugin::types::MEDIA_CONTROL_NEXT != 0 {
             draw_skip_button(
-                canvas,
+                painter,
                 btn_cx + skip_gap,
                 btn_cy,
                 false,
@@ -546,7 +512,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
     let viz_x_offset = COLLAPSED_VISUALIZER_INSET
         + (EXPANDED_VISUALIZER_INSET - COLLAPSED_VISUALIZER_INSET) * expansion_progress;
     draw_visualizer(DrawVisualizerParams {
-        canvas,
+        painter,
         x: ox + w - viz_x_offset * scale,
         y: title_y - VISUALIZER_TITLE_OFFSET * scale,
         alpha,
@@ -560,7 +526,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
 }
 
 struct CoverParams<'a> {
-    canvas: &'a Canvas,
+    painter: Painter<'a>,
     media: &'a MediaInfo,
     music_active: bool,
     img_x: f32,
@@ -570,12 +536,12 @@ struct CoverParams<'a> {
     scale: f32,
     use_blur: bool,
     dt: f32,
-    text_color: Color,
+    text_color: Rgba,
 }
 
 fn draw_cover(params: CoverParams) -> f32 {
     let CoverParams {
-        canvas,
+        painter,
         media,
         music_active,
         img_x,
@@ -660,38 +626,27 @@ fn draw_cover(params: CoverParams) -> f32 {
         image_to_draw.clone()
     };
 
-    canvas.save();
+    painter.save();
     let img_cx = img_x + img_size / 2.0;
     let img_cy = img_y + img_size / 2.0;
-    canvas.translate((img_cx, img_cy));
+    painter.translate(Vec2::new(img_cx, img_cy));
 
-    canvas.scale((cover_scale * flip_scale_x, cover_scale));
-    canvas.translate((-img_cx, -img_cy));
+    painter.scale(Vec2::new(cover_scale * flip_scale_x, cover_scale));
+    painter.translate(Vec2::new(-img_cx, -img_cy));
 
     if flip_blur_sigma > 0.1 && use_blur {
-        let mut blur_paint = Paint::default();
-        blur_paint.set_image_filter(image_filters::blur(
-            (flip_blur_sigma, flip_blur_sigma * 0.3),
-            None,
-            None,
-            None,
-        ));
-        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&blur_paint));
+        painter.begin_layer(LayerSpec::Blur(BlurSpec {
+            sigma: (flip_blur_sigma, flip_blur_sigma * 0.3),
+            tile: None,
+        }));
     }
 
-    canvas.clip_path(
-        &continuous_rounded_rect_path(
-            Rect::from_xywh(img_x, img_y, img_size, img_size),
-            16.0 * scale,
-        ),
-        skia_safe::ClipOp::Intersect,
-        true,
-    );
+    painter.clip_path(&Path::continuous_rounded_rect(
+        Rect::from_xywh(img_x, img_y, img_size, img_size),
+        16.0 * scale,
+    ));
     if let Some(img) = cover_img {
-        let mut img_paint = Paint::default();
-        img_paint.set_anti_alias(true);
         let final_alpha = (alpha as f32 * cover_brightness) / 255.0;
-        img_paint.set_alpha_f(final_alpha);
         let img_w = img.width() as f32;
         let img_h = img.height() as f32;
         let src_rect = if img_w > 0.0 && img_h > 0.0 {
@@ -709,26 +664,35 @@ fn draw_cover(params: CoverParams) -> f32 {
         } else {
             None
         };
-        canvas.draw_image_rect_with_sampling_options(
+        let mut options = ImageOptions::default()
+            .with_sampling(Sampling::LinearLinear)
+            .with_alpha_f(final_alpha);
+        if let Some(source) = src_rect {
+            options = options.with_src(Rect::from_ltrb(
+                source.left,
+                source.top,
+                source.right,
+                source.bottom,
+            ));
+        }
+        painter.draw_image(
             &img,
-            src_rect.as_ref().map(|r| (r, SrcRectConstraint::Fast)),
             Rect::from_xywh(img_x, img_y, img_size, img_size),
-            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
-            &img_paint,
+            &options,
         );
     } else {
-        draw_placeholder(canvas, img_x, img_y, img_size, alpha, scale, text_color);
+        draw_placeholder(painter, img_x, img_y, img_size, alpha, scale, text_color);
     }
     if flip_blur_sigma > 0.1 && use_blur {
-        canvas.restore();
+        painter.restore();
     }
-    canvas.restore();
+    painter.restore();
 
     pause_t
 }
 
 struct TrackTextParams<'a> {
-    canvas: &'a Canvas,
+    painter: Painter<'a>,
     media: &'a MediaInfo,
     music_active: bool,
     text_x: f32,
@@ -737,13 +701,13 @@ struct TrackTextParams<'a> {
     alpha: u8,
     font_size: f32,
     scale: f32,
-    text_color: Color,
-    text_color_sec: Color,
+    text_color: Rgba,
+    text_color_sec: Rgba,
 }
 
 fn draw_track_text(params: TrackTextParams) {
     let TrackTextParams {
-        canvas,
+        painter,
         media,
         music_active,
         text_x,
@@ -756,8 +720,6 @@ fn draw_track_text(params: TrackTextParams) {
         text_color_sec,
     } = params;
 
-    let mut text_paint = Paint::default();
-    text_paint.set_anti_alias(true);
     let title = if !music_active || media.title.is_empty() {
         "No Music playing"
     } else {
@@ -769,12 +731,6 @@ fn draw_track_text(params: TrackTextParams) {
         &media.artist
     };
 
-    text_paint.set_color(Color::from_argb(
-        alpha,
-        text_color.r(),
-        text_color.g(),
-        text_color.b(),
-    ));
     let title_font_size = if font_size > 0.0 {
         font_size * scale
     } else {
@@ -785,26 +741,20 @@ fn draw_track_text(params: TrackTextParams) {
     TITLE_SCROLL.with(|cell| {
         let mut scroll = cell.borrow_mut();
         scroll.draw(ScrollDrawParams {
-            canvas,
+            painter,
             text: title,
             x: text_x,
             y: title_y,
             max_w: max_text_w,
             size: title_font_size,
             style: title_style,
-            color: rgba_of_paint(&text_paint),
+            color: text_color.with_alpha(alpha),
             blur: None,
             scale,
             render_as_paths: true,
         });
     });
 
-    text_paint.set_color(Color::from_argb(
-        (alpha as f32 * 0.6) as u8,
-        text_color_sec.r(),
-        text_color_sec.g(),
-        text_color_sec.b(),
-    ));
     let artist_y = title_y + 22.0 * scale;
     let artist_font_size = if font_size > 0.0 {
         font_size * scale
@@ -816,14 +766,14 @@ fn draw_track_text(params: TrackTextParams) {
     ARTIST_SCROLL.with(|cell| {
         let mut scroll = cell.borrow_mut();
         scroll.draw(ScrollDrawParams {
-            canvas,
+            painter,
             text: artist,
             x: text_x,
             y: artist_y,
             max_w: max_text_w,
             size: artist_font_size,
             style: artist_style,
-            color: rgba_of_paint(&text_paint),
+            color: text_color_sec.with_alpha((alpha as f32 * 0.6) as u8),
             blur: None,
             scale,
             render_as_paths: true,
@@ -833,7 +783,7 @@ fn draw_track_text(params: TrackTextParams) {
 
 #[allow(clippy::too_many_arguments)]
 fn draw_pause_control(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     btn_cx: f32,
     btn_cy: f32,
     pause_t: f32,
@@ -841,7 +791,7 @@ fn draw_pause_control(
     scale: f32,
     use_blur: bool,
     dt: f32,
-    text_color: Color,
+    text_color: Rgba,
 ) {
     let (pause_s, pause_blur) = PAUSE_SPRING.with(|cell| {
         let mut s = cell.borrow_mut();
@@ -858,52 +808,31 @@ fn draw_pause_control(
         )
     });
 
-    canvas.save();
+    painter.save();
     if pause_blur > 0.1 && use_blur {
-        let mut blur_paint = Paint::default();
-        blur_paint.set_image_filter(image_filters::blur(
-            (pause_blur, pause_blur),
-            None,
-            None,
-            None,
-        ));
-        canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&blur_paint));
+        painter.begin_layer(LayerSpec::Blur(BlurSpec::uniform(pause_blur)));
     }
-    canvas.translate((btn_cx, btn_cy));
-    canvas.scale((pause_s, pause_s));
+    painter.translate(Vec2::new(btn_cx, btn_cy));
+    painter.scale(Vec2::new(pause_s, pause_s));
     let icon_progress = ((pause_t - 0.5).abs() * 2.0).clamp(0.0, 1.0);
     let icon_alpha =
         (alpha as f32 * icon_progress * icon_progress * (3.0 - 2.0 * icon_progress)) as u8;
     if icon_alpha > 0 {
         if pause_t >= 0.5 {
-            draw_pause_button(
-                Painter::from_canvas(canvas),
-                0.0,
-                0.0,
-                icon_alpha,
-                scale,
-                rgba(text_color),
-            );
+            draw_pause_button(painter, 0.0, 0.0, icon_alpha, scale, text_color);
         } else {
-            draw_play_button(
-                Painter::from_canvas(canvas),
-                0.0,
-                0.0,
-                icon_alpha,
-                scale,
-                rgba(text_color),
-            );
+            draw_play_button(painter, 0.0, 0.0, icon_alpha, scale, text_color);
         }
     }
     if pause_blur > 0.1 && use_blur {
-        canvas.restore();
+        painter.restore();
     }
-    canvas.restore();
+    painter.restore();
 }
 
 #[allow(clippy::too_many_arguments)]
 fn draw_skip_button(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     cx: f32,
     cy: f32,
     mirror: bool,
@@ -911,128 +840,76 @@ fn draw_skip_button(
     alpha: u8,
     scale: f32,
     use_blur: bool,
-    text_color: Color,
+    text_color: Rgba,
 ) {
-    canvas.save();
-    canvas.translate((cx, cy));
+    painter.save();
+    painter.translate(Vec2::new(cx, cy));
     if mirror {
-        canvas.scale((-1.0, 1.0));
+        painter.scale(Vec2::new(-1.0, 1.0));
     }
     if let Some(t) = anim_t {
         let skip_blur = (1.0 - t / 0.3).max(0.0) * 6.0 * scale;
         if skip_blur > 0.1 && use_blur {
-            let mut blur_paint = Paint::default();
-            blur_paint.set_image_filter(image_filters::blur(
-                (skip_blur, skip_blur * 0.3),
-                None,
-                None,
-                None,
-            ));
-            canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&blur_paint));
+            painter.begin_layer(LayerSpec::Blur(BlurSpec {
+                sigma: (skip_blur, skip_blur * 0.3),
+                tile: None,
+            }));
         }
 
         let shoot_t = (t / 0.25).min(1.0);
         let shoot_x = 10.92 * scale + 22.0 * scale * shoot_t;
         let shoot_alpha = ((alpha as f32) * (1.0 - shoot_t)) as u8;
         if shoot_alpha > 0 {
-            draw_control_triangle(
-                Painter::from_canvas(canvas),
-                shoot_x,
-                0.0,
-                shoot_alpha,
-                0.055,
-                scale,
-                rgba(text_color),
-            );
+            draw_control_triangle(painter, shoot_x, 0.0, shoot_alpha, 0.055, scale, text_color);
         }
 
         let move_t = (t / 0.55).min(1.0);
         let mid_x = -10.92 * scale + (10.92 * 2.0) * scale * move_t;
         let mid_s = 0.050 + (0.055 - 0.050) * move_t;
-        draw_control_triangle(
-            Painter::from_canvas(canvas),
-            mid_x,
-            0.0,
-            alpha,
-            mid_s,
-            scale,
-            rgba(text_color),
-        );
+        draw_control_triangle(painter, mid_x, 0.0, alpha, mid_s, scale, text_color);
 
         let fade_raw = ((t - 0.15) / 0.85).clamp(0.0, 1.0);
         let fade_eased = ease_out_back(fade_raw);
         let new_x = -25.0 * scale + (25.0 - 10.92) * scale * fade_eased;
         let new_alpha = ((alpha as f32) * fade_raw) as u8;
         if new_alpha > 0 {
-            draw_control_triangle(
-                Painter::from_canvas(canvas),
-                new_x,
-                0.0,
-                new_alpha,
-                0.050,
-                scale,
-                rgba(text_color),
-            );
+            draw_control_triangle(painter, new_x, 0.0, new_alpha, 0.050, scale, text_color);
         }
 
         if skip_blur > 0.1 && use_blur {
-            canvas.restore();
+            painter.restore();
         }
     } else {
         draw_control_triangle(
-            Painter::from_canvas(canvas),
+            painter,
             -10.92 * scale,
             0.0,
             alpha,
             0.050,
             scale,
-            rgba(text_color),
+            text_color,
         );
-        draw_control_triangle(
-            Painter::from_canvas(canvas),
-            10.92 * scale,
-            0.0,
-            alpha,
-            0.055,
-            scale,
-            rgba(text_color),
-        );
+        draw_control_triangle(painter, 10.92 * scale, 0.0, alpha, 0.055, scale, text_color);
     }
-    canvas.restore();
+    painter.restore();
 }
 
 fn draw_placeholder(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     size: f32,
     alpha: u8,
     scale: f32,
-    text_color: Color,
+    text_color: Rgba,
 ) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(Color::from_argb(
-        (alpha as f32 * 0.15) as u8,
-        text_color.r(),
-        text_color.g(),
-        text_color.b(),
-    ));
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         Rect::from_xywh(x, y, size, size),
-        14.0 * scale,
-        14.0 * scale,
-        &paint,
+        Radius::uniform(14.0 * scale),
+        text_color.with_alpha((alpha as f32 * 0.15) as u8),
     );
 
     let cx = x + size / 2.0;
     let cy = y + size / 2.0;
-    crate::icons::music::draw_music_icon(
-        Painter::from_canvas(canvas),
-        cx,
-        cy,
-        alpha,
-        scale * 1.8,
-        rgba(text_color),
-    );
+    crate::icons::music::draw_music_icon(painter, cx, cy, alpha, scale * 1.8, text_color);
 }

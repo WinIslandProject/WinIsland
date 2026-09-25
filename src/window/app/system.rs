@@ -13,13 +13,11 @@ use crate::core::persistence::{get_config_path, load_config};
 use crate::plugin::marketplace::{self, MarketplacePlugin};
 use crate::plugin::zip_loader;
 use crate::window::backdrop::{HostBackdrop, HostBackdropParams};
-use crate::window::renderer::RendererOptions;
 use crate::window::tray::TrayAction;
+use winisland_render::RendererOptions;
 
 use super::App;
 
-/// 更新宿主背景合成。失败时永久丢弃 `HostBackdrop`（与迁移前的 `Renderer` 行为一致）。
-/// 之所以是自由函数：调用点同时持有 `App` 其他字段的不可变借用，无法取 `&mut self`。
 pub(super) fn update_host_backdrop(
     host_backdrop: &mut Option<HostBackdrop>,
     params: HostBackdropParams,
@@ -167,7 +165,7 @@ impl App {
             self.next_frame_deadline = now + retry_interval;
             return;
         };
-        match crate::window::renderer::Renderer::new(
+        match winisland_render::Renderer::new(
             match crate::window::native_surface(window) {
                 Ok(surface) => surface,
                 Err(error) => {

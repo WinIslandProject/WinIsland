@@ -5,7 +5,6 @@ use crate::surface::{NativeSurface, SURFACE_TAG_WIN32_HWND};
 
 pub(crate) use d3d12::{D3DDevice, RenderTarget};
 
-/// 唯一按 `NativeSurface::tag` 分支的位置。
 pub(crate) fn check_surface_supported(surface: &NativeSurface) -> RenderResult<()> {
     if surface.tag() == SURFACE_TAG_WIN32_HWND {
         return Ok(());

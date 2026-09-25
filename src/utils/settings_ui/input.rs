@@ -5,13 +5,13 @@ use super::items::{
 };
 use crate::ui::widget::compact::widget_width;
 use crate::ui::widget::expanded::{WidgetGridLayout, widget_corner_radius, widget_grid_layout};
-use skia_safe::{Contains, Point};
 use winisland_core::config::{
     AVAILABLE_COMPACT_WIDGETS, AVAILABLE_WIDGETS, CompactWidgetAlignment, CompactWidgetKind,
     CompactWidgetPosition, CompactWidgetSlot, PluginWidgetId, PluginWidgetSlot, WidgetKind,
     WidgetSlot,
 };
 use winisland_core::widgets::PluginWidget;
+use winisland_render::Point;
 
 pub const WIDGET_PREVIEW_BASE_H: f32 = 480.0;
 pub const WIDGET_ISLAND_PANEL_H: f32 = 308.0;

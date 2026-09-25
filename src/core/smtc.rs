@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use skia_safe::Data;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
@@ -93,7 +92,7 @@ pub struct MediaInfo {
     pub source_app_id: String,
     pub track_id: u64,
     pub is_playing: bool,
-    pub thumbnail: Option<Data>,
+    pub thumbnail: Option<Arc<[u8]>>,
     pub thumbnail_hash: u64,
     pub spectrum: [f32; 6],
     pub position_ms: u64,

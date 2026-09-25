@@ -11,14 +11,6 @@ use crate::types::{
     SrcConstraint, StrokeCap, StrokeJoin, TileMode, Vec2,
 };
 
-/// 语义绘制接口：把本项目自有的值类型翻译成后端调用。
-///
-/// 线程要求：与所属 `Renderer` 相同，只在渲染线程使用。
-/// 生命周期：借用一帧的绘制作用域，不可保存到帧之外。
-/// 失败语义：单次绘制不返回错误；后端失败由 `Renderer` 在帧结束时统一记录
-/// （"失败即整体不可用"）。
-/// 可重入性：方法只借用 `&self`，与后端画布一致；**不维护自己的状态栈**，
-/// 因此外部直接操作画布不会让它失同步。
 #[derive(Clone, Copy)]
 pub struct Painter<'a> {
     pub(crate) canvas: &'a Canvas,
@@ -37,7 +29,6 @@ impl<'a> Painter<'a> {
         self.canvas.restore();
     }
 
-    /// 回退到指定保存层级；直接转发后端的 `restore_to_count`。
     pub fn restore_to(&self, count: usize) {
         self.canvas.restore_to_count(count);
     }
@@ -50,7 +41,6 @@ impl<'a> Painter<'a> {
         self.canvas.scale((factor.x, factor.y));
     }
 
-    /// 角度单位为**度**，且**不加 12 点钟偏移**（与 `stroke_arc` 的约定不同）。
     pub fn rotate_degrees(&self, degrees: f32) {
         self.canvas.rotate(degrees, None);
     }
@@ -68,6 +58,11 @@ impl<'a> Painter<'a> {
             .clip_rect(to_skia_rect(rect), ClipOp::Intersect, true);
     }
 
+    pub fn clip_rect_with_anti_alias(&self, rect: Rect, anti_alias: bool) {
+        self.canvas
+            .clip_rect(to_skia_rect(rect), ClipOp::Intersect, anti_alias);
+    }
+
     pub fn clip_round_rect(&self, rect: Rect, radius: Radius) {
         self.canvas
             .clip_rrect(to_skia_rrect(rect, radius), ClipOp::Intersect, true);
@@ -78,7 +73,6 @@ impl<'a> Painter<'a> {
             .clip_path(path.as_skia(), ClipOp::Intersect, true);
     }
 
-    /// 从当前裁剪区中挖去路径（阴影绘制使用）。
     pub fn clip_path_difference(&self, path: &Path) {
         self.canvas
             .clip_path(path.as_skia(), ClipOp::Difference, true);
@@ -147,8 +141,6 @@ impl<'a> Painter<'a> {
         self.canvas.draw_path(path.as_skia(), &paint);
     }
 
-    /// 画一段圆弧（不画扇形）。`start`/`sweep` 用 12 点钟约定，换算在后端完成。
-    /// `cap` 决定弧线两端的样式；实测的两个环状站点都用 `StrokeCap::Round`。
     pub fn stroke_arc(
         &self,
         rect: Rect,
@@ -169,7 +161,6 @@ impl<'a> Painter<'a> {
         );
     }
 
-    /// 用线性渐变填充矩形。`from`/`to` 为渐变的两个端点（逻辑像素）。
     pub fn fill_rect_with_gradient(
         &self,
         rect: Rect,
@@ -184,7 +175,6 @@ impl<'a> Painter<'a> {
         self.canvas.draw_rect(to_skia_rect(rect), &paint);
     }
 
-    /// 用线性渐变填充圆角矩形（频谱柱共用同一组端点与色标）。
     pub fn fill_round_rect_with_gradient(
         &self,
         rect: Rect,
@@ -200,6 +190,50 @@ impl<'a> Painter<'a> {
         self.canvas.draw_rrect(to_skia_rrect(rect, radius), &paint);
     }
 
+    pub fn fill_path_with_gradient(
+        &self,
+        path: &Path,
+        from: Point,
+        to: Point,
+        stops: &[GradientStop],
+        tile: TileMode,
+    ) -> bool {
+        let Some(paint) = gradient_paint(from, to, stops, tile) else {
+            return false;
+        };
+        self.canvas.draw_path(path.as_skia(), &paint);
+        true
+    }
+
+    pub fn axis_scale(&self) -> f32 {
+        let matrix = self.canvas.local_to_device_as_3x3();
+        matrix.scale_x().abs().max(matrix.scale_y().abs())
+    }
+
+    pub fn surface_size(&self) -> (i32, i32) {
+        let info = self.canvas.image_info();
+        (info.width(), info.height())
+    }
+
+    pub fn fill_path_blurred(&self, path: &Path, color: Rgba, blur: BlurSpec) {
+        let mut paint = filled(color);
+        if let Some(filter) =
+            image_filters::blur(blur.sigma, blur.tile.map(to_skia_tile_mode), None, None)
+        {
+            paint.set_image_filter(filter);
+        }
+        self.canvas.draw_path(path.as_skia(), &paint);
+    }
+
+    pub fn draw_image_at(&self, image: &Image, position: Point) {
+        self.canvas
+            .draw_image(image.as_skia(), to_skia_point(position), None);
+    }
+
+    pub fn plugin_canvas_handle_v1(&self) -> *mut std::ffi::c_void {
+        self.canvas as *const Canvas as *mut std::ffi::c_void
+    }
+
     pub fn draw_image(&self, image: &Image, dst: Rect, options: &ImageOptions) {
         let (width, height) = image.dimensions();
         if width <= 0 || height <= 0 {
@@ -208,25 +242,29 @@ impl<'a> Painter<'a> {
         let full = Rect::from_xywh(0.0, 0.0, width as f32, height as f32);
         let source = options.src.unwrap_or(full);
         let (source, dst) = match options.fit {
-            ImageFit::Fill => (source, dst),
-            ImageFit::Cover => (cover_source(source, dst), dst),
+            ImageFit::Fill => (options.src, dst),
+            ImageFit::Cover => (Some(cover_source(source, dst)), dst),
             ImageFit::Contain => {
                 let scaled = contain_dst(source, dst);
-                (source, scaled)
+                (options.src, scaled)
             }
         };
         let mut paint = skia_safe::Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_alpha(options.alpha);
+        paint.set_anti_alias(options.anti_alias);
+        if let Some(alpha) = options.alpha_f {
+            paint.set_alpha_f(alpha);
+        } else {
+            paint.set_alpha(options.alpha);
+        }
         let sampling = to_skia_sampling(options.sampling);
+        let source = source.map(to_skia_rect);
         match options.constraint {
             SrcConstraint::Fast => {
                 self.canvas.draw_image_rect_with_sampling_options(
                     image.as_skia(),
-                    Some((
-                        &to_skia_rect(source),
-                        skia_safe::canvas::SrcRectConstraint::Fast,
-                    )),
+                    source
+                        .as_ref()
+                        .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Fast)),
                     to_skia_rect(dst),
                     sampling,
                     &paint,
@@ -235,10 +273,9 @@ impl<'a> Painter<'a> {
             SrcConstraint::Strict => {
                 self.canvas.draw_image_rect_with_sampling_options(
                     image.as_skia(),
-                    Some((
-                        &to_skia_rect(source),
-                        skia_safe::canvas::SrcRectConstraint::Strict,
-                    )),
+                    source
+                        .as_ref()
+                        .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
                     to_skia_rect(dst),
                     sampling,
                     &paint,

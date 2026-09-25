@@ -1,10 +1,12 @@
-use skia_safe::{Canvas, Color, Paint, Rect};
-
 use crate::utils::color::SettingsTheme;
-use crate::utils::color::rgba_of_paint;
+use crate::utils::color::settings_color;
 use winisland_render::FontStyle;
 use winisland_render::Painter;
 use winisland_render::Point;
+use winisland_render::Radius;
+use winisland_render::Rect;
+use winisland_render::Rgba;
+use winisland_render::StrokeCap;
 use winisland_render::text::{DrawTextCachedParams, DrawTextInRectParams, FontManager};
 
 use super::super::items::{
@@ -13,31 +15,24 @@ use super::super::items::{
 };
 
 pub(super) struct PillBtnParams<'a> {
-    pub(super) canvas: &'a Canvas,
+    pub(super) painter: Painter<'a>,
     pub(super) rect: Rect,
     pub(super) label: &'a str,
-    pub(super) text_color: Color,
-    pub(super) bg_color: Color,
-    pub(super) hover_bg_color: Color,
-    pub(super) border_color: Color,
+    pub(super) text_color: Rgba,
+    pub(super) bg_color: Rgba,
+    pub(super) hover_bg_color: Rgba,
+    pub(super) border_color: Rgba,
     pub(super) hovered: bool,
-}
-
-pub(crate) fn settings_paint(color: Color) -> Paint {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(color);
-    paint
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct SettingsPainter<'a> {
-    canvas: &'a Canvas,
+    painter: Painter<'a>,
 }
 
 impl<'a> SettingsPainter<'a> {
-    pub(crate) fn new(canvas: &'a Canvas) -> Self {
-        Self { canvas }
+    pub(crate) fn new(painter: Painter<'a>) -> Self {
+        Self { painter }
     }
 
     pub(crate) fn text(
@@ -46,17 +41,16 @@ impl<'a> SettingsPainter<'a> {
         position: (f32, f32),
         size: f32,
         bold: bool,
-        color: Color,
+        color: impl Into<Rgba>,
     ) {
-        let paint = settings_paint(color);
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(self.canvas),
+            painter: self.painter,
             text,
             x: position.0,
             y: position.1,
             size,
             bold,
-            color: rgba_of_paint(&paint),
+            color: color.into(),
             blur: None,
         });
     }
@@ -67,7 +61,7 @@ impl<'a> SettingsPainter<'a> {
         position: (f32, f32),
         size: f32,
         bold: bool,
-        color: Color,
+        color: impl Into<Rgba>,
     ) {
         let style = if bold {
             FontStyle::bold()
@@ -86,32 +80,29 @@ impl<'a> SettingsPainter<'a> {
 }
 
 pub(super) fn draw_row_separator(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     theme: &SettingsTheme,
     content_w: f32,
     sep_y: f32,
 ) {
     let row_x = CONTENT_PADDING + GROUP_INNER_PAD;
-    let mut sep = settings_paint(theme.separator);
-    sep.set_stroke_width(0.5);
-    sep.set_style(skia_safe::paint::Style::Stroke);
-    canvas.draw_line(
-        (row_x, sep_y),
-        (CONTENT_PADDING + content_w - GROUP_INNER_PAD, sep_y),
-        &sep,
+    painter.stroke_line(
+        Point::new(row_x, sep_y),
+        Point::new(CONTENT_PADDING + content_w - GROUP_INNER_PAD, sep_y),
+        0.5,
+        settings_color(theme.separator),
+        StrokeCap::Butt,
     );
 }
 
 pub(super) fn draw_switch(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     pos: f32,
     enabled: bool,
     theme: &SettingsTheme,
 ) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
     let (off_color, on_color) = if enabled {
         (theme.toggle_off, theme.toggle_on)
     } else {
@@ -120,46 +111,37 @@ pub(super) fn draw_switch(
     let r = off_color.r() as f32 + (on_color.r() as f32 - off_color.r() as f32) * pos;
     let g = off_color.g() as f32 + (on_color.g() as f32 - off_color.g() as f32) * pos;
     let b = off_color.b() as f32 + (on_color.b() as f32 - off_color.b() as f32) * pos;
-    paint.set_color(Color::from_rgb(r as u8, g as u8, b as u8));
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         Rect::from_xywh(x, y, TOGGLE_W, TOGGLE_H),
-        TOGGLE_R,
-        TOGGLE_R,
-        &paint,
+        Radius::uniform(TOGGLE_R),
+        Rgba::from_rgb(r as u8, g as u8, b as u8),
     );
 
-    let mut border = settings_paint(theme.control_border);
-    border.set_style(skia_safe::paint::Style::Stroke);
-    border.set_stroke_width(0.75);
-    canvas.draw_round_rect(
+    painter.stroke_round_rect(
         Rect::from_xywh(x + 0.375, y + 0.375, TOGGLE_W - 0.75, TOGGLE_H - 0.75),
-        TOGGLE_R,
-        TOGGLE_R,
-        &border,
+        Radius::uniform(TOGGLE_R),
+        0.75,
+        settings_color(theme.control_border),
     );
 
     let knob_x = x + TOGGLE_INSET + (pos * (TOGGLE_W - TOGGLE_KNOB - TOGGLE_INSET * 2.0));
     let knob_y = y + TOGGLE_INSET;
 
-    let shadow = settings_paint(Color::from_argb(40, 0, 0, 0));
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         Rect::from_xywh(knob_x, knob_y + 1.0, TOGGLE_KNOB, TOGGLE_KNOB),
-        TOGGLE_KNOB / 2.0,
-        TOGGLE_KNOB / 2.0,
-        &shadow,
+        Radius::uniform(TOGGLE_KNOB / 2.0),
+        Rgba::from_argb(40, 0, 0, 0),
     );
 
-    paint.set_color(Color::WHITE);
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         Rect::from_xywh(knob_x, knob_y, TOGGLE_KNOB, TOGGLE_KNOB),
-        TOGGLE_KNOB / 2.0,
-        TOGGLE_KNOB / 2.0,
-        &paint,
+        Radius::uniform(TOGGLE_KNOB / 2.0),
+        Rgba::WHITE,
     );
 }
 
 pub(super) fn draw_stepper_btn(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     label: &str,
@@ -168,18 +150,14 @@ pub(super) fn draw_stepper_btn(
     hovered: bool,
 ) {
     let fm = FontManager::global();
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
     if hovered && enabled {
-        paint.set_color(theme.control_hover);
-        canvas.draw_round_rect(
+        painter.fill_round_rect(
             Rect::from_xywh(x, y, STEPPER_BTN_SIZE, STEPPER_BTN_SIZE),
-            POPUP_BTN_R,
-            POPUP_BTN_R,
-            &paint,
+            Radius::uniform(POPUP_BTN_R),
+            settings_color(theme.control_hover),
         );
     }
-    paint.set_color(if enabled {
+    let color = settings_color(if enabled {
         theme.text_pri
     } else {
         theme.text_sec
@@ -188,49 +166,47 @@ pub(super) fn draw_stepper_btn(
     let text_x = x + (STEPPER_BTN_SIZE - bounds.width()) / 2.0 - bounds.left;
     let text_y = y + (STEPPER_BTN_SIZE - bounds.height()) / 2.0 - bounds.top;
     fm.draw_str(
-        Painter::from_canvas(canvas),
+        painter,
         label,
         Point::new(text_x, text_y),
         16.0,
         false,
-        rgba_of_paint(&paint),
+        color,
     );
 }
 
 pub(super) fn draw_pill_btn(params: PillBtnParams<'_>) {
     let fm = FontManager::global();
-    let canvas = params.canvas;
-    let mut paint = settings_paint(if params.hovered {
-        params.hover_bg_color
-    } else {
-        params.bg_color
-    });
-    canvas.draw_round_rect(params.rect, POPUP_BTN_R, POPUP_BTN_R, &paint);
-    paint.set_color(params.border_color);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(0.75);
-    canvas.draw_round_rect(
+    let painter = params.painter;
+    painter.fill_round_rect(
+        params.rect,
+        Radius::uniform(POPUP_BTN_R),
+        if params.hovered {
+            params.hover_bg_color
+        } else {
+            params.bg_color
+        },
+    );
+    painter.stroke_round_rect(
         Rect::from_xywh(
             params.rect.left + 0.375,
             params.rect.top + 0.375,
             params.rect.width() - 0.75,
             params.rect.height() - 0.75,
         ),
-        POPUP_BTN_R,
-        POPUP_BTN_R,
-        &paint,
+        Radius::uniform(POPUP_BTN_R),
+        0.75,
+        params.border_color,
     );
-    paint.set_style(skia_safe::paint::Style::Fill);
-    paint.set_color(params.text_color);
     fm.draw_text_in_rect(DrawTextInRectParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text: params.label,
         x: params.rect.left,
         y: params.rect.top + 17.0,
         w: params.rect.width(),
         size: 12.0,
         bold: false,
-        color: rgba_of_paint(&paint),
+        color: params.text_color,
         blur: None,
     });
 }

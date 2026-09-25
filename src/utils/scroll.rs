@@ -1,12 +1,11 @@
-use skia_safe::{Canvas, ClipOp, Rect};
 use std::time::Instant;
 use winisland_render::FontStyle;
-use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
 use winisland_render::{BlurSpec, Rgba};
+use winisland_render::{Painter, Rect};
 
 pub struct ScrollDrawParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub text: &'a str,
     pub x: f32,
     pub y: f32,
@@ -44,7 +43,7 @@ impl ScrollText {
     }
 
     pub fn draw(&mut self, params: ScrollDrawParams<'_>) {
-        let canvas = params.canvas;
+        let painter = params.painter;
         let text = params.text;
         let x = params.x;
         let y = params.y;
@@ -79,16 +78,12 @@ impl ScrollText {
                 }
             }
 
-            canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(x, y - size * 1.2, max_w, size * 1.5),
-                ClipOp::Intersect,
-                true,
-            );
+            painter.save();
+            painter.clip_rect(Rect::from_xywh(x, y - size * 1.2, max_w, size * 1.5));
 
             draw_text(
                 DrawTextCachedParams {
-                    painter: Painter::from_canvas(canvas),
+                    painter,
                     text,
                     x: x - self.offset,
                     y,
@@ -103,7 +98,7 @@ impl ScrollText {
             if next_x < x + max_w {
                 draw_text(
                     DrawTextCachedParams {
-                        painter: Painter::from_canvas(canvas),
+                        painter,
                         text,
                         x: next_x,
                         y,
@@ -115,12 +110,12 @@ impl ScrollText {
                     render_as_paths,
                 );
             }
-            canvas.restore();
+            painter.restore();
         } else {
             self.offset = 0.0;
             draw_text(
                 DrawTextCachedParams {
-                    painter: Painter::from_canvas(canvas),
+                    painter,
                     text,
                     x,
                     y,

@@ -1,13 +1,11 @@
-use skia_safe::{
-    Canvas, ClipOp, Color, FilterMode, MipmapMode, Paint, Path, Rect, SamplingOptions,
-};
+use winisland_render::{ImageOptions, Painter, Path, Rect, Rgba, Sampling, Vec2};
 
 use crate::core::smtc::MediaInfo;
 use crate::utils::backdrop::get_blurred_cover_background;
-use crate::window::renderer::DrawingContext;
+use winisland_render::DrawingContext;
 
 pub(super) struct BackgroundParams<'a, 'context> {
-    pub(super) canvas: &'a Canvas,
+    pub(super) painter: Painter<'a>,
     pub(super) drawing_context: &'a mut DrawingContext<'context>,
     pub(super) rect: Rect,
     pub(super) island_path: &'a Path,
@@ -16,26 +14,21 @@ pub(super) struct BackgroundParams<'a, 'context> {
     pub(super) media: &'a MediaInfo,
 }
 
-fn draw_solid(canvas: &Canvas, path: &Path, color: Color) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(color);
-    canvas.draw_path(path, &paint);
+fn draw_solid(painter: Painter<'_>, path: &Path, color: Rgba) {
+    painter.fill_path(path, color);
 }
 
-fn draw_effect_base(canvas: &Canvas, rect: Rect) {
-    let mut paint = Paint::default();
-    paint.set_color(Color::from_rgb(32, 32, 36));
-    canvas.draw_rect(rect, &paint);
+fn draw_effect_base(painter: Painter<'_>, rect: Rect) {
+    painter.fill_rect(rect, Rgba::from_rgb(32, 32, 36));
 }
 
-fn draw_host_glass(canvas: &Canvas, path: &Path) {
-    draw_solid(canvas, path, Color::from_argb(150, 10, 10, 14));
+fn draw_host_glass(painter: Painter<'_>, path: &Path) {
+    draw_solid(painter, path, Rgba::from_argb(150, 10, 10, 14));
 }
 
 pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
     let BackgroundParams {
-        canvas,
+        painter,
         drawing_context,
         rect,
         island_path,
@@ -43,22 +36,22 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
         host_backdrop,
         media,
     } = params;
-    let bg_color = Color::BLACK;
-    let fallback_color = Color::from_argb(205, 32, 32, 36);
+    let bg_color = Rgba::BLACK;
+    let fallback_color = Rgba::from_argb(205, 32, 32, 36);
 
-    canvas.save();
-    canvas.clip_path(island_path, ClipOp::Intersect, true);
+    painter.save();
+    painter.clip_path(island_path);
     match island_style {
         "glass" => {
             if host_backdrop {
-                draw_host_glass(canvas, island_path);
+                draw_host_glass(painter, island_path);
             } else {
-                draw_solid(canvas, island_path, fallback_color);
+                draw_solid(painter, island_path, fallback_color);
             }
         }
         "dynamic" => {
             if let Some(blurred_cover) = get_blurred_cover_background(drawing_context, media) {
-                draw_effect_base(canvas, rect);
+                draw_effect_base(painter, rect);
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -79,38 +72,33 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
                 let dx = (now * drift_speed_x).sin() * drift_amp_x;
                 let dy = (now * drift_speed_y).cos() * drift_amp_y;
 
-                let cx = rect.left() + rect.width() / 2.0;
-                let cy = rect.top() + rect.height() / 2.0;
+                let cx = rect.left + rect.width() / 2.0;
+                let cy = rect.top + rect.height() / 2.0;
 
                 let diagonal = rect.width().hypot(rect.height());
                 let side_len = diagonal * 1.3f32;
 
-                canvas.save();
-                canvas.translate((cx + dx as f32, cy + dy as f32));
-                canvas.rotate(angle_deg as f32, None);
+                painter.save();
+                painter.translate(Vec2::new(cx + dx as f32, cy + dy as f32));
+                painter.rotate_degrees(angle_deg as f32);
 
                 let draw_rect =
                     Rect::from_xywh(-side_len / 2.0, -side_len / 2.0, side_len, side_len);
 
-                let mut paint = Paint::default();
-                paint.set_anti_alias(true);
-                canvas.draw_image_rect_with_sampling_options(
+                painter.draw_image(
                     &blurred_cover,
-                    None,
                     draw_rect,
-                    SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
-                    &paint,
+                    &ImageOptions::default().with_sampling(Sampling::LinearNone),
                 );
-                canvas.restore();
-                paint.set_color(Color::from_argb(120, 20, 20, 24));
-                canvas.draw_rect(rect, &paint);
+                painter.restore();
+                painter.fill_rect(rect, Rgba::from_argb(120, 20, 20, 24));
             } else if host_backdrop {
-                draw_host_glass(canvas, island_path);
+                draw_host_glass(painter, island_path);
             } else {
-                draw_solid(canvas, island_path, fallback_color);
+                draw_solid(painter, island_path, fallback_color);
             }
         }
-        _ => draw_solid(canvas, island_path, bg_color),
+        _ => draw_solid(painter, island_path, bg_color),
     }
-    canvas.restore();
+    painter.restore();
 }

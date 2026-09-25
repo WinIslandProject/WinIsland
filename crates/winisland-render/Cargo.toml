@@ -17,7 +17,3 @@ windows = { version = "0.62.2", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
 ] }
-
-[features]
-# 过渡桥接（12-phase2-计划.md §8.1）：只用于 Phase 2 分批迁移，B10 删除。
-legacy-canvas-bridge = []

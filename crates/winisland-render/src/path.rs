@@ -12,30 +12,29 @@ use crate::types::{Point, Rect};
 const PATH_CACHE_CAPACITY: usize = 64;
 type CurvePoint = (f64, f64);
 
-/// 矢量路径句柄。构造方式为 `from_svg` 或 `PathBuilder`。
 #[derive(Clone, Default)]
 pub struct Path {
     inner: SkPath,
 }
 
 impl Path {
-    /// 解析 SVG path 数据（`d` 属性的语法），失败返回 `None`。
     pub fn from_svg(svg: &str) -> Option<Self> {
         SkPath::from_svg(svg).map(|inner| Self { inner })
     }
 
-    /// 路径包围盒，单位逻辑像素。
     pub fn bounds(&self) -> Rect {
         let bounds = self.inner.bounds();
         Rect::from_ltrb(bounds.left, bounds.top, bounds.right, bounds.bottom)
     }
 
-    /// 路径是否不含任何图元。
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
-    /// 连续圆角矩形（超椭圆）路径；半径先夹取到半宽/半高，非有限或空矩形返回空路径。
+    pub fn contains(&self, point: Point) -> bool {
+        self.inner.contains((point.x, point.y))
+    }
+
     pub fn continuous_rounded_rect(rect: Rect, radius: f32) -> Self {
         if !rect.is_finite() || rect.width() <= 0.0 || rect.height() <= 0.0 {
             return Self::default();
@@ -122,8 +121,7 @@ impl Path {
     }
 }
 
-/// 路径构建器，能力对齐 `skia_safe::PathBuilder` 中本项目实际使用到的部分
-/// （`move_to` / `line_to` / `cubic_to` / `conic_to` / `close` / `add_rect`）。
+/// Builds paths with move, line, cubic, conic, close, and rectangle operations.
 #[derive(Default)]
 pub struct PathBuilder {
     inner: SkPathBuilder,
@@ -153,7 +151,6 @@ impl PathBuilder {
         self
     }
 
-    /// 有理二次曲线；`weight` 为 conic 权重。
     pub fn conic_to(&mut self, control: Point, end: Point, weight: f32) -> &mut Self {
         self.inner
             .conic_to((control.x, control.y), (end.x, end.y), weight);
@@ -165,7 +162,6 @@ impl PathBuilder {
         self
     }
 
-    /// 追加一个矩形子路径（顺时针）。
     pub fn add_rect(&mut self, rect: Rect) -> &mut Self {
         self.inner.add_rect(
             skia_safe::Rect::from_ltrb(rect.left, rect.top, rect.right, rect.bottom),
@@ -175,7 +171,6 @@ impl PathBuilder {
         self
     }
 
-    /// 取出累积的路径并把构建器重置为空。
     pub fn detach(&mut self) -> Path {
         Path::from_skia(self.inner.detach())
     }

@@ -1,15 +1,11 @@
-use crate::utils::color::rgba_of_paint;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use skia_safe::{Canvas, Color, Paint, Rect};
-
-use winisland_render::FontStyle;
-use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{FontStyle, Painter, Point, Radius, Rect, Rgba, StrokeCap, Vec2};
 
 const BODY_SIZE: f32 = 12.0;
 const LINE_HEIGHT: f32 = 18.0;
@@ -32,16 +28,16 @@ pub(crate) struct MarkdownRenderResult {
 }
 
 pub(crate) struct MarkdownColors {
-    pub(crate) text: Color,
-    pub(crate) secondary: Color,
-    pub(crate) accent: Color,
-    pub(crate) code_background: Color,
-    pub(crate) quote_background: Color,
-    pub(crate) separator: Color,
+    pub(crate) text: Rgba,
+    pub(crate) secondary: Rgba,
+    pub(crate) accent: Rgba,
+    pub(crate) code_background: Rgba,
+    pub(crate) quote_background: Rgba,
+    pub(crate) separator: Rgba,
 }
 
 pub(crate) struct MarkdownRenderParams<'a> {
-    pub(crate) canvas: &'a Canvas,
+    pub(crate) painter: Painter<'a>,
     pub(crate) markdown: &'a str,
     pub(crate) origin: (f32, f32),
     pub(crate) width: f32,
@@ -704,7 +700,7 @@ pub(crate) fn markdown_height(markdown: &str, width: f32) -> f32 {
 
 pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
     let MarkdownRenderParams {
-        canvas,
+        painter,
         markdown,
         origin: (x, y),
         width,
@@ -712,12 +708,13 @@ pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
         colors,
     } = params;
     let layout = layout(markdown, width);
-    let save_count = canvas.save();
-    canvas.clip_rect(
-        Rect::from_xywh(x - 3.0, y - 6.0, width + 3.0, layout.height + 12.0),
-        skia_safe::ClipOp::Intersect,
-        true,
-    );
+    let save_count = painter.save();
+    painter.clip_rect(Rect::from_xywh(
+        x - 3.0,
+        y - 6.0,
+        width + 3.0,
+        layout.height + 12.0,
+    ));
     for op in &layout.ops {
         let DrawOp::Background { rect, kind } = op else {
             continue;
@@ -726,13 +723,11 @@ pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
         if rect.bottom < visible_top || rect.top > visible_bottom {
             continue;
         }
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        paint.set_color(match kind {
+        let color = match kind {
             BackgroundKind::Code => colors.code_background,
             BackgroundKind::TableHeader => colors.quote_background,
-        });
-        canvas.draw_round_rect(rect, 7.0, 7.0, &paint);
+        };
+        painter.fill_round_rect(rect, Radius::uniform(7.0), color);
     }
     for op in &layout.ops {
         match op {
@@ -748,15 +743,13 @@ pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
                 if baseline + 4.0 < visible_top || baseline - size > visible_bottom {
                     continue;
                 }
-                let mut paint = Paint::default();
-                paint.set_anti_alias(true);
-                paint.set_color(if style.link.is_some() {
+                let color = if style.link.is_some() {
                     colors.accent
                 } else if *secondary {
                     colors.secondary
                 } else {
                     colors.text
-                });
+                };
                 if style.code && !style.code_block {
                     let width = FontManager::global().measure_text_cached(
                         text,
@@ -767,22 +760,18 @@ pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
                             FontStyle::normal()
                         },
                     );
-                    let mut background = Paint::default();
-                    background.set_anti_alias(true);
-                    background.set_color(colors.code_background);
-                    canvas.draw_round_rect(
+                    painter.fill_round_rect(
                         Rect::from_xywh(
                             x + op_x - 2.0,
                             baseline - size - 2.0,
                             width + 4.0,
                             size + 6.0,
                         ),
-                        3.0,
-                        3.0,
-                        &background,
+                        Radius::uniform(3.0),
+                        colors.code_background,
                     );
                 }
-                draw_text(canvas, text, x + op_x, baseline, *size, style, &paint);
+                draw_text(painter, text, x + op_x, baseline, *size, style, color);
             }
             DrawOp::Background { .. } => {}
             DrawOp::Checkbox { rect, checked } => {
@@ -791,32 +780,29 @@ pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
                 if rect.bottom < visible_top || rect.top > visible_bottom {
                     continue;
                 }
-                let mut paint = Paint::default();
-                paint.set_anti_alias(true);
-                paint.set_color(if *checked {
+                let color = if *checked {
                     colors.accent
                 } else {
                     colors.code_background
-                });
-                canvas.draw_round_rect(rect, 2.0, 2.0, &paint);
-                paint.set_style(skia_safe::paint::Style::Stroke);
+                };
+                painter.fill_round_rect(rect, Radius::uniform(2.0), color);
                 if *checked {
-                    paint.set_color(Color::WHITE);
-                    paint.set_stroke_width(1.4);
-                    canvas.draw_line(
-                        (rect.left + 2.3, rect.top + 5.2),
-                        (rect.left + 4.4, rect.top + 7.2),
-                        &paint,
+                    painter.stroke_line(
+                        Point::new(rect.left + 2.3, rect.top + 5.2),
+                        Point::new(rect.left + 4.4, rect.top + 7.2),
+                        1.4,
+                        Rgba::WHITE,
+                        StrokeCap::Butt,
                     );
-                    canvas.draw_line(
-                        (rect.left + 4.4, rect.top + 7.2),
-                        (rect.right - 2.0, rect.top + 2.7),
-                        &paint,
+                    painter.stroke_line(
+                        Point::new(rect.left + 4.4, rect.top + 7.2),
+                        Point::new(rect.right - 2.0, rect.top + 2.7),
+                        1.4,
+                        Rgba::WHITE,
+                        StrokeCap::Butt,
                     );
                 } else {
-                    paint.set_color(colors.separator);
-                    paint.set_stroke_width(1.0);
-                    canvas.draw_round_rect(rect, 2.0, 2.0, &paint);
+                    painter.stroke_round_rect(rect, Radius::uniform(2.0), 1.0, colors.separator);
                 }
             }
             DrawOp::Line {
@@ -830,20 +816,22 @@ pub(crate) fn render(params: MarkdownRenderParams<'_>) -> MarkdownRenderResult {
                 if y + y1 < visible_top || y + y1 > visible_bottom {
                     continue;
                 }
-                let mut paint = Paint::default();
-                paint.set_anti_alias(true);
-                paint.set_style(skia_safe::paint::Style::Stroke);
-                paint.set_stroke_width(*width);
-                paint.set_color(match kind {
+                let color = match kind {
                     LineKind::Quote => colors.accent,
                     LineKind::Separator => colors.separator,
                     LineKind::Strike => colors.secondary,
-                });
-                canvas.draw_line((x + x1, y + y1), (x + x2, y + y2), &paint);
+                };
+                painter.stroke_line(
+                    Point::new(x + x1, y + y1),
+                    Point::new(x + x2, y + y2),
+                    *width,
+                    color,
+                    StrokeCap::Butt,
+                );
             }
         }
     }
-    canvas.restore_to_count(save_count);
+    painter.restore_to(save_count);
     MarkdownRenderResult {
         height: layout.height,
     }
@@ -887,38 +875,38 @@ fn layout(markdown: &str, width: f32) -> Rc<MarkdownLayout> {
 }
 
 fn draw_text(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     text: &str,
     x: f32,
     baseline: f32,
     size: f32,
     style: &InlineStyle,
-    paint: &Paint,
+    color: Rgba,
 ) {
     if style.italic {
-        canvas.save();
-        canvas.translate((x, baseline));
-        canvas.skew((-0.12, 0.0));
+        painter.save();
+        painter.translate(Vec2::new(x, baseline));
+        painter.skew(Vec2::new(-0.12, 0.0));
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(canvas),
+            painter,
             text,
             x: 0.0,
             y: 0.0,
             size,
             bold: style.bold,
-            color: rgba_of_paint(paint),
+            color,
             blur: None,
         });
-        canvas.restore();
+        painter.restore();
     } else {
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            painter: Painter::from_canvas(canvas),
+            painter,
             text,
             x,
             y: baseline,
             size,
             bold: style.bold,
-            color: rgba_of_paint(paint),
+            color,
             blur: None,
         });
     }

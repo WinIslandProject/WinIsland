@@ -1,6 +1,5 @@
 pub mod app;
 mod backdrop;
-pub(crate) mod renderer;
 pub mod settings;
 pub mod tray;
 
@@ -21,8 +20,6 @@ pub(crate) fn take_dwm_composition_changed() -> bool {
     DWM_COMPOSITION_CHANGED.swap(false, Ordering::AcqRel)
 }
 
-/// 从 winit 窗口提取后端表面描述。返回的 `NativeSurface` 携带窗口所有权，
-/// 因此只要它存活，其中的 `HWND` 就保持有效。
 pub(crate) fn native_surface(window: &Arc<Window>) -> Result<NativeSurface, String> {
     let handle = window
         .window_handle()

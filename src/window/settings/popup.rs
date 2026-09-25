@@ -1,4 +1,4 @@
-use skia_safe::Rect;
+use winisland_render::Rect;
 
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, POPUP_MENU_PAD};
 use winisland_render::text::FontManager;

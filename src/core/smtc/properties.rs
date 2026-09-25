@@ -3,7 +3,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use skia_safe::Data;
 use tokio::sync::watch;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession,
@@ -683,7 +682,7 @@ fn publish_thumbnail(
     bytes.hash(&mut hasher);
     let hash = hasher.finish();
     let byte_len = bytes.len();
-    let data = Data::new_copy(&bytes);
+    let data: Arc<[u8]> = Arc::from(bytes);
     let applied = info_tx.send_if_modified(|current| {
         if current.track_id != request.track_id
             || current.source_app_id != request.source_app_id

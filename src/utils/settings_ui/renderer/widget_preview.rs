@@ -1,16 +1,18 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use skia_safe::{
-    Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
+use winisland_render::{
+    GradientStop, Image, ImageOptions, Painter, Path, Point, Radius, RasterSurface, Rect, Rgba,
+    Sampling, StrokeCap, StrokeJoin, TileMode, Vec2,
 };
 
 use crate::ui::widget::expanded::{
     draw_mini_card, draw_widget_preview as draw_widget_card_preview,
 };
 use crate::utils::color::SettingsTheme;
-use crate::utils::settings_ui::{SettingsPainter, settings_paint};
-use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
+use crate::utils::color::settings_color;
+use crate::utils::settings_ui::SettingsPainter;
+use crate::utils::shape::expanded_island_radius;
 use winisland_core::config::{
     CompactWidgetAlignment, CompactWidgetKind, CompactWidgetPosition, CompactWidgetSlot,
     PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetKind, WidgetSlot, plugin_widget_slot, span_cells,
@@ -18,7 +20,6 @@ use winisland_core::config::{
 };
 use winisland_core::i18n::tr;
 use winisland_core::widgets::PluginWidget;
-use winisland_render::Painter;
 
 use super::super::input::{
     COMPACT_WIDGET_ISLAND_PANEL_H, CompactWidgetGridGeom, WIDGET_ISLAND_PANEL_H,
@@ -32,7 +33,7 @@ use super::super::items::{CONTENT_PADDING, GROUP_INNER_PAD};
 
 #[derive(Clone, Copy)]
 pub(super) struct WidgetPreviewParams<'a> {
-    pub(super) canvas: &'a Canvas,
+    pub(super) painter: Painter<'a>,
     pub(super) item_y: f32,
     pub(super) width: f32,
     pub(super) content_width: f32,
@@ -58,39 +59,41 @@ pub(super) struct WidgetPreviewParams<'a> {
     pub(super) theme: &'a SettingsTheme,
 }
 
-fn draw_panel(canvas: &Canvas, rect: Rect, theme: &SettingsTheme) {
-    let shadow = settings_paint(theme.shadow);
-    canvas.draw_round_rect(
+fn draw_panel(painter: Painter<'_>, rect: Rect, theme: &SettingsTheme) {
+    painter.fill_round_rect(
         Rect::from_xywh(rect.left, rect.top + 2.0, rect.width(), rect.height()),
-        14.0,
-        14.0,
-        &shadow,
+        Radius::uniform(14.0),
+        settings_color(theme.shadow),
     );
 
-    let mut paint = settings_paint(theme.group_bg);
-    canvas.draw_round_rect(rect, 14.0, 14.0, &paint);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(0.75);
-    paint.set_color(theme.group_border);
-    canvas.draw_round_rect(
+    painter.fill_round_rect(rect, Radius::uniform(14.0), settings_color(theme.group_bg));
+    painter.stroke_round_rect(
         Rect::from_xywh(
             rect.left + 0.375,
             rect.top + 0.375,
             rect.width() - 0.75,
             rect.height() - 0.75,
         ),
-        14.0,
-        14.0,
-        &paint,
+        Radius::uniform(14.0),
+        0.75,
+        settings_color(theme.group_border),
     );
 }
 
-fn draw_label(canvas: &Canvas, text: &str, x: f32, y: f32, size: f32, bold: bool, color: Color) {
-    SettingsPainter::new(canvas).text(text, (x, y), size, bold, color);
+fn draw_label(
+    painter: Painter<'_>,
+    text: &str,
+    x: f32,
+    y: f32,
+    size: f32,
+    bold: bool,
+    color: Rgba,
+) {
+    SettingsPainter::new(painter).text(text, (x, y), size, bold, color);
 }
 
-fn draw_centered_label(canvas: &Canvas, text: &str, rect: Rect, size: f32, color: Color) {
-    SettingsPainter::new(canvas).centered_text(
+fn draw_centered_label(painter: Painter<'_>, text: &str, rect: Rect, size: f32, color: Rgba) {
+    SettingsPainter::new(painter).centered_text(
         text,
         (rect.center_x(), rect.center_y() + size * 0.35),
         size,
@@ -99,27 +102,23 @@ fn draw_centered_label(canvas: &Canvas, text: &str, rect: Rect, size: f32, color
     );
 }
 
-fn with_alpha(color: Color, alpha: u8) -> Color {
-    Color::from_argb(alpha, color.r(), color.g(), color.b())
-}
-
 fn ease_out_back(progress: f32) -> f32 {
     let progress = progress.clamp(0.0, 1.0) - 1.0;
     let overshoot = 1.70158;
     1.0 + (overshoot + 1.0) * progress.powi(3) + overshoot * progress.powi(2)
 }
 
-fn begin_card_transform(canvas: &Canvas, rect: Rect, hover: f32, drop: Option<f32>) {
+fn begin_card_transform(painter: Painter<'_>, rect: Rect, hover: f32, drop: Option<f32>) {
     let drop_scale = drop.map_or(1.0, |progress| 0.94 + 0.06 * ease_out_back(progress));
     let scale = (1.0 + hover * 0.018) * drop_scale;
-    canvas.save();
-    canvas.translate((rect.center_x(), rect.center_y() - hover * 2.0));
-    canvas.scale((scale, scale));
-    canvas.translate((-rect.center_x(), -rect.center_y()));
+    painter.save();
+    painter.translate(Vec2::new(rect.center_x(), rect.center_y() - hover * 2.0));
+    painter.scale(Vec2::new(scale, scale));
+    painter.translate(Vec2::new(-rect.center_x(), -rect.center_y()));
 }
 
 fn draw_card_feedback(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     rect: Rect,
     radius: f32,
     hover: f32,
@@ -131,62 +130,63 @@ fn draw_card_feedback(
         return;
     }
     let intensity = hover.max(drop_glow);
-    let shadow = settings_paint(Color::from_argb((42.0 * intensity) as u8, 0, 0, 0));
-    canvas.draw_round_rect(
+    let accent = settings_color(theme.accent);
+    painter.fill_round_rect(
         Rect::from_xywh(rect.left, rect.top + 3.0, rect.width(), rect.height()),
-        radius,
-        radius,
-        &shadow,
+        Radius::uniform(radius),
+        Rgba::from_argb((42.0 * intensity) as u8, 0, 0, 0),
     );
-    let mut paint = settings_paint(with_alpha(theme.accent, (22.0 * intensity) as u8));
-    canvas.draw_round_rect(rect, radius, radius, &paint);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(1.0 + drop_glow);
-    paint.set_color(with_alpha(theme.accent, (110.0 * intensity) as u8));
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
+        rect,
+        Radius::uniform(radius),
+        accent.with_alpha((22.0 * intensity) as u8),
+    );
+    painter.stroke_round_rect(
         Rect::from_xywh(
             rect.left + 0.5,
             rect.top + 0.5,
             rect.width() - 1.0,
             rect.height() - 1.0,
         ),
-        radius,
-        radius,
-        &paint,
+        Radius::uniform(radius),
+        1.0 + drop_glow,
+        accent.with_alpha((110.0 * intensity) as u8),
     );
 }
 
-fn draw_library_tile_surface(canvas: &Canvas, rect: Rect, hover: f32, theme: &SettingsTheme) {
-    let shadow = settings_paint(Color::from_argb((28.0 * hover) as u8, 0, 0, 0));
-    canvas.draw_round_rect(
+fn draw_library_tile_surface(painter: Painter<'_>, rect: Rect, hover: f32, theme: &SettingsTheme) {
+    let accent = settings_color(theme.accent);
+    painter.fill_round_rect(
         Rect::from_xywh(rect.left, rect.top + 2.0, rect.width(), rect.height()),
-        12.0,
-        12.0,
-        &shadow,
+        Radius::uniform(12.0),
+        Rgba::from_argb((28.0 * hover) as u8, 0, 0, 0),
     );
-    let mut paint = settings_paint(theme.control_bg);
-    canvas.draw_round_rect(rect, 12.0, 12.0, &paint);
+    painter.fill_round_rect(
+        rect,
+        Radius::uniform(12.0),
+        settings_color(theme.control_bg),
+    );
     if hover > 0.001 {
-        paint.set_color(with_alpha(theme.accent, (18.0 * hover) as u8));
-        canvas.draw_round_rect(rect, 12.0, 12.0, &paint);
+        painter.fill_round_rect(
+            rect,
+            Radius::uniform(12.0),
+            accent.with_alpha((18.0 * hover) as u8),
+        );
     }
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(0.75 + hover * 0.5);
-    paint.set_color(if hover > 0.001 {
-        with_alpha(theme.accent, (105.0 * hover) as u8)
-    } else {
-        theme.control_border
-    });
-    canvas.draw_round_rect(
+    painter.stroke_round_rect(
         Rect::from_xywh(
             rect.left + 0.375,
             rect.top + 0.375,
             rect.width() - 0.75,
             rect.height() - 0.75,
         ),
-        12.0,
-        12.0,
-        &paint,
+        Radius::uniform(12.0),
+        0.75 + hover * 0.5,
+        if hover > 0.001 {
+            accent.with_alpha((105.0 * hover) as u8)
+        } else {
+            settings_color(theme.control_border)
+        },
     );
 }
 
@@ -194,25 +194,23 @@ fn draw_library_tile_surface(canvas: &Canvas, rect: Rect, hover: f32, theme: &Se
 struct PreviewBackgroundKey {
     dimensions: [u32; 4],
     style: String,
-    border_color: Color,
+    border_color: Rgba,
 }
 
 thread_local! {
     static PREVIEW_BACKGROUNDS: RefCell<VecDeque<(PreviewBackgroundKey, Image)>> = const { RefCell::new(VecDeque::new()) };
-    static PENCIL_ICON: Option<Image> = Image::from_encoded(Data::new_copy(include_bytes!(
-        "../../../../resources/in_app/settings/pencil.png"
-    )));
+    static PENCIL_ICON: Option<Image> =
+        Image::from_encoded(include_bytes!("../../../../resources/in_app/settings/pencil.png"));
 }
 
 fn draw_island_background(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     rect: Rect,
     island_style: &str,
     theme: &SettingsTheme,
     corner_radius: f32,
 ) {
-    let matrix = canvas.local_to_device_as_3x3();
-    let scale = matrix.scale_x().abs().max(matrix.scale_y().abs()).max(1.0) * 2.0;
+    let scale = painter.axis_scale().max(1.0) * 2.0;
     let key = PreviewBackgroundKey {
         dimensions: [
             rect.width().to_bits(),
@@ -221,7 +219,7 @@ fn draw_island_background(
             scale.to_bits(),
         ],
         style: island_style.to_owned(),
-        border_color: theme.text_pri,
+        border_color: settings_color(theme.text_pri),
     };
     let padding = 6.0;
     let bounds = Rect::from_xywh(
@@ -239,10 +237,10 @@ fn draw_island_background(
             (bounds.width() * scale).ceil() as i32,
             (bounds.height() * scale).ceil() as i32,
         );
-        let mut surface = skia_safe::surfaces::raster_n32_premul(size)?;
-        let raster = surface.canvas();
-        raster.clear(Color::TRANSPARENT);
-        raster.scale((
+        let mut surface = RasterSurface::new(size.0, size.1)?;
+        surface.clear(Rgba::TRANSPARENT);
+        let raster = surface.painter();
+        raster.scale(Vec2::new(
             size.0 as f32 / bounds.width(),
             size.1 as f32 / bounds.height(),
         ));
@@ -253,90 +251,76 @@ fn draw_island_background(
             theme,
             corner_radius,
         );
-        let image = surface.image_snapshot();
+        let image = surface.snapshot();
         cache.push_front((key, image.clone()));
         cache.truncate(4);
         Some(image)
     });
     if let Some(image) = image {
-        canvas.draw_image_rect_with_sampling_options(
+        painter.draw_image(
             &image,
-            None,
             bounds,
-            SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
-            &Paint::default(),
+            &ImageOptions::default()
+                .with_sampling(Sampling::LinearNone)
+                .with_anti_alias(false),
         );
     } else {
-        draw_island_background_path(canvas, rect, island_style, theme, corner_radius);
+        draw_island_background_path(painter, rect, island_style, theme, corner_radius);
     }
 }
 
 fn draw_island_background_path(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     rect: Rect,
     island_style: &str,
     theme: &SettingsTheme,
     corner_radius: f32,
 ) {
-    let mut shadow = Paint::default();
-    shadow.set_anti_alias(true);
-    shadow.set_color(Color::from_argb(72, 0, 0, 0));
-    let shadow_path = continuous_rounded_rect_path(
+    let shadow_path = Path::continuous_rounded_rect(
         Rect::from_xywh(rect.left, rect.top + 4.0, rect.width(), rect.height()),
         corner_radius,
     );
-    canvas.draw_path(&shadow_path, &shadow);
+    painter.fill_path(&shadow_path, Rgba::from_argb(72, 0, 0, 0));
 
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
+    let island_path = Path::continuous_rounded_rect(rect, corner_radius);
     if island_style == "glass" {
-        paint.set_color(Color::from_argb(220, 24, 24, 28));
+        painter.fill_path(&island_path, Rgba::from_argb(220, 24, 24, 28));
     } else if island_style == "dynamic" {
-        let colors = [
-            skia_safe::Color4f::from(Color::from_rgb(18, 12, 36)),
-            skia_safe::Color4f::from(Color::from_rgb(8, 24, 48)),
+        let stops = [
+            GradientStop {
+                offset: 0.0,
+                color: Rgba::from_rgb(18, 12, 36),
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Rgba::from_rgb(8, 24, 48),
+            },
         ];
-        let colors = skia_safe::gradient::Colors::new_evenly_spaced(
-            &colors,
-            skia_safe::TileMode::Clamp,
-            None,
+        let filled = painter.fill_path_with_gradient(
+            &island_path,
+            Point::new(rect.left, rect.top),
+            Point::new(rect.right, rect.bottom),
+            &stops,
+            TileMode::Clamp,
         );
-        let gradient = skia_safe::gradient::Gradient::new(
-            colors,
-            skia_safe::gradient::Interpolation::default(),
-        );
-        if let Some(shader) = skia_safe::gradient::shaders::linear_gradient(
-            (
-                Point::new(rect.left, rect.top),
-                Point::new(rect.right, rect.bottom),
-            ),
-            &gradient,
-            None,
-        ) {
-            paint.set_shader(Some(shader));
-        } else {
-            paint.set_color(Color::from_rgb(12, 12, 16));
+        if !filled {
+            painter.fill_path(&island_path, Rgba::from_rgb(12, 12, 16));
         }
     } else {
-        paint.set_color(Color::from_rgb(10, 10, 10));
+        painter.fill_path(&island_path, Rgba::from_rgb(10, 10, 10));
     }
-    let island_path = continuous_rounded_rect_path(rect, corner_radius);
-    canvas.draw_path(&island_path, &paint);
 
-    paint.set_shader(None);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(1.0);
-    paint.set_color(Color::from_argb(
-        if island_style == "glass" { 52 } else { 38 },
-        theme.text_pri.r(),
-        theme.text_pri.g(),
-        theme.text_pri.b(),
-    ));
-    canvas.draw_path(&island_path, &paint);
+    painter.stroke_path(
+        &island_path,
+        1.0,
+        settings_color(theme.text_pri).with_alpha(if island_style == "glass" { 52 } else { 38 }),
+        StrokeCap::Butt,
+        StrokeJoin::Miter,
+    );
 }
 
 fn draw_grid(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     geometry: &WidgetGridGeom,
     dragging: bool,
     drop_cells: &[usize],
@@ -345,104 +329,102 @@ fn draw_grid(
     let slot_radius = 12.0 * geometry.cap_scale;
     for slot in 0..WIDGET_GRID_SLOTS {
         let (x, y, width, height) = geometry.slot_rect(slot);
-        let mut paint = settings_paint(Color::from_argb(
-            if dragging { 52 } else { 24 },
-            255,
-            255,
-            255,
-        ));
-        paint.set_style(skia_safe::paint::Style::Stroke);
-        paint.set_stroke_width(if dragging { 1.0 } else { 0.75 });
-        let path = continuous_rounded_rect_path(Rect::from_xywh(x, y, width, height), slot_radius);
-        canvas.draw_path(&path, &paint);
+        let path = Path::continuous_rounded_rect(Rect::from_xywh(x, y, width, height), slot_radius);
+        painter.stroke_path(
+            &path,
+            if dragging { 1.0 } else { 0.75 },
+            Rgba::from_argb(if dragging { 52 } else { 24 }, 255, 255, 255),
+            StrokeCap::Butt,
+            StrokeJoin::Miter,
+        );
     }
 
     for slot in drop_cells {
         let (x, y, width, height) = geometry.slot_rect(*slot);
         let rect = Rect::from_xywh(x, y, width, height);
-        let mut paint = settings_paint(Color::from_argb(
-            100,
-            theme.accent.r(),
-            theme.accent.g(),
-            theme.accent.b(),
-        ));
-        canvas.draw_path(&continuous_rounded_rect_path(rect, slot_radius), &paint);
-        paint.set_style(skia_safe::paint::Style::Stroke);
-        paint.set_stroke_width(2.0);
-        paint.set_color(theme.accent);
-        canvas.draw_path(&continuous_rounded_rect_path(rect, slot_radius), &paint);
+        let path = Path::continuous_rounded_rect(rect, slot_radius);
+        painter.fill_path(&path, settings_color(theme.accent).with_alpha(100));
+        painter.stroke_path(
+            &path,
+            2.0,
+            settings_color(theme.accent),
+            StrokeCap::Butt,
+            StrokeJoin::Miter,
+        );
     }
 }
 
-fn draw_delete_button(canvas: &Canvas, x: f32, y: f32, scale: f32) {
+fn draw_delete_button(painter: Painter<'_>, x: f32, y: f32, scale: f32) {
     let radius = (8.0 * scale).max(7.0);
     let stroke_width = (1.5 * scale).max(1.25);
     let arm = (3.0 * scale).max(2.5);
-    draw_delete_button_with_metrics(canvas, x, y, radius, stroke_width, arm);
+    draw_delete_button_with_metrics(painter, x, y, radius, stroke_width, arm);
 }
 
-fn draw_compact_delete_button(canvas: &Canvas, x: f32, y: f32, scale: f32) {
+fn draw_compact_delete_button(painter: Painter<'_>, x: f32, y: f32, scale: f32) {
     let radius = (3.75 * scale).max(4.0);
     let stroke_width = (0.9 * scale).max(1.0);
     let arm = (1.35 * scale).max(1.5);
-    draw_delete_button_with_metrics(canvas, x, y, radius, stroke_width, arm);
+    draw_delete_button_with_metrics(painter, x, y, radius, stroke_width, arm);
 }
 
-fn draw_edit_button(canvas: &Canvas, x: f32, y: f32, scale: f32, compact: bool) {
+fn draw_edit_button(painter: Painter<'_>, x: f32, y: f32, scale: f32, compact: bool) {
     let radius = if compact {
         (3.75 * scale).max(4.0)
     } else {
         (8.0 * scale).max(7.0)
     };
-    canvas.draw_circle(
-        (x, y),
-        radius,
-        &settings_paint(Color::from_rgb(10, 132, 255)),
-    );
+    painter.fill_circle(Point::new(x, y), radius, Rgba::from_rgb(10, 132, 255));
     let size = radius * 1.18;
     PENCIL_ICON.with(|image| {
         let Some(image) = image else {
             return;
         };
-        canvas.draw_image_rect_with_sampling_options(
+        painter.draw_image(
             image,
-            None,
             Rect::from_xywh(x - size / 2.0, y - size / 2.0, size, size),
-            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
-            &Paint::default(),
+            &ImageOptions::default()
+                .with_sampling(Sampling::LinearLinear)
+                .with_anti_alias(false),
         );
     });
 }
 
 fn draw_delete_button_with_metrics(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     radius: f32,
     stroke_width: f32,
     arm: f32,
 ) {
-    let mut paint = settings_paint(Color::from_rgb(255, 59, 48));
-    canvas.draw_circle((x, y), radius, &paint);
-
-    paint.set_color(Color::WHITE);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width(stroke_width);
-    paint.set_stroke_cap(skia_safe::paint::Cap::Round);
-    canvas.draw_line((x - arm, y - arm), (x + arm, y + arm), &paint);
-    canvas.draw_line((x + arm, y - arm), (x - arm, y + arm), &paint);
+    painter.fill_circle(Point::new(x, y), radius, Rgba::from_rgb(255, 59, 48));
+    painter.stroke_line(
+        Point::new(x - arm, y - arm),
+        Point::new(x + arm, y + arm),
+        stroke_width,
+        Rgba::WHITE,
+        StrokeCap::Round,
+    );
+    painter.stroke_line(
+        Point::new(x + arm, y - arm),
+        Point::new(x - arm, y + arm),
+        stroke_width,
+        Rgba::WHITE,
+        StrokeCap::Round,
+    );
 }
 
 fn draw_library_tile(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     source: &WidgetSource,
     plugin_widgets: &[PluginWidget],
     rect: Rect,
     hover: f32,
     theme: &SettingsTheme,
 ) {
-    begin_card_transform(canvas, rect, hover, None);
-    draw_library_tile_surface(canvas, rect, hover, theme);
+    begin_card_transform(painter, rect, hover, None);
+    draw_library_tile_surface(painter, rect, hover, theme);
     let preview_rect = Rect::from_xywh(
         rect.left + 7.0,
         rect.top + 6.0,
@@ -458,7 +440,7 @@ fn draw_library_tile(
                 WidgetKind::Settings => (54.0, 54.0),
             };
             draw_mini_card(
-                Painter::from_canvas(canvas),
+                painter,
                 *kind,
                 preview_rect.center_x() - preview_width / 2.0,
                 preview_rect.center_y() - preview_height / 2.0,
@@ -480,7 +462,7 @@ fn draw_library_tile(
                 let width = natural_width * scale;
                 let height = natural_height * scale;
                 crate::ui::expanded::widget_view::draw_plugin_widget(
-                    canvas,
+                    painter,
                     widget,
                     preview_rect.center_x() - width / 2.0,
                     preview_rect.center_y() - height / 2.0,
@@ -492,7 +474,7 @@ fn draw_library_tile(
             }
         }
     }
-    canvas.restore();
+    painter.restore();
 }
 
 pub(super) fn draw_widget_preview(params: WidgetPreviewParams<'_>) {
@@ -535,7 +517,7 @@ impl PreviewFrame {
         })
     }
 
-    fn draw(self, canvas: &Canvas, theme: &SettingsTheme) {
+    fn draw(self, painter: Painter<'_>, theme: &SettingsTheme) {
         for rect in [
             Rect::from_xywh(
                 self.panel_x,
@@ -550,17 +532,17 @@ impl PreviewFrame {
                 self.library_height,
             ),
         ] {
-            draw_panel(canvas, rect, theme);
+            draw_panel(painter, rect, theme);
         }
         draw_preview_heading(
-            canvas,
+            painter,
             self.panel_x,
             self.y,
             ("widget_layout_title", "widget_layout_hint"),
             theme,
         );
         draw_preview_heading(
-            canvas,
+            painter,
             self.panel_x,
             self.library_y,
             ("widget_library_title", "widget_library_hint"),
@@ -572,10 +554,10 @@ impl PreviewFrame {
         self.library_y + WIDGET_LIBRARY_HEADER_H
     }
 
-    fn draw_empty_library(self, canvas: &Canvas, dragging: bool, theme: &SettingsTheme) {
+    fn draw_empty_library(self, painter: Painter<'_>, dragging: bool, theme: &SettingsTheme) {
         if !dragging {
             draw_centered_label(
-                canvas,
+                painter,
                 &tr("widget_library_empty"),
                 Rect::from_xywh(
                     self.panel_x + 12.0,
@@ -584,14 +566,14 @@ impl PreviewFrame {
                     self.library_height - WIDGET_LIBRARY_HEADER_H,
                 ),
                 12.0,
-                theme.text_sec,
+                settings_color(theme.text_sec),
             );
         }
     }
 }
 
 fn draw_preview_heading(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     panel_x: f32,
     panel_y: f32,
     keys: (&str, &str),
@@ -602,20 +584,20 @@ fn draw_preview_heading(
         (keys.1, 44.0, 11.0, false, theme.text_sec),
     ] {
         draw_label(
-            canvas,
+            painter,
             &tr(key),
             panel_x + 16.0,
             panel_y + offset,
             size,
             bold,
-            color,
+            settings_color(color),
         );
     }
 }
 
 fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
     let WidgetPreviewParams {
-        canvas,
+        painter,
         item_y,
         width,
         island_style,
@@ -645,7 +627,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
     let Some(frame) = PreviewFrame::new(params, preview_height, WIDGET_ISLAND_PANEL_H) else {
         return;
     };
-    frame.draw(canvas, theme);
+    frame.draw(painter, theme);
 
     let geometry = widget_grid_geom(item_y, width, expanded_width, expanded_height);
     let island_rect = Rect::from_xywh(
@@ -655,7 +637,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         geometry.cap_h,
     );
     draw_island_background(
-        canvas,
+        painter,
         island_rect,
         island_style,
         theme,
@@ -669,7 +651,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             .unwrap_or_default(),
         _ => Vec::new(),
     };
-    draw_grid(canvas, &geometry, dragging, &drop_cells, theme);
+    draw_grid(painter, &geometry, dragging, &drop_cells, theme);
 
     for entry in widget_layout {
         let Some(kind) = entry.widget else { continue };
@@ -697,10 +679,10 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             .then_some(animation.progress)
         });
         let rect = Rect::from_xywh(x, y, width, height);
-        begin_card_transform(canvas, rect, hover, drop);
-        draw_card_feedback(canvas, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
+        begin_card_transform(painter, rect, hover, drop);
+        draw_card_feedback(painter, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
         draw_widget_card_preview(
-            Painter::from_canvas(canvas),
+            painter,
             kind,
             x,
             y,
@@ -708,19 +690,19 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             height,
             geometry.cap_scale,
             255,
-            crate::utils::color::rgba(Color::WHITE),
+            Rgba::WHITE,
         );
-        canvas.restore();
+        painter.restore();
 
         let hovered = widget_preview_hover_slot.is_some_and(|slot| footprint.contains(&slot));
         if kind != WidgetKind::Settings && (dragging || hovered) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
-            draw_delete_button(canvas, button_x, button_y, geometry.cap_scale);
+            draw_delete_button(painter, button_x, button_y, geometry.cap_scale);
             if kind == WidgetKind::ResourceUsage && hovered && !dragging {
                 let (edit_x, edit_y) =
                     widget_edit_button_center(x, y, width, height, geometry.cap_scale);
-                draw_edit_button(canvas, edit_x, edit_y, geometry.cap_scale, false);
+                draw_edit_button(painter, edit_x, edit_y, geometry.cap_scale, false);
             }
         }
     }
@@ -756,10 +738,10 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             .then_some(animation.progress)
         });
         let rect = Rect::from_xywh(x, y, width, height);
-        begin_card_transform(canvas, rect, hover, drop);
-        draw_card_feedback(canvas, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
+        begin_card_transform(painter, rect, hover, drop);
+        draw_card_feedback(painter, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
         crate::ui::expanded::widget_view::draw_plugin_widget(
-            canvas,
+            painter,
             widget,
             x,
             y,
@@ -768,12 +750,12 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             geometry.cap_scale,
             255,
         );
-        canvas.restore();
+        painter.restore();
         let hovered = widget_preview_hover_slot.is_some_and(|slot| cells.contains(&slot));
         if dragging || hovered {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
-            draw_delete_button(canvas, button_x, button_y, geometry.cap_scale);
+            draw_delete_button(painter, button_x, button_y, geometry.cap_scale);
         }
     }
 
@@ -785,7 +767,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         widget_dragging,
     );
     if library_items.is_empty() {
-        frame.draw_empty_library(canvas, widget_dragging.is_some(), theme);
+        frame.draw_empty_library(painter, widget_dragging.is_some(), theme);
     } else {
         for (index, source) in library_items.iter().enumerate() {
             let (x, y, width, height) =
@@ -801,13 +783,13 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             } else {
                 0.0
             };
-            draw_library_tile(canvas, source, plugin_widgets, rect, hover, theme);
+            draw_library_tile(painter, source, plugin_widgets, rect, hover, theme);
         }
     }
 }
 
 fn draw_compact_grid(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     geometry: &CompactWidgetGridGeom,
     dragging: bool,
     drop_position: Option<CompactWidgetPosition>,
@@ -816,8 +798,8 @@ fn draw_compact_grid(
     if !dragging {
         return;
     }
-    canvas.save();
-    let island_path = continuous_rounded_rect_path(
+    painter.save();
+    let island_path = Path::continuous_rounded_rect(
         Rect::from_xywh(
             geometry.cap_x,
             geometry.cap_y,
@@ -826,9 +808,7 @@ fn draw_compact_grid(
         ),
         geometry.cap_h / 2.0,
     );
-    canvas.clip_path(&island_path, skia_safe::ClipOp::Intersect, true);
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
+    painter.clip_path(&island_path);
     if let Some(position) = drop_position {
         let lane_width = geometry.cap_w / 3.0;
         let lane = match position.alignment {
@@ -836,57 +816,48 @@ fn draw_compact_grid(
             CompactWidgetAlignment::Center => 1.0,
             CompactWidgetAlignment::Right => 2.0,
         };
-        paint.set_color(Color::from_argb(
-            24,
-            theme.accent.r(),
-            theme.accent.g(),
-            theme.accent.b(),
-        ));
-        canvas.draw_rect(
+        painter.fill_rect(
             Rect::from_xywh(
                 geometry.cap_x + lane_width * lane,
                 geometry.cap_y,
                 lane_width,
                 geometry.cap_h,
             ),
-            &paint,
+            settings_color(theme.accent).with_alpha(24),
         );
         let indicator_x = geometry.drop_indicator_x(position);
-        paint.set_color(theme.accent);
-        paint.set_stroke_width((1.5 * geometry.cap_scale).clamp(1.5, 2.5));
-        paint.set_stroke_cap(skia_safe::paint::Cap::Round);
         let inset = geometry.cap_h * 0.27;
-        canvas.draw_line(
-            (indicator_x, geometry.cap_y + inset),
-            (indicator_x, geometry.cap_y + geometry.cap_h - inset),
-            &paint,
+        painter.stroke_line(
+            Point::new(indicator_x, geometry.cap_y + inset),
+            Point::new(indicator_x, geometry.cap_y + geometry.cap_h - inset),
+            (1.5 * geometry.cap_scale).clamp(1.5, 2.5),
+            settings_color(theme.accent),
+            StrokeCap::Round,
         );
     }
-    paint.set_color(Color::from_argb(28, 255, 255, 255));
-    paint.set_stroke_width(1.0);
     for boundary in [1.0, 2.0] {
         let x = geometry.cap_x + geometry.cap_w * boundary / 3.0;
         let inset = geometry.cap_h * 0.32;
-        canvas.draw_line(
-            (x, geometry.cap_y + inset),
-            (x, geometry.cap_y + geometry.cap_h - inset),
-            &paint,
+        painter.stroke_line(
+            Point::new(x, geometry.cap_y + inset),
+            Point::new(x, geometry.cap_y + geometry.cap_h - inset),
+            1.0,
+            Rgba::from_argb(28, 255, 255, 255),
+            StrokeCap::Round,
         );
     }
-    canvas.restore();
+    painter.restore();
 }
 
 fn draw_compact_library_tile(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     widget: CompactWidgetKind,
     rect: Rect,
     hover: f32,
     theme: &SettingsTheme,
 ) {
-    begin_card_transform(canvas, rect, hover, None);
-    draw_library_tile_surface(canvas, rect, hover, theme);
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
+    begin_card_transform(painter, rect, hover, None);
+    draw_library_tile_surface(painter, rect, hover, theme);
     let widget_width = crate::ui::widget::compact::widget_width(widget);
     let natural_width = widget_width + 18.0;
     let preview_scale = ((rect.width() - 8.0) / natural_width).min(1.0);
@@ -896,18 +867,15 @@ fn draw_compact_library_tile(
         natural_width * preview_scale,
         30.0 * preview_scale,
     );
-    paint.set_style(skia_safe::paint::Style::Fill);
-    paint.set_color(Color::from_rgb(10, 10, 10));
-    canvas.draw_round_rect(
+    painter.fill_round_rect(
         preview,
-        preview.height() / 2.0,
-        preview.height() / 2.0,
-        &paint,
+        Radius::uniform(preview.height() / 2.0),
+        Rgba::from_rgb(10, 10, 10),
     );
     crate::ui::widget::compact::draw_widget(
-        Painter::from_canvas(canvas),
+        painter,
         widget,
-        winisland_render::Rect::from_xywh(
+        Rect::from_xywh(
             preview.left + 9.0 * preview_scale,
             preview.top,
             widget_width * preview_scale,
@@ -916,12 +884,12 @@ fn draw_compact_library_tile(
         preview_scale,
         255,
     );
-    canvas.restore();
+    painter.restore();
 }
 
 fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
     let WidgetPreviewParams {
-        canvas,
+        painter,
         item_y,
         width,
         island_style,
@@ -947,7 +915,7 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
     else {
         return;
     };
-    frame.draw(canvas, theme);
+    frame.draw(painter, theme);
 
     let geometry = compact_widget_grid_geom(
         item_y,
@@ -964,7 +932,7 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
         geometry.cap_h,
     );
     draw_island_background(
-        canvas,
+        painter,
         island_rect,
         island_style,
         theme,
@@ -972,7 +940,7 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
     );
     let dragging = compact_widget_dragging.is_some();
     draw_compact_grid(
-        canvas,
+        painter,
         &geometry,
         dragging,
         compact_widget_drag_hover_slot,
@@ -1002,31 +970,31 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
             .then_some(animation.progress)
         });
         let rect = Rect::from_xywh(x, y, width, height);
-        begin_card_transform(canvas, rect, hover, drop);
-        draw_card_feedback(canvas, rect, height / 2.0, hover, drop, theme);
+        begin_card_transform(painter, rect, hover, drop);
+        draw_card_feedback(painter, rect, height / 2.0, hover, drop, theme);
         crate::ui::widget::compact::draw_widget(
-            Painter::from_canvas(canvas),
+            painter,
             widget,
-            winisland_render::Rect::from_xywh(x, y, width, height),
+            Rect::from_xywh(x, y, width, height),
             geometry.cap_scale,
             255,
         );
-        canvas.restore();
+        painter.restore();
         if compact_widget_preview_hover_slot == Some(entry.position()) {
             let (button_x, button_y) =
                 widget_delete_button_center(x, y, width, height, geometry.cap_scale);
-            draw_compact_delete_button(canvas, button_x, button_y, geometry.cap_scale);
+            draw_compact_delete_button(painter, button_x, button_y, geometry.cap_scale);
             if widget == CompactWidgetKind::ResourceUsage {
                 let (edit_x, edit_y) =
                     widget_edit_button_center(x, y, width, height, geometry.cap_scale);
-                draw_edit_button(canvas, edit_x, edit_y, geometry.cap_scale, true);
+                draw_edit_button(painter, edit_x, edit_y, geometry.cap_scale, true);
             }
         }
     }
 
     let source_y = frame.source_y();
     if library_items.is_empty() {
-        frame.draw_empty_library(canvas, compact_widget_dragging.is_some(), theme);
+        frame.draw_empty_library(painter, compact_widget_dragging.is_some(), theme);
     } else {
         for (index, widget) in library_items.into_iter().enumerate() {
             let (x, y, width, height) =
@@ -1039,7 +1007,7 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
                 0.0
             };
             draw_compact_library_tile(
-                canvas,
+                painter,
                 widget,
                 Rect::from_xywh(x, y, width, height),
                 hover,

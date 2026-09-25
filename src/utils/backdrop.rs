@@ -1,12 +1,10 @@
 use std::cell::RefCell;
 
-use skia_safe::{
-    FilterMode, Image, ImageInfo, MipmapMode, Paint, Rect, SamplingOptions, TileMode, image_filters,
-};
+use winisland_render::{Image, TileMode};
 
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::get_cached_media_image_with_key;
-use crate::window::renderer::DrawingContext;
+use winisland_render::DrawingContext;
 
 thread_local! {
     static BLURRED_COVER_CACHE: RefCell<Option<BlurredCoverCache>> = const { RefCell::new(None) };
@@ -37,33 +35,9 @@ pub fn get_blurred_cover_background(
         return cached;
     }
 
-    let info = ImageInfo::new_n32_premul((64, 64), None);
-    let mut downscaled_surface = drawing_context.render_surface(&info)?;
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    downscaled_surface
-        .canvas()
-        .draw_image_rect_with_sampling_options(
-            &image,
-            None,
-            Rect::from_xywh(0.0, 0.0, 64.0, 64.0),
-            SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
-            &paint,
-        );
-    drawing_context.finish_surface(&mut downscaled_surface);
-    let downscaled = downscaled_surface.image_snapshot();
-
-    let mut blur_surface = drawing_context.render_surface(&info)?;
-    let mut blur_paint = Paint::default();
-    blur_paint.set_anti_alias(true);
-    if let Some(filter) = image_filters::blur((8.0, 8.0), Some(TileMode::Clamp), None, None) {
-        blur_paint.set_image_filter(filter);
-    }
-    blur_surface
-        .canvas()
-        .draw_image(&downscaled, (0, 0), Some(&blur_paint));
-    drawing_context.finish_surface(&mut blur_surface);
-    let blurred_image = blur_surface.image_snapshot();
+    let downscaled = drawing_context.scale_image(&image, 64, 64)?;
+    let blurred_image =
+        drawing_context.blur_image(&downscaled, 64, 64, (8.0, 8.0), Some(TileMode::Clamp))?;
 
     BLURRED_COVER_CACHE.with(|cell| {
         *cell.borrow_mut() = Some(BlurredCoverCache {

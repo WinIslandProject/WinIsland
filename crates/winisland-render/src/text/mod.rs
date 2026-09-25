@@ -1,9 +1,4 @@
-//! 文本层：字体缓存、文本分组、测量与绘制（普通绘制与按路径绘制两条路径）。
-//!
-//! 与迁移前的 `src/utils/font.rs` 逐行等价，改动只有两处：
-//! - 参数结构体用 `Painter` 取代 `&Canvas`；
-//! - `FontStyle` 换成 `winisland_render::FontStyle`，`paint: &Paint` 换成 `color: Rgba` +
-//!   `blur: Option<BlurSpec>`（歌词切换会给文字加各向异性模糊，只有颜色是不够的）。
+//! Cached font measurement and drawing for the rendering layer.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -41,9 +36,6 @@ fn text_paint(color: Rgba, blur: Option<BlurSpec>) -> Paint {
     paint
 }
 
-/// 在矩形内居中绘制文本；超宽时按字符截断并追加 `...`。
-///
-/// `color` 为文字颜色（含 alpha，非预乘）；`blur` 为可选模糊，`None` 表示不模糊。
 pub struct DrawTextInRectParams<'a> {
     pub painter: Painter<'a>,
     pub text: &'a str,
@@ -56,7 +48,6 @@ pub struct DrawTextInRectParams<'a> {
     pub blur: Option<BlurSpec>,
 }
 
-/// 一次缓存文本绘制：`x`/`y` 为基线原点，单位逻辑像素。
 pub struct DrawTextCachedParams<'a> {
     pub painter: Painter<'a>,
     pub text: &'a str,
@@ -68,10 +59,6 @@ pub struct DrawTextCachedParams<'a> {
     pub blur: Option<BlurSpec>,
 }
 
-/// 字体门面。单例：`FontManager::global()`。
-///
-/// 线程要求：内部缓存是 `thread_local`，与迁移前一致（只在渲染线程访问）。
-/// 失败语义：字体解析失败时逐级回退到系统默认字体，不返回错误。
 pub struct FontManager;
 
 struct CustomTypefaceState {
@@ -349,21 +336,18 @@ impl FontManager {
         make_font(typeface, size, style)
     }
 
-    /// 测量文本的字形边界，返回包围盒（逻辑像素）。
     pub fn measure_str(&self, text: &str, size: f32, bold: bool) -> crate::types::Rect {
         let font = self.get_font(size, bold);
         let (_, bounds) = font.measure_str(text, None);
         crate::types::Rect::from_ltrb(bounds.left, bounds.top, bounds.right, bounds.bottom)
     }
 
-    /// 字体的 ascent（负值，逻辑像素），用于把"文本框顶部"换算成绘制基线。
     pub fn ascent(&self, size: f32, bold: bool) -> f32 {
         let font = self.get_font(size, bold);
         let (_, metrics) = font.metrics();
         metrics.ascent
     }
 
-    /// 在给定基线原点绘制文本。
     pub fn draw_str(
         &self,
         painter: Painter<'_>,
@@ -376,6 +360,18 @@ impl FontManager {
         let font = self.get_font(size, bold);
         let paint = text_paint(color, None);
         painter.canvas().draw_str(text, (at.x, at.y), &font, &paint);
+    }
+
+    pub fn draw_plugin_str_v1(
+        &self,
+        canvas: &skia_safe::Canvas,
+        text: &str,
+        at: crate::types::Point,
+        size: f32,
+        bold: bool,
+        color: Rgba,
+    ) {
+        self.draw_str(Painter { canvas }, text, at, size, bold, color);
     }
 
     pub fn draw_text_in_rect(&self, params: DrawTextInRectParams<'_>) {
