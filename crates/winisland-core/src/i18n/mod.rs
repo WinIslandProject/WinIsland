@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::{Arc, LazyLock, RwLock};
-use windows::Win32::Globalization::GetUserDefaultLocaleName;
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 #[derive(Clone, Debug)]
 pub struct Language {
@@ -33,15 +32,15 @@ fn embedded_langs() -> &'static [EmbeddedLang] {
     &[
         (
             "en_us.lang",
-            include_str!("../../resources/in_app/lang/en_us.lang"),
+            include_str!("../../../../resources/in_app/lang/en_us.lang"),
         ),
         (
             "zh_cn.lang",
-            include_str!("../../resources/in_app/lang/zh_cn.lang"),
+            include_str!("../../../../resources/in_app/lang/zh_cn.lang"),
         ),
         (
             "es_es.lang",
-            include_str!("../../resources/in_app/lang/es_es.lang"),
+            include_str!("../../../../resources/in_app/lang/es_es.lang"),
         ),
     ]
 }
@@ -207,6 +206,16 @@ impl I18n {
     }
 }
 
+static SYSTEM_LOCALE_PROVIDER: OnceLock<fn() -> String> = OnceLock::new();
+
+/// Registers the platform locale lookup used when the configured language is `auto`.
+///
+/// The provider is read on every `init_i18n("auto")` call; until it is registered, `auto`
+/// resolves to `en_us`.
+pub fn set_system_locale_provider(provider: fn() -> String) {
+    let _ = SYSTEM_LOCALE_PROVIDER.set(provider);
+}
+
 pub fn init_i18n(config_lang: &str) {
     let target_lang = if config_lang == "auto" {
         get_system_lang()
@@ -254,23 +263,15 @@ pub fn release_plugin_translation_bundle(id: u64) -> Result<(), &'static str> {
 }
 
 fn get_system_lang() -> String {
-    let mut buffer = [0u16; 128];
-    // SAFETY: GetUserDefaultLocaleName reads the system locale into the provided
-    // buffer. The buffer is stack-allocated with 128 elements, sufficient for any
-    // valid locale name. from_utf16_lossy handles potentially malformed input.
-    unsafe {
-        let len = GetUserDefaultLocaleName(&mut buffer);
-        if len > 0 {
-            let s = String::from_utf16_lossy(&buffer[..len as usize - 1]);
-            let lower = s.to_lowercase();
-            if lower.starts_with("zh") {
-                return "zh_cn".to_string();
-            }
-            if lower.starts_with("es") {
-                return "es_es".to_string();
-            }
-            return "en_us".to_string();
-        }
+    let Some(provider) = SYSTEM_LOCALE_PROVIDER.get() else {
+        return "en_us".to_string();
+    };
+    let lower = provider().to_lowercase();
+    if lower.starts_with("zh") {
+        return "zh_cn".to_string();
+    }
+    if lower.starts_with("es") {
+        return "es_es".to_string();
     }
     "en_us".to_string()
 }

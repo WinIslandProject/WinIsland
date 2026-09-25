@@ -22,11 +22,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, Result};
 
-use crate::core::i18n::tr;
 use crate::icons::brightness::draw_brightness_icon;
 use crate::icons::volume::draw_volume_icon;
 use crate::ui::compact::{CompactOverlayState, CompactSize};
 use crate::utils::font::{DrawTextCachedParams, FontManager};
+use winisland_core::i18n::tr;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const ENDPOINT_RETRY_INTERVAL: Duration = Duration::from_millis(500);

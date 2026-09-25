@@ -1,8 +1,8 @@
 mod resource_usage;
 mod time;
 
-use crate::core::config::{CompactWidgetAlignment, CompactWidgetKind, CompactWidgetSlot};
 use skia_safe::{Canvas, Color, Paint, Rect};
+use winisland_core::config::{CompactWidgetAlignment, CompactWidgetKind, CompactWidgetSlot};
 
 const CONTENT_EDGE_INSET: f32 = 9.0;
 const CONTENT_GAP: f32 = 7.0;

@@ -35,6 +35,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+ "winisland-core",
  "winisland-plugin-api",
  "winit",
  "winres",
@@ -5177,6 +5178,22 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winisland-core"
+version = "1.3.9"
+dependencies = [
+ "base64 0.23.1",
+ "encoding_rs",
+ "fuzzengine",
+ "log",
+ "lrc",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "toml 1.1.4+spec-1.1.0",
+]
 
 [[package]]
 name = "winisland-plugin-api"

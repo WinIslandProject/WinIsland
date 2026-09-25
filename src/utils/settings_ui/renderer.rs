@@ -4,12 +4,12 @@ mod widget_preview;
 
 use skia_safe::{Canvas, Rect};
 
-use crate::core::config::{CompactWidgetKind, CompactWidgetSlot, PluginWidgetSlot, WidgetSlot};
-use crate::core::plugin_widget::PluginWidget;
 use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::input::{
     WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetSource,
 };
+use winisland_core::config::{CompactWidgetKind, CompactWidgetSlot, PluginWidgetSlot, WidgetSlot};
+use winisland_core::widgets::PluginWidget;
 
 use super::anim::SwitchAnimator;
 use super::items::SettingsItem;

@@ -44,12 +44,12 @@ impl App {
                                 settings.set_plugin_inventory_receiver(receiver);
                             }
                             settings.set_plugin_status(
-                                crate::core::i18n::tr("plugin_state_restart"),
+                                winisland_core::i18n::tr("plugin_state_restart"),
                                 true,
                             );
                         }
                         Err(error) => settings.set_plugin_status(
-                            crate::core::i18n::tr_args("plugin_state_failed", &[&error]),
+                            winisland_core::i18n::tr_args("plugin_state_failed", &[&error]),
                             false,
                         ),
                     }
@@ -71,12 +71,12 @@ impl App {
                                 settings.set_plugin_inventory_receiver(receiver);
                             }
                             settings.set_plugin_status(
-                                crate::core::i18n::tr("plugin_uninstalled"),
+                                winisland_core::i18n::tr("plugin_uninstalled"),
                                 false,
                             );
                         }
                         Err(error) => settings.set_plugin_status(
-                            crate::core::i18n::tr_args("plugin_uninstall_failed", &[&error]),
+                            winisland_core::i18n::tr_args("plugin_uninstall_failed", &[&error]),
                             false,
                         ),
                     }
@@ -222,7 +222,7 @@ impl App {
             Self::show_toast("Plugin Info", "Another installation is already in progress");
             if let Some(settings) = self.settings.as_mut() {
                 settings.set_plugin_status(
-                    crate::core::i18n::tr_args(
+                    winisland_core::i18n::tr_args(
                         "plugin_install_failed",
                         &["another installation is already in progress"],
                     ),
@@ -266,7 +266,7 @@ impl App {
             if let Some(settings) = self.settings.as_mut() {
                 settings.finish_marketplace_install();
                 settings.set_plugin_status(
-                    crate::core::i18n::tr("plugin_marketplace_incompatible"),
+                    winisland_core::i18n::tr("plugin_marketplace_incompatible"),
                     false,
                 );
             }
@@ -276,7 +276,7 @@ impl App {
             if let Some(settings) = self.settings.as_mut() {
                 settings.finish_marketplace_install();
                 settings.set_plugin_status(
-                    crate::core::i18n::tr_args(
+                    winisland_core::i18n::tr_args(
                         "plugin_install_failed",
                         &["another installation is already in progress"],
                     ),
@@ -287,7 +287,7 @@ impl App {
         }
         if let Some(settings) = self.settings.as_mut() {
             settings.set_plugin_status(
-                crate::core::i18n::tr("plugin_marketplace_downloading"),
+                winisland_core::i18n::tr("plugin_marketplace_downloading"),
                 false,
             );
         }
@@ -309,7 +309,7 @@ impl App {
         crate::plugin::manager::drain_widget_events(&mut self.widget_mgr);
         let mut config = load_config();
         let plugin_widgets = self.widget_mgr.configurable_widgets();
-        if crate::core::config::normalize_active_plugin_widget_layout(
+        if winisland_core::config::normalize_active_plugin_widget_layout(
             &config.widget_layout,
             &mut config.plugin_widget_layout,
             &plugin_widgets,
@@ -430,7 +430,7 @@ impl App {
                         &self.config.resource_metrics,
                         &self.config.compact_resource_metrics,
                     );
-                    crate::core::config::set_resource_widget_span(
+                    winisland_core::config::set_resource_widget_span(
                         self.config.resource_widget_columns,
                         self.config.resource_widget_rows,
                     );

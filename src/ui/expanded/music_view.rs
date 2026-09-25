@@ -17,7 +17,6 @@ use crate::icons::arrows::draw_arrow_right;
 use crate::icons::controls::{draw_control_triangle, draw_pause_button, draw_play_button};
 use crate::utils::cover::decode_cover_image;
 use crate::utils::font::{DrawTextCachedParams, FontManager};
-use crate::utils::physics::Spring;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 use crate::utils::shape::continuous_rounded_rect_path;
 use skia_safe::canvas::SrcRectConstraint;
@@ -28,6 +27,7 @@ use skia_safe::{
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
+use winisland_core::physics::Spring;
 
 const CONTENT_PADDING: f32 = 24.0;
 const PAGE_ARROW_RIGHT_INSET: f32 = 7.5;

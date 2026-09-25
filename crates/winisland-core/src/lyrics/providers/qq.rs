@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use super::{MOZILLA_UA, artist_matches, get_json_with_referer, query_matches_song, url_encode};
-use crate::core::lyrics::{LyricLine, MatchKey, parse_lyrics};
+use crate::lyrics::{LyricLine, MatchKey, parse_lyrics};
 
 pub(super) async fn fetch(
     title: &str,

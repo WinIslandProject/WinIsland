@@ -1,8 +1,8 @@
-use crate::core::config::LyricTransitionMode;
-use crate::core::i18n::{current_lang, tr};
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use skia_safe::Contains;
+use winisland_core::config::LyricTransitionMode;
+use winisland_core::i18n::{current_lang, tr};
 
 use super::super::{NumberInputHandler, PopupState, SettingsApp};
 use super::{PageInput, SettingsPage};

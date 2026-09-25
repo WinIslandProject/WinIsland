@@ -5,7 +5,6 @@ use skia_safe::{
     Canvas, ClipOp, Color, Contains, Data, FontStyle, Image, Paint, Point, RRect, Rect,
 };
 
-use crate::core::i18n::tr;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::MarketplacePlugin;
 use crate::utils::color::SettingsTheme;
@@ -13,6 +12,7 @@ use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{CONTENT_PADDING, SettingsItem};
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
 use crate::window::renderer::DrawingContext;
+use winisland_core::i18n::tr;
 
 use super::super::{
     MarketplaceViewState, PLUGIN_DETAIL_KEY, PluginPageTab, PluginSettingsRequest,

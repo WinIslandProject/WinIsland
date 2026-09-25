@@ -75,12 +75,12 @@ pub enum MediaSourceEvent {
 }
 
 enum ContextEvent {
-    Upsert(crate::core::context::PluginContext),
+    Upsert(winisland_core::context::PluginContext),
     Remove(ResourceId),
 }
 
 enum WidgetEvent {
-    Upsert(crate::core::plugin_widget::PluginWidget),
+    Upsert(winisland_core::widgets::PluginWidget),
     Remove(ResourceId),
 }
 
@@ -391,9 +391,9 @@ fn validate_widget_key(key: &[u8; 64]) -> Result<Option<String>, &'static str> {
 
 fn validate_widget_data(data: &WidgetDataV1) -> Result<(), &'static str> {
     if data.span_cols == 0
-        || data.span_cols > crate::core::config::WIDGET_GRID_COLS as u32
+        || data.span_cols > winisland_core::config::WIDGET_GRID_COLS as u32
         || data.span_rows == 0
-        || data.span_rows > crate::core::config::WIDGET_GRID_ROWS as u32
+        || data.span_rows > winisland_core::config::WIDGET_GRID_ROWS as u32
     {
         return Err("widget span is out of range");
     }
@@ -1010,7 +1010,8 @@ unsafe extern "C" fn i18n_register_bundle(
         return PluginResultC::err("translation bundles exceed the 4 MiB limit");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
-    if let Err(error) = crate::core::i18n::register_plugin_translation_bundle(id, language, copied)
+    if let Err(error) =
+        winisland_core::i18n::register_plugin_translation_bundle(id, language, copied)
     {
         return PluginResultC::err(error);
     }
@@ -1033,7 +1034,7 @@ unsafe extern "C" fn i18n_release_bundle(token: PluginToken, id: ResourceId) -> 
     if let Err(error) = require_resource(&state, token, id, ResourceKind::I18n) {
         return PluginResultC::err(error);
     }
-    if let Err(error) = crate::core::i18n::release_plugin_translation_bundle(id) {
+    if let Err(error) = winisland_core::i18n::release_plugin_translation_bundle(id) {
         return PluginResultC::err(error);
     }
     state.resources.remove(&id);
@@ -1886,8 +1887,8 @@ fn transform_lyric_text(
 }
 
 pub fn apply_lyrics_transforms(
-    mut lyrics: Arc<Vec<crate::core::lyrics::LyricLine>>,
-) -> Arc<Vec<crate::core::lyrics::LyricLine>> {
+    mut lyrics: Arc<Vec<winisland_core::lyrics::LyricLine>>,
+) -> Arc<Vec<winisland_core::lyrics::LyricLine>> {
     let lease = LyricsTransformLease::acquire();
     if lease.transformers.is_empty() {
         return lyrics;
@@ -1953,7 +1954,7 @@ pub fn update_host_theme(is_light: bool) {
     }
 }
 
-pub fn drain_pending_contexts(manager: &mut crate::core::context::ContextManager) {
+pub fn drain_pending_contexts(manager: &mut winisland_core::context::ContextManager) {
     let events = match runtime().lock() {
         Ok(mut runtime) => {
             let events = runtime
@@ -1985,7 +1986,7 @@ pub fn drain_pending_contexts(manager: &mut crate::core::context::ContextManager
     }
 }
 
-pub fn drain_widget_events(manager: &mut crate::core::plugin_widget::WidgetManager) -> bool {
+pub fn drain_widget_events(manager: &mut winisland_core::widgets::WidgetManager) -> bool {
     let events = match runtime().try_lock() {
         Ok(mut runtime) => runtime
             .widget_events
@@ -2283,7 +2284,7 @@ fn revoke_plugin(token: PluginToken) {
         i18n_resources
     };
     for id in i18n_resources {
-        if let Err(error) = crate::core::i18n::release_plugin_translation_bundle(id) {
+        if let Err(error) = winisland_core::i18n::release_plugin_translation_bundle(id) {
             log::error!("Failed to release plugin translation bundle {id}: {error}");
         }
     }

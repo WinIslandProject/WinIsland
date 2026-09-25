@@ -1,10 +1,10 @@
 use skia_safe::{Canvas, Color, Paint, Rect};
 
-use crate::core::config::{ResourceMetricConfig, ResourceMetricStyle};
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_compact_config, with_resource_usage,
 };
 use crate::utils::font::{DrawTextCachedParams, FontManager};
+use winisland_core::config::{ResourceMetricConfig, ResourceMetricStyle};
 
 const METRIC_GAP: f32 = 4.0;
 

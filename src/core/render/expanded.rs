@@ -1,9 +1,9 @@
 use skia_safe::{Canvas, Color, ImageFilter, Paint};
 
-use crate::core::config::{PluginWidgetSlot, WidgetSlot};
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{DrawMusicPageParams, draw_music_page};
 use crate::ui::expanded::widget_view::draw_widget_page;
+use winisland_core::config::{PluginWidgetSlot, WidgetSlot};
 
 pub(super) struct ExpandedContentParams<'a> {
     pub(super) canvas: &'a Canvas,
@@ -28,7 +28,7 @@ pub(super) struct ExpandedContentParams<'a> {
     pub(super) palette: &'a [Color],
     pub(super) widget_layout: &'a [WidgetSlot],
     pub(super) plugin_widget_layout: &'a [PluginWidgetSlot],
-    pub(super) plugin_widgets: &'a crate::core::plugin_widget::WidgetManager,
+    pub(super) plugin_widgets: &'a winisland_core::widgets::WidgetManager,
 }
 
 pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {

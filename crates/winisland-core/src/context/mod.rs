@@ -15,6 +15,12 @@ pub struct ContextManager {
     smtc_active: bool,
 }
 
+impl Default for ContextManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContextManager {
     pub fn new() -> Self {
         Self {

@@ -5,7 +5,6 @@ use winit::dpi::PhysicalPosition;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::Window;
 
-use crate::core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
 use crate::ui::compact::CompactOverlayState;
 use crate::ui::expanded::music_view::{
     get_progress_bar_rect, set_progress_dragging, set_progress_hover,
@@ -14,6 +13,7 @@ use crate::utils::mouse::{
     double_click_interval, get_global_cursor_pos, is_cursor_hidden, is_foreground_fullscreen,
     is_left_button_pressed, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
+use winisland_core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
 
 use super::{App, DragAxis, RIGHT_DRAG_THRESHOLD};
 
@@ -235,7 +235,7 @@ impl App {
                     let _ = std::fs::remove_dir_all(staging);
                     Self::show_toast("Plugin Error", &error);
                     log::error!("Failed to activate installed plugin: {error}");
-                    self.set_plugin_install_error(crate::core::i18n::tr_args(
+                    self.set_plugin_install_error(winisland_core::i18n::tr_args(
                         "plugin_install_failed",
                         &[&error],
                     ));
@@ -249,14 +249,16 @@ impl App {
                     settings.finish_marketplace_install();
                     settings
                         .set_plugin_inventory_receiver(self.plugin_mgr.installed_plugins_async());
-                    settings
-                        .set_plugin_status(crate::core::i18n::tr("plugin_install_success"), false);
+                    settings.set_plugin_status(
+                        winisland_core::i18n::tr("plugin_install_success"),
+                        false,
+                    );
                 }
                 log::info!("Plugin '{}' installed via drop", manifest.name);
             }
             Ok(Err(e)) => {
                 Self::show_toast("Plugin Error", &e);
-                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
                     &[&e],
                 ));
@@ -268,7 +270,7 @@ impl App {
             Err(mpsc::TryRecvError::Disconnected) => {
                 Self::show_toast("Plugin Error", "Installation thread crashed");
                 log::error!("Plugin installation thread disconnected unexpectedly");
-                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
                     &["installation thread crashed"],
                 ));
@@ -314,13 +316,14 @@ impl App {
         match rx.try_recv() {
             Ok(Ok(path)) => {
                 if let Some(settings) = self.settings.as_mut() {
-                    settings.set_plugin_status(crate::core::i18n::tr("plugin_installing"), false);
+                    settings
+                        .set_plugin_status(winisland_core::i18n::tr("plugin_installing"), false);
                 }
                 self.install_zip_drop(&path);
             }
             Ok(Err(error)) => {
                 log::error!("Failed to download marketplace plugin: {error}");
-                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
                     &[&error],
                 ));
@@ -329,7 +332,7 @@ impl App {
                 self.pending_marketplace_download = Some(rx);
             }
             Err(mpsc::TryRecvError::Disconnected) => {
-                self.set_plugin_install_error(crate::core::i18n::tr_args(
+                self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
                     &["the marketplace download task stopped unexpectedly"],
                 ));
@@ -567,7 +570,7 @@ impl App {
                     .any(|entry| entry.widget.is_some())
                 || matches!(
                     self.ctx_mgr.current_mini(),
-                    Some(crate::core::context::MiniContent::Plugin(_))
+                    Some(winisland_core::context::MiniContent::Plugin(_))
                 ));
         let is_idle = (!is_hovering_visible || self.components_hidden)
             && !self.expanded
@@ -991,7 +994,7 @@ impl App {
     }
 
     fn resource_usage_animating(&self) -> bool {
-        use crate::core::config::{CompactWidgetKind, WidgetKind};
+        use winisland_core::config::{CompactWidgetKind, WidgetKind};
 
         if self.is_hidden() || self.compact_overlay.is_visible() {
             return false;

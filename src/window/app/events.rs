@@ -279,7 +279,7 @@ impl App {
                         if crate::plugin::manager::drain_widget_events(&mut self.widget_mgr) {
                             let widgets = self.widget_mgr.configurable_widgets();
                             let mut layout_config = crate::core::persistence::load_config();
-                            if crate::core::config::normalize_active_plugin_widget_layout(
+                            if winisland_core::config::normalize_active_plugin_widget_layout(
                                 &layout_config.widget_layout,
                                 &mut layout_config.plugin_widget_layout,
                                 &widgets,

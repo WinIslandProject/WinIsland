@@ -1,4 +1,4 @@
-use crate::core::config::PluginWidgetId;
+use crate::config::PluginWidgetId;
 #[derive(Clone)]
 pub struct PluginWidget {
     pub id: u64,
@@ -25,6 +25,12 @@ impl PluginWidget {
 
 pub struct WidgetManager {
     plugin_widgets: Vec<PluginWidget>,
+}
+
+impl Default for WidgetManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WidgetManager {

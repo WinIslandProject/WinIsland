@@ -3,10 +3,10 @@ pub mod resource_usage;
 pub mod settings;
 pub mod time;
 
-use crate::core::config::{WIDGET_GRID_COLS, WIDGET_GRID_ROWS, WidgetKind, widget_footprint};
 use crate::utils::font::FontManager;
 use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
 use skia_safe::{Canvas, Color, Paint, Rect};
+use winisland_core::config::{WIDGET_GRID_COLS, WIDGET_GRID_ROWS, WidgetKind, widget_footprint};
 
 #[derive(Debug, Clone, Copy)]
 pub struct WidgetGridLayout {

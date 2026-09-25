@@ -1,18 +1,18 @@
-use crate::core::config::{
-    PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetSlot, first_free_anchor, plugin_widget_slot,
-    span_cells, widget_footprint,
-};
-use crate::core::plugin_widget::WidgetManager;
 use crate::icons::arrows::draw_arrow_left;
 use crate::plugin::types::{INTERFACE_VERSION_1, WidgetDrawContextV1};
 use crate::ui::widget::expanded::{draw_widget, widget_animates, widget_grid_layout};
 use skia_safe::{Canvas, Color, Rect};
 use std::ffi::c_void;
+use winisland_core::config::{
+    PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetSlot, first_free_anchor, plugin_widget_slot,
+    span_cells, widget_footprint,
+};
+use winisland_core::widgets::WidgetManager;
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_plugin_widget(
     canvas: &Canvas,
-    widget: &crate::core::plugin_widget::PluginWidget,
+    widget: &winisland_core::widgets::PluginWidget,
     x: f32,
     y: f32,
     width: f32,

@@ -1,7 +1,7 @@
-use crate::core::config::WINDOW_TITLE;
-use crate::core::i18n::tr;
 use tray_icon::menu::{Menu, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use winisland_core::config::WINDOW_TITLE;
+use winisland_core::i18n::tr;
 
 pub struct TrayManager {
     tray: TrayIcon,

@@ -2,13 +2,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use encoding_rs::GBK;
 use fuzzengine::{PreprocessingOptions, partial_ratio, partial_token_set_ratio};
 use lrc::Lyrics;
-use windows::Win32::Globalization::{LCMAP_SIMPLIFIED_CHINESE, LCMapStringEx};
-use windows::core::w;
 
 mod providers;
 
@@ -16,7 +14,7 @@ mod providers;
 pub struct LyricLine {
     pub time_ms: u64,
     pub text: String,
-    pub(crate) secondary_text: Option<String>,
+    pub secondary_text: Option<String>,
     timings: Vec<LyricTiming>,
 }
 
@@ -28,18 +26,18 @@ struct LyricTiming {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LyricHighlight {
-    pub(crate) start_byte: usize,
-    pub(crate) end_byte: usize,
-    pub(crate) progress: f32,
+pub struct LyricHighlight {
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub progress: f32,
 }
 
 impl LyricLine {
-    pub(crate) fn is_word_synced(&self) -> bool {
+    pub fn is_word_synced(&self) -> bool {
         !self.timings.is_empty()
     }
 
-    pub(crate) fn replace_text_preserving_timings(&mut self, text: String) -> bool {
+    pub fn replace_text_preserving_timings(&mut self, text: String) -> bool {
         if self.timings.is_empty() {
             self.text = text;
             return true;
@@ -75,7 +73,7 @@ impl LyricLine {
         true
     }
 
-    pub(crate) fn highlight_at(
+    pub fn highlight_at(
         &self,
         position_ms: u64,
         next_line_time_ms: Option<u64>,
@@ -130,7 +128,7 @@ impl LyricLine {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum LyricsMode {
+pub enum LyricsMode {
     #[default]
     Online,
     Lrc,
@@ -469,28 +467,25 @@ fn decode_lrc_text(bytes: &[u8]) -> String {
     text.into_owned()
 }
 
-pub async fn fetch_lyrics(
+pub fn load_local_lyrics(
     title: &str,
     artist: &str,
-    duration_secs: u64,
-    mode: LyricsMode,
-    source: &str,
-    local_dir: Option<&str>,
+    local_dir: &str,
 ) -> Option<Arc<Vec<LyricLine>>> {
     if title.is_empty() {
         return None;
     }
+    fetch_lyrics_local(title, artist, local_dir).map(simplify_lyrics_for_chinese_ui)
+}
 
-    if mode == LyricsMode::Lrc {
-        let dir = local_dir.filter(|dir| !dir.trim().is_empty())?;
-        let title = title.to_string();
-        let artist = artist.to_string();
-        let dir = dir.to_string();
-        return tokio::task::spawn_blocking(move || fetch_lyrics_local(&title, &artist, &dir))
-            .await
-            .ok()
-            .flatten()
-            .map(simplify_lyrics_for_chinese_ui);
+pub async fn fetch_online_lyrics(
+    title: &str,
+    artist: &str,
+    duration_secs: u64,
+    source: &str,
+) -> Option<Arc<Vec<LyricLine>>> {
+    if title.is_empty() {
+        return None;
     }
 
     log::info!("Lyrics: fetching '{title}' - '{artist}' from source '{source}'");
@@ -523,7 +518,7 @@ pub async fn fetch_lyrics(
 }
 
 fn simplify_lyrics_for_chinese_ui(mut lyrics: Arc<Vec<LyricLine>>) -> Arc<Vec<LyricLine>> {
-    if crate::core::i18n::current_lang() != "zh_cn" {
+    if crate::i18n::current_lang() != "zh_cn" {
         return lyrics;
     }
     for line in Arc::make_mut(&mut lyrics) {
@@ -537,40 +532,23 @@ fn simplify_lyrics_for_chinese_ui(mut lyrics: Arc<Vec<LyricLine>>) -> Arc<Vec<Ly
     lyrics
 }
 
+static SIMPLIFY_HOOK: OnceLock<fn(&str) -> String> = OnceLock::new();
+
+/// Registers the script conversion applied to traditional Chinese lyrics when the interface
+/// language is simplified Chinese.
+///
+/// Until a hook is registered, lyric text is left unchanged.
+pub fn set_simplify_hook(hook: fn(&str) -> String) {
+    let _ = SIMPLIFY_HOOK.set(hook);
+}
+
 fn simplify_chinese(text: &str) -> String {
     if text.is_empty() {
         return String::new();
     }
-    let source: Vec<u16> = text.encode_utf16().collect();
-    // SAFETY: Both calls use valid UTF-16 slices; the first obtains the exact output length.
-    unsafe {
-        let len = LCMapStringEx(
-            w!("zh-CN"),
-            LCMAP_SIMPLIFIED_CHINESE,
-            &source,
-            None,
-            None,
-            None,
-            windows::Win32::Foundation::LPARAM(0),
-        );
-        if len <= 0 {
-            return text.to_string();
-        }
-        let mut output = vec![0u16; len as usize];
-        let written = LCMapStringEx(
-            w!("zh-CN"),
-            LCMAP_SIMPLIFIED_CHINESE,
-            &source,
-            Some(&mut output),
-            None,
-            None,
-            windows::Win32::Foundation::LPARAM(0),
-        );
-        if written <= 0 {
-            text.to_string()
-        } else {
-            String::from_utf16_lossy(&output[..written as usize])
-        }
+    match SIMPLIFY_HOOK.get() {
+        Some(hook) => hook(text),
+        None => text.to_string(),
     }
 }
 

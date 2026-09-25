@@ -11,6 +11,12 @@ pub struct AnimPool {
     default_speed: f32,
 }
 
+impl Default for AnimPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnimPool {
     pub fn new() -> Self {
         Self {

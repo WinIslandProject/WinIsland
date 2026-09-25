@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use crate::core::config::APP_VERSION;
 use crate::plugin::zip_loader;
+use winisland_core::config::APP_VERSION;
 
 const CATALOG_URL: &str = "https://github.com/WinIslandProject/PluginMarketplace/releases/download/catalog-v1/catalog-v1.json";
 const SIGNATURE_URL: &str = "https://github.com/WinIslandProject/PluginMarketplace/releases/download/catalog-v1/catalog-v1.sig";

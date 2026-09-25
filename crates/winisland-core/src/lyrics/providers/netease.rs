@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{MOZILLA_UA, get_json, query_matches_song, url_encode};
-use crate::core::lyrics::{LyricLine, LyricTiming, parse_lyrics};
+use crate::lyrics::{LyricLine, LyricTiming, parse_lyrics};
 
 pub(super) async fn fetch(title: &str, artist: &str) -> Option<Arc<Vec<LyricLine>>> {
     if let Some(lyrics) = fetch_inner(title, artist).await {

@@ -1,4 +1,3 @@
-use crate::core::i18n::tr;
 use crate::ui::expanded::widget_view::draw_plugin_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
@@ -10,6 +9,7 @@ use crate::utils::settings_ui::{
 };
 use crate::window::renderer::Renderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, RRect, Rect};
+use winisland_core::i18n::tr;
 
 use super::{
     PAGE_NAV_GAP, PAGE_NAV_HEIGHT, PAGE_NAV_WIDTH, PAGE_NAV_X, PAGE_NAV_Y, PLUGINS_PAGE_INDEX,

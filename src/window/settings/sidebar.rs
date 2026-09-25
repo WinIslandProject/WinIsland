@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::core::i18n::tr;
 use crate::utils::color::SettingsTheme;
 use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{SIDEBAR_PAD, SIDEBAR_SEL_RADIUS};
@@ -11,6 +10,7 @@ use skia_safe::{
     Canvas, Color, Data, FilterMode, FontStyle, Image, MipmapMode, Paint, Rect, SamplingOptions,
     gpu::Mipmapped,
 };
+use winisland_core::i18n::tr;
 
 use super::{
     SIDEBAR_KEY_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,

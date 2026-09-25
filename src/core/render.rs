@@ -13,16 +13,16 @@ use self::background::{BackgroundParams, draw_background};
 use self::expanded::{ExpandedContentParams, draw_expanded_content};
 use self::mini::{MiniContentParams, draw_mini_content};
 
-use crate::core::config::{
-    CompactWidgetSlot, LyricTransitionAnimation, PluginWidgetSlot, WidgetSlot,
-};
-use crate::core::lyrics::LyricHighlight;
 use crate::core::smtc::MediaInfo;
 use crate::ui::compact::CompactOverlay;
 use crate::ui::expanded::music_view::{default_media_palette, get_media_palette};
 use crate::utils::shape::continuous_rounded_rect_path;
 use crate::window::renderer::DrawingContext;
 use skia_safe::{ClipOp, Color, Image, Paint, Rect, Surface, image_filters};
+use winisland_core::config::{
+    CompactWidgetSlot, LyricTransitionAnimation, PluginWidgetSlot, WidgetSlot,
+};
+use winisland_core::lyrics::LyricHighlight;
 
 pub struct LayoutParams {
     pub current_w: f32,
@@ -68,11 +68,11 @@ pub struct StyleParams<'a> {
     pub dt: f32,
     pub widget_layout: &'a [WidgetSlot],
     pub plugin_widget_layout: &'a [PluginWidgetSlot],
-    pub plugin_widgets: &'a crate::core::plugin_widget::WidgetManager,
+    pub plugin_widgets: &'a winisland_core::widgets::WidgetManager,
     pub compact_widget_layout: &'a [CompactWidgetSlot],
 }
 
-use crate::core::context::MiniContent;
+use winisland_core::context::MiniContent;
 
 const MIN_VISIBLE_OPACITY: f32 = 0.01;
 const MIN_BLUR_SIGMA: f32 = 0.1;

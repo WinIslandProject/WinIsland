@@ -3,15 +3,15 @@ use super::items::{
     STEPPER_GAP, STEPPER_VALUE_W, SettingsItem, TOGGLE_H, TOGGLE_W, picker_button_rects,
     trailing_control_rect,
 };
-use crate::core::config::{
+use crate::ui::widget::compact::widget_width;
+use crate::ui::widget::expanded::{WidgetGridLayout, widget_corner_radius, widget_grid_layout};
+use skia_safe::{Contains, Point};
+use winisland_core::config::{
     AVAILABLE_COMPACT_WIDGETS, AVAILABLE_WIDGETS, CompactWidgetAlignment, CompactWidgetKind,
     CompactWidgetPosition, CompactWidgetSlot, PluginWidgetId, PluginWidgetSlot, WidgetKind,
     WidgetSlot,
 };
-use crate::core::plugin_widget::PluginWidget;
-use crate::ui::widget::compact::widget_width;
-use crate::ui::widget::expanded::{WidgetGridLayout, widget_corner_radius, widget_grid_layout};
-use skia_safe::{Contains, Point};
+use winisland_core::widgets::PluginWidget;
 
 pub const WIDGET_PREVIEW_BASE_H: f32 = 480.0;
 pub const WIDGET_ISLAND_PANEL_H: f32 = 308.0;
@@ -176,7 +176,7 @@ impl WidgetGridGeom {
     }
 
     pub fn footprint_rect(&self, span: (usize, usize), slot: usize) -> (f32, f32, f32, f32) {
-        let cells = crate::core::config::span_cells(slot, span);
+        let cells = winisland_core::config::span_cells(slot, span);
         self.layout.footprint_rect_span(cells[0], span)
     }
 

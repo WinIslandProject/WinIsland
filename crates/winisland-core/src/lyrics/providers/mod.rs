@@ -9,7 +9,7 @@ use std::sync::{Arc, LazyLock};
 use serde_json::Value;
 
 use super::LyricLine;
-use crate::core::config::{APP_HOMEPAGE, APP_VERSION};
+use crate::config::{APP_HOMEPAGE, APP_VERSION};
 
 pub(super) const MOZILLA_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 

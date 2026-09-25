@@ -1,6 +1,6 @@
-use crate::core::i18n::tr;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use crate::window::settings::{NumberInputHandler, PopupState};
+use winisland_core::i18n::tr;
 
 use super::super::{PageInput, SettingsPage};
 use super::SettingsApp;
