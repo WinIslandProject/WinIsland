@@ -1,18 +1,18 @@
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
     Canvas, ClipOp, Color, FilterMode, Image, MipmapMode, Paint, RRect, Rect, SamplingOptions,
-    image_filters,
 };
 
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{
     DrawVisualizerParams, draw_text_cached, draw_visualizer, get_cached_media_image,
 };
+use crate::utils::color::rgba;
 use winisland_core::config::LyricTransitionAnimation;
 use winisland_core::context::MiniContent;
 use winisland_core::lyrics::LyricHighlight;
-use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{BlurSpec, Painter, Rgba};
 
 const PENDING_LYRIC_CHANNEL: u8 = 190;
 const SECONDARY_LYRIC_SCALE: f32 = 0.85;
@@ -262,7 +262,7 @@ fn draw_lyric_transition(
         ),
     };
     if old_opacity > 0.0 && !params.old_lyric.is_empty() {
-        let paint = lyric_paint(
+        let (color, blur) = lyric_style(
             params.text_color,
             scaled_alpha(alpha, old_opacity),
             transition.powi(2) * blur_sigma * params.global_scale,
@@ -276,14 +276,15 @@ fn draw_lyric_transition(
             center_y: layout.center_y - offset * params.global_scale * transition,
             size: layout.size,
             primary_centered: layout.primary_centered,
-            paint: &paint,
+            color,
+            blur,
             highlight: None,
         });
     }
     if new_opacity <= 0.0 || params.current_lyric.is_empty() {
         return;
     }
-    let paint = lyric_paint(
+    let (color, blur) = lyric_style(
         params.text_color,
         scaled_alpha(alpha, new_opacity),
         (1.0 - transition).powi(2) * blur_sigma * params.global_scale,
@@ -297,7 +298,8 @@ fn draw_lyric_transition(
         center_y: layout.center_y + offset * params.global_scale * (1.0 - transition),
         size: layout.size,
         primary_centered: layout.primary_centered,
-        paint: &paint,
+        color,
+        blur,
         highlight: params.lyric_highlight,
     });
 }
@@ -307,19 +309,13 @@ fn lyric_transition_progress(progress: f32) -> f32 {
     progress * progress * (3.0 - 2.0 * progress)
 }
 
-fn lyric_paint(color: Color, alpha: u8, blur_sigma: f32) -> Paint {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(Color::from_argb(alpha, color.r(), color.g(), color.b()));
-    if blur_sigma > MIN_BLUR_SIGMA {
-        paint.set_image_filter(image_filters::blur(
-            (blur_sigma * LYRIC_TRANSITION_BLUR_X_SCALE, blur_sigma),
-            None,
-            None,
-            None,
-        ));
-    }
-    paint
+fn lyric_style(color: Color, alpha: u8, blur_sigma: f32) -> (Rgba, Option<BlurSpec>) {
+    let color = rgba(Color::from_argb(alpha, color.r(), color.g(), color.b()));
+    let blur = (blur_sigma > MIN_BLUR_SIGMA).then_some(BlurSpec {
+        sigma: (blur_sigma * LYRIC_TRANSITION_BLUR_X_SCALE, blur_sigma),
+        tile: None,
+    });
+    (color, blur)
 }
 
 /// Horizontal position of one line of plugin text.
@@ -356,7 +352,7 @@ fn draw_plugin_content(
     } else {
         &context.compact_text
     };
-    let paint = lyric_paint(params.text_color, alpha, 0.0);
+    let (color, blur) = lyric_style(params.text_color, alpha, 0.0);
 
     params.canvas.save();
     params.canvas.clip_rect(
@@ -371,10 +367,11 @@ fn draw_plugin_content(
         y: text_y,
         size: font_size,
         bold: true,
-        paint: &paint,
+        color,
+        blur,
     });
     if !context.body.is_empty() {
-        let secondary_paint = lyric_paint(
+        let (secondary_color, secondary_blur) = lyric_style(
             params.text_color,
             scaled_alpha(alpha, PLUGIN_SECONDARY_ALPHA),
             0.0,
@@ -392,7 +389,8 @@ fn draw_plugin_content(
             y: text_y + font_size * PLUGIN_SECONDARY_LINE_SPACING,
             size: font_size * PLUGIN_SECONDARY_FONT_SCALE,
             bold: false,
-            paint: &secondary_paint,
+            color: secondary_color,
+            blur: secondary_blur,
         });
     }
     params.canvas.restore();
@@ -411,7 +409,8 @@ struct LyricPairParams<'a> {
     center_y: f32,
     size: f32,
     primary_centered: bool,
-    paint: &'a Paint,
+    color: Rgba,
+    blur: Option<BlurSpec>,
     highlight: Option<LyricHighlight>,
 }
 
@@ -425,7 +424,8 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
         center_y,
         size,
         primary_centered,
-        paint,
+        color,
+        blur,
         highlight,
     } = params;
     let has_pair = !primary.is_empty() && !secondary.is_empty();
@@ -462,19 +462,18 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
             text_x(primary, size, primary_anchor_x, primary_centered),
             primary_y,
             size,
-            paint,
+            color,
+            blur,
             highlight,
         );
     }
     if !secondary.is_empty() {
-        let mut secondary_paint = paint.clone();
-        let color = paint.color();
-        secondary_paint.set_color(Color::from_argb(
+        let secondary_color = Rgba::from_argb(
             color.a(),
             SECONDARY_LYRIC_CHANNEL,
             SECONDARY_LYRIC_CHANNEL,
             SECONDARY_LYRIC_CHANNEL,
-        ));
+        );
         draw_text_cached(DrawTextCachedParams {
             painter: Painter::from_canvas(canvas),
             text: secondary,
@@ -482,18 +481,21 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
             y: secondary_y,
             size: secondary_size,
             bold: false,
-            paint: &secondary_paint,
+            color: secondary_color,
+            blur,
         });
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_highlighted_lyric(
     canvas: &Canvas,
     text: &str,
     x: f32,
     y: f32,
     size: f32,
-    active_paint: &Paint,
+    active_color: Rgba,
+    blur: Option<BlurSpec>,
     highlight: Option<LyricHighlight>,
 ) {
     let Some(highlight) = highlight.filter(|highlight| {
@@ -509,19 +511,18 @@ fn draw_highlighted_lyric(
             y,
             size,
             bold: false,
-            paint: active_paint,
+            color: active_color,
+            blur,
         });
         return;
     };
 
-    let active_color = active_paint.color();
-    let mut pending_paint = active_paint.clone();
-    pending_paint.set_color(Color::from_argb(
+    let pending_color = Rgba::from_argb(
         active_color.a(),
         PENDING_LYRIC_CHANNEL,
         PENDING_LYRIC_CHANNEL,
         PENDING_LYRIC_CHANNEL,
-    ));
+    );
     draw_text_cached(DrawTextCachedParams {
         painter: Painter::from_canvas(canvas),
         text,
@@ -529,7 +530,8 @@ fn draw_highlighted_lyric(
         y,
         size,
         bold: false,
-        paint: &pending_paint,
+        color: pending_color,
+        blur,
     });
 
     let font_manager = FontManager::global();
@@ -541,7 +543,7 @@ fn draw_highlighted_lyric(
         size,
         style,
     );
-    let draw_layer = |paint: &Paint, clip_left: f32, clip_right: f32| {
+    let draw_layer = |color: Rgba, clip_left: f32, clip_right: f32| {
         if clip_right <= clip_left {
             return;
         }
@@ -558,16 +560,17 @@ fn draw_highlighted_lyric(
             y,
             size,
             bold: false,
-            paint,
+            color,
+            blur,
         });
         canvas.restore();
     };
-    draw_layer(active_paint, x, x + completed_width);
+    draw_layer(active_color, x, x + completed_width);
 
     let progress = highlight.progress.clamp(0.0, 1.0);
     let current_width = (active_width - completed_width) * progress;
     draw_layer(
-        active_paint,
+        active_color,
         x + completed_width,
         x + completed_width + current_width,
     );

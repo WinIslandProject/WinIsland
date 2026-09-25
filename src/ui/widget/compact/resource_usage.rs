@@ -3,6 +3,7 @@ use skia_safe::{Canvas, Color, Paint, Rect};
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_compact_config, with_resource_usage,
 };
+use crate::utils::color::rgba_of_paint;
 use winisland_core::config::{ResourceMetricConfig, ResourceMetricStyle};
 use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
@@ -97,7 +98,8 @@ fn draw_bar(
         y: baseline,
         size: label_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
     let value_w =
         fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
@@ -109,7 +111,8 @@ fn draw_bar(
         y: baseline,
         size: value_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
 }
 
@@ -164,7 +167,8 @@ fn draw_ring(
         y: center.1 + value_size * 0.32,
         size: value_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
     let label_size = (6.0 * scale).max(4.5);
     paint.set_color(alpha_color(accent, (alpha as f32 * 0.8) as u8));
@@ -175,6 +179,7 @@ fn draw_ring(
         y: rect.center_y() + label_size * 0.34,
         size: label_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
 }

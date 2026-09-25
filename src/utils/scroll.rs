@@ -1,8 +1,9 @@
-use skia_safe::{Canvas, ClipOp, Paint, Rect};
+use skia_safe::{Canvas, ClipOp, Rect};
 use std::time::Instant;
 use winisland_render::FontStyle;
 use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{BlurSpec, Rgba};
 
 pub struct ScrollDrawParams<'a> {
     pub canvas: &'a Canvas,
@@ -12,7 +13,8 @@ pub struct ScrollDrawParams<'a> {
     pub max_w: f32,
     pub size: f32,
     pub style: FontStyle,
-    pub paint: &'a Paint,
+    pub color: Rgba,
+    pub blur: Option<BlurSpec>,
     pub scale: f32,
     pub render_as_paths: bool,
 }
@@ -49,7 +51,8 @@ impl ScrollText {
         let max_w = params.max_w;
         let size = params.size;
         let style = params.style;
-        let paint = params.paint;
+        let color = params.color;
+        let blur = params.blur;
         let scale = params.scale;
         let render_as_paths = params.render_as_paths;
 
@@ -91,7 +94,8 @@ impl ScrollText {
                     y,
                     size,
                     bold: style.weight().value() >= 700,
-                    paint,
+                    color,
+                    blur,
                 },
                 render_as_paths,
             );
@@ -105,7 +109,8 @@ impl ScrollText {
                         y,
                         size,
                         bold: style.weight().value() >= 700,
-                        paint,
+                        color,
+                        blur,
                     },
                     render_as_paths,
                 );
@@ -121,7 +126,8 @@ impl ScrollText {
                     y,
                     size,
                     bold: style.weight().value() >= 700,
-                    paint,
+                    color,
+                    blur,
                 },
                 render_as_paths,
             );

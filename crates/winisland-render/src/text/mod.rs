@@ -2,21 +2,18 @@
 //!
 //! 与迁移前的 `src/utils/font.rs` 逐行等价，改动只有两处：
 //! - 参数结构体用 `Painter` 取代 `&Canvas`；
-//! - `FontStyle` 换成 `winisland_render::FontStyle`。
-//!
-//! `paint` 暂时仍是后端 `Paint`：线条下方 `core/render/mini.rs:264,285` 会把**带模糊
-//! image_filter 的 Paint** 传给歌词绘制，只收颜色会丢掉切换模糊（观感回归）。颜色与模糊
-//! 的语义化（`color: Rgba` + `blur: Option<BlurSpec>`）随各调用文件自己的批次一起改。
+//! - `FontStyle` 换成 `winisland_render::FontStyle`，`paint: &Paint` 换成 `color: Rgba` +
+//!   `blur: Option<BlurSpec>`（歌词切换会给文字加各向异性模糊，只有颜色是不够的）。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
-use skia_safe::{Font, FontMgr, FontStyle as SkFontStyle, Paint, Path, Typeface};
+use skia_safe::{Font, FontMgr, FontStyle as SkFontStyle, Paint, Path, Typeface, image_filters};
 
 use crate::painter::Painter;
-use crate::types::{FontStyle, Slant};
+use crate::types::{BlurSpec, FontStyle, Rgba, Slant};
 
 static GLOBAL_FONT_MANAGER: OnceLock<FontManager> = OnceLock::new();
 
@@ -27,7 +24,26 @@ type TextCacheMap = HashMap<u64, TextCacheValue>;
 type TextPathCacheMap = HashMap<u64, Vec<Path>>;
 type TextPrefixCacheMap = HashMap<u64, Vec<(usize, f32)>>;
 
+fn text_paint(color: Rgba, blur: Option<BlurSpec>) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(crate::convert::to_skia_color(color));
+    if let Some(BlurSpec { sigma, tile }) = blur
+        && let Some(filter) = image_filters::blur(
+            sigma,
+            tile.map(crate::convert::to_skia_tile_mode),
+            None,
+            None,
+        )
+    {
+        paint.set_image_filter(filter);
+    }
+    paint
+}
+
 /// 在矩形内居中绘制文本；超宽时按字符截断并追加 `...`。
+///
+/// `color` 为文字颜色（含 alpha，非预乘）；`blur` 为可选模糊，`None` 表示不模糊。
 pub struct DrawTextInRectParams<'a> {
     pub painter: Painter<'a>,
     pub text: &'a str,
@@ -36,7 +52,8 @@ pub struct DrawTextInRectParams<'a> {
     pub w: f32,
     pub size: f32,
     pub bold: bool,
-    pub paint: &'a Paint,
+    pub color: Rgba,
+    pub blur: Option<BlurSpec>,
 }
 
 /// 一次缓存文本绘制：`x`/`y` 为基线原点，单位逻辑像素。
@@ -47,7 +64,8 @@ pub struct DrawTextCachedParams<'a> {
     pub y: f32,
     pub size: f32,
     pub bold: bool,
-    pub paint: &'a Paint,
+    pub color: Rgba,
+    pub blur: Option<BlurSpec>,
 }
 
 /// 字体门面。单例：`FontManager::global()`。
@@ -353,14 +371,16 @@ impl FontManager {
         at: crate::types::Point,
         size: f32,
         bold: bool,
-        paint: &Paint,
+        color: Rgba,
     ) {
         let font = self.get_font(size, bold);
-        painter.canvas().draw_str(text, (at.x, at.y), &font, paint);
+        let paint = text_paint(color, None);
+        painter.canvas().draw_str(text, (at.x, at.y), &font, &paint);
     }
 
     pub fn draw_text_in_rect(&self, params: DrawTextInRectParams<'_>) {
         let font = self.get_font(params.size, params.bold);
+        let paint = text_paint(params.color, params.blur);
         let canvas = params.painter.canvas();
         let (_, rect) = font.measure_str(params.text, None);
         if rect.width() <= params.w {
@@ -368,7 +388,7 @@ impl FontManager {
                 params.text,
                 (params.x + (params.w - rect.width()) / 2.0, params.y),
                 &font,
-                params.paint,
+                &paint,
             );
         } else {
             let mut truncated = String::new();
@@ -384,7 +404,7 @@ impl FontManager {
                 truncated.push(c);
             }
             truncated.push_str("...");
-            canvas.draw_str(&truncated, (params.x, params.y), &font, params.paint);
+            canvas.draw_str(&truncated, (params.x, params.y), &font, &paint);
         }
     }
 
@@ -443,6 +463,7 @@ impl FontManager {
             FontStyle::normal()
         };
         let cache_key = hash_cache_key(params.text, style, params.size);
+        let paint = text_paint(params.color, params.blur);
         TEXT_CACHE.with(|cache| {
             let mut cache_mut = cache.borrow_mut();
             if !cache_mut.contains_key(&cache_key) {
@@ -461,7 +482,7 @@ impl FontManager {
                 if *embolden {
                     font.set_embolden(true);
                 }
-                canvas.draw_str(&**s, (x, y), &font, params.paint);
+                canvas.draw_str(&**s, (x, y), &font, &paint);
                 x += *width;
             }
         });
@@ -474,6 +495,7 @@ impl FontManager {
             FontStyle::normal()
         };
         let cache_key = hash_cache_key(params.text, style, params.size);
+        let paint = text_paint(params.color, params.blur);
         TEXT_PATH_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
             if !cache.contains_key(&cache_key) {
@@ -486,7 +508,7 @@ impl FontManager {
             canvas.save();
             canvas.translate((params.x, params.y));
             for path in paths {
-                canvas.draw_path(path, params.paint);
+                canvas.draw_path(path, &paint);
             }
             canvas.restore();
         });

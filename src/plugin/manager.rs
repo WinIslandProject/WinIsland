@@ -1239,7 +1239,7 @@ unsafe extern "C" fn ffi_draw_text(
             winisland_render::Point::new((x + tx) * ctx.scale, baseline),
             scaled_size,
             bold != 0,
-            &argb_paint(color, ctx.alpha),
+            crate::utils::color::rgba_of_paint(&argb_paint(color, ctx.alpha)),
         );
     });
 }

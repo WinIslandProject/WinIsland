@@ -1,3 +1,4 @@
+use crate::utils::color::rgba_of_paint;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -905,7 +906,8 @@ fn draw_text(
             y: 0.0,
             size,
             bold: style.bold,
-            paint,
+            color: rgba_of_paint(paint),
+            blur: None,
         });
         canvas.restore();
     } else {
@@ -916,7 +918,8 @@ fn draw_text(
             y: baseline,
             size,
             bold: style.bold,
-            paint,
+            color: rgba_of_paint(paint),
+            blur: None,
         });
     }
 }

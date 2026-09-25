@@ -1,6 +1,7 @@
 use crate::ui::expanded::widget_view::draw_plugin_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
+use crate::utils::color::rgba_of_paint;
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
 use crate::utils::settings_ui::{
     ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
@@ -47,7 +48,8 @@ impl SettingsApp {
             y: top + 32.0,
             size: 14.0,
             bold: true,
-            paint: &text,
+            color: rgba_of_paint(&text),
+            blur: None,
         });
         for (line, y) in [
             (
@@ -67,7 +69,8 @@ impl SettingsApp {
                 y,
                 size: 12.0,
                 bold: false,
-                paint: &text,
+                color: rgba_of_paint(&text),
+                blur: None,
             });
         }
         let button = music_notice_button_rect(width, top);
@@ -88,7 +91,8 @@ impl SettingsApp {
             y: button.top + 18.0,
             size: 12.0,
             bold: true,
-            paint: &settings_paint(Color::WHITE),
+            color: rgba_of_paint(&settings_paint(Color::WHITE)),
+            blur: None,
         });
     }
 

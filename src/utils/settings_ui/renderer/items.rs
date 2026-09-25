@@ -1,3 +1,4 @@
+use crate::utils::color::rgba_of_paint;
 use skia_safe::{
     Canvas, Color, Contains, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
 };
@@ -435,7 +436,8 @@ fn draw_row_source_select(
             w: text_w,
             size: 13.0,
             bold: false,
-            paint: &p,
+            color: rgba_of_paint(&p),
+            blur: None,
         });
 
         let chev_cx = btn_x + POPUP_BTN_W - 12.0;

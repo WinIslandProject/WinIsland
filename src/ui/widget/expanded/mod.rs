@@ -1,3 +1,4 @@
+use crate::utils::color::rgba_of_paint;
 pub mod calendar;
 pub mod resource_usage;
 pub mod settings;
@@ -135,7 +136,7 @@ pub(crate) fn draw_widget_text_centered(
         Point::new(text_x, baseline_y),
         size,
         bold,
-        paint,
+        rgba_of_paint(paint),
     );
 }
 

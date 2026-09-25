@@ -1,4 +1,5 @@
 use crate::utils::color::SettingsTheme;
+use crate::utils::color::rgba_of_paint;
 use crate::utils::settings_ui::settings_paint;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 use winisland_core::config::{
@@ -502,7 +503,8 @@ fn draw_text(canvas: &Canvas, text: &str, x: f32, y: f32, size: f32, bold: bool,
         y,
         size,
         bold,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
 }
 

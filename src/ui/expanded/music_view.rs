@@ -16,6 +16,7 @@ use crate::core::smtc::MediaInfo;
 use crate::icons::arrows::draw_arrow_right;
 use crate::icons::controls::{draw_control_triangle, draw_pause_button, draw_play_button};
 use crate::utils::color::rgba;
+use crate::utils::color::rgba_of_paint;
 use crate::utils::cover::decode_cover_image;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 use crate::utils::shape::continuous_rounded_rect_path;
@@ -404,7 +405,8 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
                 y: text_baseline_y,
                 size: time_font_size,
                 bold: false,
-                paint: &time_paint,
+                color: rgba_of_paint(&time_paint),
+                blur: None,
             });
 
             let remaining_w = FontManager::global().measure_text_cached(
@@ -419,7 +421,8 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
                 y: text_baseline_y,
                 size: time_font_size,
                 bold: false,
-                paint: &time_paint,
+                color: rgba_of_paint(&time_paint),
+                blur: None,
             });
         });
 
@@ -789,7 +792,8 @@ fn draw_track_text(params: TrackTextParams) {
             max_w: max_text_w,
             size: title_font_size,
             style: title_style,
-            paint: &text_paint,
+            color: rgba_of_paint(&text_paint),
+            blur: None,
             scale,
             render_as_paths: true,
         });
@@ -819,7 +823,8 @@ fn draw_track_text(params: TrackTextParams) {
             max_w: max_text_w,
             size: artist_font_size,
             style: artist_style,
-            paint: &text_paint,
+            color: rgba_of_paint(&text_paint),
+            blur: None,
             scale,
             render_as_paths: true,
         });

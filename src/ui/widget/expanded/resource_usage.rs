@@ -4,6 +4,7 @@ use super::draw_widget_rounded_background;
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_expanded_config, with_resource_usage,
 };
+use crate::utils::color::rgba_of_paint;
 use winisland_core::config::{
     ResourceMetricConfig, ResourceMetricKind, ResourceMetricStyle, default_resource_metrics,
     resource_widget_span,
@@ -144,7 +145,8 @@ fn draw_bar(
         y: baseline,
         size: font_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
     let value_w =
         fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
@@ -156,7 +158,8 @@ fn draw_bar(
         y: baseline,
         size: value_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
 }
 
@@ -213,7 +216,8 @@ fn draw_ring(
         y: center.1 + value_size * 0.32,
         size: value_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
     let mut label_size = (bounds.height() * 0.22).clamp(4.0 * scale, 10.0 * scale);
     let label_space = (ring.left - bounds.left - inset - 2.0 * scale).max(1.0);
@@ -233,7 +237,8 @@ fn draw_ring(
         y: bounds.center_y() + label_size * 0.34,
         size: label_size,
         bold: true,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
 }
 

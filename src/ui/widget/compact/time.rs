@@ -1,6 +1,7 @@
 use skia_safe::{Canvas, Color, Paint, Rect};
 
 use crate::ui::widget::time_text::with_current_time_text;
+use crate::utils::color::rgba_of_paint;
 use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
 
@@ -22,7 +23,8 @@ pub(super) fn draw(canvas: &Canvas, rect: Rect, scale: f32, alpha: u8) {
             y: rect.center_y() + size * 0.36,
             size,
             bold: true,
-            paint: &paint,
+            color: rgba_of_paint(&paint),
+            blur: None,
         });
     });
 }

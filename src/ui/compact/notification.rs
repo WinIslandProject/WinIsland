@@ -20,6 +20,7 @@ use windows::core::HRESULT;
 
 use crate::ui::compact::notification_event::{self, NotificationEventSubscription};
 use crate::ui::compact::{CompactOverlayState, CompactSize};
+use crate::utils::color::rgba_of_paint;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 use winisland_render::FontStyle;
 use winisland_render::Painter;
@@ -812,7 +813,8 @@ impl NotificationIndicator {
                     y: top + 22.0 * scale,
                     size: 11.0 * scale,
                     bold: false,
-                    paint: &app_paint,
+                    color: rgba_of_paint(&app_paint),
+                    blur: None,
                 },
                 content_width,
                 scale,
@@ -834,7 +836,8 @@ impl NotificationIndicator {
                 y: title_y,
                 size: 13.0 * scale,
                 bold: true,
-                paint: &title_paint,
+                color: rgba_of_paint(&title_paint),
+                blur: None,
             },
             content_width,
             scale,
@@ -849,7 +852,8 @@ impl NotificationIndicator {
                     y: title_y + DETAIL_LINE_GAP * scale,
                     size: 11.0 * scale,
                     bold: false,
-                    paint: &detail_paint,
+                    color: rgba_of_paint(&detail_paint),
+                    blur: None,
                 },
                 content_width,
                 scale,
@@ -917,7 +921,8 @@ fn draw_notification_text(
             max_w: max_width,
             size: params.size,
             style,
-            paint: params.paint,
+            color: params.color,
+            blur: params.blur,
             scale,
             render_as_paths: false,
         });

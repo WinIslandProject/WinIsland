@@ -1,6 +1,7 @@
 use skia_safe::{Canvas, Color, Paint, Rect};
 
 use crate::utils::color::SettingsTheme;
+use crate::utils::color::rgba_of_paint;
 use winisland_render::FontStyle;
 use winisland_render::Painter;
 use winisland_render::Point;
@@ -55,7 +56,8 @@ impl<'a> SettingsPainter<'a> {
             y: position.1,
             size,
             bold,
-            paint: &paint,
+            color: rgba_of_paint(&paint),
+            blur: None,
         });
     }
 
@@ -191,7 +193,7 @@ pub(super) fn draw_stepper_btn(
         Point::new(text_x, text_y),
         16.0,
         false,
-        &paint,
+        rgba_of_paint(&paint),
     );
 }
 
@@ -228,7 +230,8 @@ pub(super) fn draw_pill_btn(params: PillBtnParams<'_>) {
         w: params.rect.width(),
         size: 12.0,
         bold: false,
-        paint: &paint,
+        color: rgba_of_paint(&paint),
+        blur: None,
     });
 }
 

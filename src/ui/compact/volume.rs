@@ -1,3 +1,4 @@
+use crate::utils::color::rgba_of_paint;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -726,7 +727,8 @@ impl VolumeIndicator {
             y: center_y + 4.0 * scale,
             size: label_size,
             bold: false,
-            paint: &label_paint,
+            color: rgba_of_paint(&label_paint),
+            blur: None,
         });
 
         let track = self.track_rect(rect, scale);
