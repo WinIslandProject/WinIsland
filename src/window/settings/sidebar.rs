@@ -1,16 +1,17 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use winisland_render::FontStyle;
 
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{SIDEBAR_PAD, SIDEBAR_SEL_RADIUS};
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
 use crate::window::renderer::DrawingContext;
 use skia_safe::{
-    Canvas, Color, Data, FilterMode, FontStyle, Image, MipmapMode, Paint, Rect, SamplingOptions,
+    Canvas, Color, Data, FilterMode, Image, MipmapMode, Paint, Rect, SamplingOptions,
     gpu::Mipmapped,
 };
 use winisland_core::i18n::tr;
+use winisland_render::text::FontManager;
 
 use super::{
     SIDEBAR_KEY_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_H, SIDEBAR_START_Y, SIDEBAR_W, SettingsApp,

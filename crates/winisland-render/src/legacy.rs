@@ -17,7 +17,7 @@ use crate::painter::Painter;
 impl<'a> Painter<'a> {
     /// 由已有的借出画布廉价构造 `Painter`（不做任何状态同步）。
     pub fn from_canvas(canvas: &'a Canvas) -> Self {
-        Self::new(canvas)
+        Self { canvas }
     }
 
     /// 把本画布借给尚未迁移的绘制函数；闭包参数由类型推断，因此调用方文件里不出现 `skia_safe`。

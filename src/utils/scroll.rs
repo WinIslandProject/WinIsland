@@ -1,6 +1,8 @@
-use crate::utils::font::{DrawTextCachedParams, FontManager};
-use skia_safe::{Canvas, ClipOp, FontStyle, Paint, Rect};
+use skia_safe::{Canvas, ClipOp, Paint, Rect};
 use std::time::Instant;
+use winisland_render::FontStyle;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 pub struct ScrollDrawParams<'a> {
     pub canvas: &'a Canvas,
@@ -83,12 +85,12 @@ impl ScrollText {
 
             draw_text(
                 DrawTextCachedParams {
-                    canvas,
+                    painter: Painter::from_canvas(canvas),
                     text,
                     x: x - self.offset,
                     y,
                     size,
-                    bold: *style.weight() >= 700,
+                    bold: style.weight().value() >= 700,
                     paint,
                 },
                 render_as_paths,
@@ -97,12 +99,12 @@ impl ScrollText {
             if next_x < x + max_w {
                 draw_text(
                     DrawTextCachedParams {
-                        canvas,
+                        painter: Painter::from_canvas(canvas),
                         text,
                         x: next_x,
                         y,
                         size,
-                        bold: *style.weight() >= 700,
+                        bold: style.weight().value() >= 700,
                         paint,
                     },
                     render_as_paths,
@@ -113,12 +115,12 @@ impl ScrollText {
             self.offset = 0.0;
             draw_text(
                 DrawTextCachedParams {
-                    canvas,
+                    painter: Painter::from_canvas(canvas),
                     text,
                     x,
                     y,
                     size,
-                    bold: *style.weight() >= 700,
+                    bold: style.weight().value() >= 700,
                     paint,
                 },
                 render_as_paths,

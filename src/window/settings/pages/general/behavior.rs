@@ -1,9 +1,9 @@
 use crate::utils::autostart::set_autostart;
-use crate::utils::font::FontManager;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use crate::window::settings::{NumberInputHandler, PopupState};
 use winisland_core::config::{AppConfig, MAX_HIDDEN_WIDTH, MIN_HIDDEN_WIDTH};
 use winisland_core::i18n::{available_langs, current_lang, init_i18n, set_lang, tr};
+use winisland_render::text::FontManager;
 
 use super::super::{PageInput, SettingsPage};
 use super::SettingsApp;

@@ -1,7 +1,10 @@
-use skia_safe::{Canvas, Color, FontStyle, Paint, Rect};
+use skia_safe::{Canvas, Color, Paint, Rect};
 
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextCachedParams, DrawTextInRectParams, FontManager};
+use winisland_render::FontStyle;
+use winisland_render::Painter;
+use winisland_render::Point;
+use winisland_render::text::{DrawTextCachedParams, DrawTextInRectParams, FontManager};
 
 use super::super::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_R, STEPPER_BTN_SIZE, TOGGLE_H, TOGGLE_INSET,
@@ -46,7 +49,7 @@ impl<'a> SettingsPainter<'a> {
     ) {
         let paint = settings_paint(color);
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            canvas: self.canvas,
+            painter: Painter::from_canvas(self.canvas),
             text,
             x: position.0,
             y: position.1,
@@ -179,11 +182,17 @@ pub(super) fn draw_stepper_btn(
     } else {
         theme.text_sec
     });
-    let font = fm.get_font(16.0, false);
-    let (_, bounds) = font.measure_str(label, None);
-    let text_x = x + (STEPPER_BTN_SIZE - bounds.width()) / 2.0 - bounds.left();
-    let text_y = y + (STEPPER_BTN_SIZE - bounds.height()) / 2.0 - bounds.top();
-    canvas.draw_str(label, (text_x, text_y), &font, &paint);
+    let bounds = fm.measure_str(label, 16.0, false);
+    let text_x = x + (STEPPER_BTN_SIZE - bounds.width()) / 2.0 - bounds.left;
+    let text_y = y + (STEPPER_BTN_SIZE - bounds.height()) / 2.0 - bounds.top;
+    fm.draw_str(
+        Painter::from_canvas(canvas),
+        label,
+        Point::new(text_x, text_y),
+        16.0,
+        false,
+        &paint,
+    );
 }
 
 pub(super) fn draw_pill_btn(params: PillBtnParams<'_>) {
@@ -212,7 +221,7 @@ pub(super) fn draw_pill_btn(params: PillBtnParams<'_>) {
     paint.set_style(skia_safe::paint::Style::Fill);
     paint.set_color(params.text_color);
     fm.draw_text_in_rect(DrawTextInRectParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: params.label,
         x: params.rect.left,
         y: params.rect.top + 17.0,

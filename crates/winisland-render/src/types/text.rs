@@ -74,6 +74,11 @@ impl FontStyle {
     pub const fn slant(self) -> Slant {
         self.slant
     }
+
+    /// 复刻既有 `utils/font.rs` 的样式缓存键打包：`(weight << 16) | (width << 8) | slant`。
+    pub(crate) const fn cache_key(self) -> u32 {
+        ((self.weight.0 as u32) << 16) | ((self.width.0 as u32) << 8) | self.slant as u32
+    }
 }
 
 impl FontWeight {

@@ -148,7 +148,7 @@ impl Default for App {
         let last_config_modified = std::fs::metadata(get_config_path())
             .and_then(|metadata| metadata.modified())
             .ok();
-        crate::utils::font::FontManager::global()
+        winisland_render::text::FontManager::global()
             .set_custom_font_path(config.custom_font_path.as_deref());
         Self {
             window: None,

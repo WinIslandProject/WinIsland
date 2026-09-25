@@ -3,10 +3,11 @@ pub mod resource_usage;
 pub mod settings;
 pub mod time;
 
-use crate::utils::font::FontManager;
 use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
 use skia_safe::{Canvas, Color, Paint, Rect};
 use winisland_core::config::{WIDGET_GRID_COLS, WIDGET_GRID_ROWS, WidgetKind, widget_footprint};
+use winisland_render::text::FontManager;
+use winisland_render::{Painter, Point};
 
 #[derive(Debug, Clone, Copy)]
 pub struct WidgetGridLayout {
@@ -124,13 +125,18 @@ pub(crate) fn draw_widget_text_centered(
     bold: bool,
     paint: &Paint,
 ) {
-    let font = FontManager::global().get_font(size, bold);
-    let (_, glyph_bounds) = font.measure_str(text, None);
-    let text_x =
-        bounds.left() + (bounds.width() - glyph_bounds.width()) / 2.0 - glyph_bounds.left();
+    let glyph_bounds = FontManager::global().measure_str(text, size, bold);
+    let text_x = bounds.left() + (bounds.width() - glyph_bounds.width()) / 2.0 - glyph_bounds.left;
     let baseline_y =
-        bounds.top() + (bounds.height() - glyph_bounds.height()) / 2.0 - glyph_bounds.top();
-    canvas.draw_str(text, (text_x, baseline_y), &font, paint);
+        bounds.top() + (bounds.height() - glyph_bounds.height()) / 2.0 - glyph_bounds.top;
+    FontManager::global().draw_str(
+        Painter::from_canvas(canvas),
+        text,
+        Point::new(text_x, baseline_y),
+        size,
+        bold,
+        paint,
+    );
 }
 
 pub fn widget_animates(kind: WidgetKind) -> bool {

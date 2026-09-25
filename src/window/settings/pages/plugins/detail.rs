@@ -6,9 +6,9 @@ use windows::core::PCWSTR;
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::MarketplacePlugin;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::FontManager;
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
 use winisland_core::i18n::tr;
+use winisland_render::text::FontManager;
 
 use super::super::super::{
     PLUGIN_DETAIL_KEY, PluginPageTab, PluginSettingsRequest, SETTINGS_HEADER_H, SIDEBAR_W,
@@ -302,7 +302,7 @@ impl SettingsApp {
             fm,
             plugin.name(),
             17.0,
-            skia_safe::FontStyle::bold(),
+            winisland_render::FontStyle::bold(),
             name_width.max(30.0),
         );
         SettingsPainter::new(canvas).text(&name, (info_x, y + 22.0), 17.0, true, theme.text_pri);
@@ -310,7 +310,7 @@ impl SettingsApp {
             fm,
             &format!("{} · v{}", plugin.author(), plugin.version()),
             11.5,
-            skia_safe::FontStyle::normal(),
+            winisland_render::FontStyle::normal(),
             DETAIL_W - (info_x - panel_x) - DETAIL_PADDING,
         );
         SettingsPainter::new(canvas).text(
@@ -375,7 +375,7 @@ impl SettingsApp {
                 fm,
                 reason,
                 11.0,
-                skia_safe::FontStyle::normal(),
+                winisland_render::FontStyle::normal(),
                 warning.width() - 20.0,
             );
             SettingsPainter::new(canvas).text(
@@ -514,10 +514,12 @@ fn toggle_rect(panel_x: f32) -> Rect {
 }
 
 fn detail_action_rect(panel_x: f32, label: &str) -> Rect {
-    let width =
-        (FontManager::global().measure_text_cached(label, 11.0, skia_safe::FontStyle::bold())
-            + 24.0)
-            .clamp(64.0, 112.0);
+    let width = (FontManager::global().measure_text_cached(
+        label,
+        11.0,
+        winisland_render::FontStyle::bold(),
+    ) + 24.0)
+        .clamp(64.0, 112.0);
     Rect::from_xywh(
         panel_x + DETAIL_PADDING + 116.0 + ACTION_GAP,
         DETAIL_ACTION_Y,

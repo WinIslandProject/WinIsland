@@ -1,5 +1,4 @@
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::settings_ui::settings_paint;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 use winisland_core::config::{
@@ -7,6 +6,8 @@ use winisland_core::config::{
     set_resource_widget_span, span_cells,
 };
 use winisland_core::i18n::tr;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 use super::{PopupState, SettingsApp};
 use crate::utils::settings_ui::WidgetEditorMode;
@@ -495,7 +496,7 @@ fn rgb(value: u32) -> Color {
 fn draw_text(canvas: &Canvas, text: &str, x: f32, y: f32, size: f32, bold: bool, color: Color) {
     let paint = settings_paint(color);
     FontManager::global().draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text,
         x,
         y,
@@ -518,9 +519,9 @@ fn draw_centered_text(
         text,
         size,
         if selected {
-            skia_safe::FontStyle::bold()
+            winisland_render::FontStyle::bold()
         } else {
-            skia_safe::FontStyle::normal()
+            winisland_render::FontStyle::normal()
         },
     );
     draw_text(

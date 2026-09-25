@@ -16,14 +16,17 @@ use crate::core::smtc::MediaInfo;
 use crate::icons::arrows::draw_arrow_right;
 use crate::icons::controls::{draw_control_triangle, draw_pause_button, draw_play_button};
 use crate::utils::cover::decode_cover_image;
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 use crate::utils::shape::continuous_rounded_rect_path;
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
-    Canvas, Color, FilterMode, FontStyle, Image, MipmapMode, Paint, Point, RRect, Rect,
-    SamplingOptions, image_filters,
+    Canvas, Color, FilterMode, Image, MipmapMode, Paint, Point, RRect, Rect, SamplingOptions,
+    image_filters,
 };
+use winisland_render::FontStyle;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
+
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
@@ -394,7 +397,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             }
 
             draw_text_cached(DrawTextCachedParams {
-                canvas,
+                painter: Painter::from_canvas(canvas),
                 text: &cache.elapsed_text,
                 x: bar_full_left,
                 y: text_baseline_y,
@@ -409,7 +412,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
                 FontStyle::normal(),
             );
             draw_text_cached(DrawTextCachedParams {
-                canvas,
+                painter: Painter::from_canvas(canvas),
                 text: &cache.remaining_text,
                 x: bar_full_right - remaining_w,
                 y: text_baseline_y,

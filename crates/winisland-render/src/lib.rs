@@ -31,6 +31,7 @@ mod legacy;
 mod painter;
 mod path;
 mod surface;
+pub mod text;
 mod types;
 
 pub use error::{RenderError, RenderResult};

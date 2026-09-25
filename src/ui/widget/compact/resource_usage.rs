@@ -3,8 +3,9 @@ use skia_safe::{Canvas, Color, Paint, Rect};
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_compact_config, with_resource_usage,
 };
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use winisland_core::config::{ResourceMetricConfig, ResourceMetricStyle};
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 const METRIC_GAP: f32 = 4.0;
 
@@ -90,7 +91,7 @@ fn draw_bar(
     let fonts = FontManager::global();
     paint.set_color(alpha_color(accent, (alpha as f32 * 0.78) as u8));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: config.kind.label(),
         x: left,
         y: baseline,
@@ -98,10 +99,11 @@ fn draw_bar(
         bold: true,
         paint: &paint,
     });
-    let value_w = fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+    let value_w =
+        fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     paint.set_color(Color::from_argb(alpha, 255, 255, 255));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: usage.text,
         x: rect.right - inset - value_w,
         y: baseline,
@@ -147,15 +149,16 @@ fn draw_ring(
     let mut value_size = (diameter * 0.22).max(4.0);
     let max_value_width = diameter * 0.78;
     let mut value_w =
-        fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+        fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     if value_w > max_value_width {
         value_size = (value_size * max_value_width / value_w).max(3.2);
-        value_w = fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+        value_w =
+            fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     }
     paint.set_style(skia_safe::paint::Style::Fill);
     paint.set_color(Color::from_argb(alpha, 255, 255, 255));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: usage.text,
         x: center.0 - value_w / 2.0,
         y: center.1 + value_size * 0.32,
@@ -166,7 +169,7 @@ fn draw_ring(
     let label_size = (6.0 * scale).max(4.5);
     paint.set_color(alpha_color(accent, (alpha as f32 * 0.8) as u8));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: config.kind.label(),
         x: rect.left + inset,
         y: rect.center_y() + label_size * 0.34,

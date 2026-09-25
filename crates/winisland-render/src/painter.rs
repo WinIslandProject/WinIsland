@@ -21,14 +21,10 @@ use crate::types::{
 /// 因此外部直接操作画布不会让它失同步。
 #[derive(Clone, Copy)]
 pub struct Painter<'a> {
-    canvas: &'a Canvas,
+    pub(crate) canvas: &'a Canvas,
 }
 
 impl<'a> Painter<'a> {
-    pub(crate) fn new(canvas: &'a Canvas) -> Self {
-        Self { canvas }
-    }
-
     pub(crate) fn canvas(&self) -> &'a Canvas {
         self.canvas
     }

@@ -8,10 +8,11 @@ use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{
     DrawVisualizerParams, draw_text_cached, draw_visualizer, get_cached_media_image,
 };
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use winisland_core::config::LyricTransitionAnimation;
 use winisland_core::context::MiniContent;
 use winisland_core::lyrics::LyricHighlight;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 const PENDING_LYRIC_CHANNEL: u8 = 190;
 const SECONDARY_LYRIC_SCALE: f32 = 0.85;
@@ -328,9 +329,9 @@ fn lyric_paint(color: Color, alpha: u8, blur_sigma: f32) -> Paint {
 /// the left inset so its leading characters stay readable.
 fn plugin_text_x(text: &str, size: f32, bold: bool, text_x: f32, text_width: f32) -> f32 {
     let style = if bold {
-        skia_safe::FontStyle::bold()
+        winisland_render::FontStyle::bold()
     } else {
-        skia_safe::FontStyle::normal()
+        winisland_render::FontStyle::normal()
     };
     let measured = FontManager::global().measure_text_cached(text, size, style);
     text_x + ((text_width - measured) * 0.5).max(0.0)
@@ -364,7 +365,7 @@ fn draw_plugin_content(
         true,
     );
     draw_text_cached(DrawTextCachedParams {
-        canvas: params.canvas,
+        painter: Painter::from_canvas(params.canvas),
         text,
         x: plugin_text_x(text, font_size, true, text_x, text_width),
         y: text_y,
@@ -379,7 +380,7 @@ fn draw_plugin_content(
             0.0,
         );
         draw_text_cached(DrawTextCachedParams {
-            canvas: params.canvas,
+            painter: Painter::from_canvas(params.canvas),
             text: &context.body,
             x: plugin_text_x(
                 &context.body,
@@ -446,7 +447,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
             let width = FontManager::global().measure_text_cached(
                 text,
                 text_size,
-                skia_safe::FontStyle::normal(),
+                winisland_render::FontStyle::normal(),
             );
             anchor_x - width / 2.0
         } else {
@@ -475,7 +476,7 @@ fn draw_lyric_pair(params: LyricPairParams<'_>) {
             SECONDARY_LYRIC_CHANNEL,
         ));
         draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text: secondary,
             x: text_x(secondary, secondary_size, secondary_center_x, true),
             y: secondary_y,
@@ -502,7 +503,7 @@ fn draw_highlighted_lyric(
             && text.is_char_boundary(highlight.end_byte)
     }) else {
         draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text,
             x,
             y,
@@ -522,7 +523,7 @@ fn draw_highlighted_lyric(
         PENDING_LYRIC_CHANNEL,
     ));
     draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text,
         x,
         y,
@@ -532,7 +533,7 @@ fn draw_highlighted_lyric(
     });
 
     let font_manager = FontManager::global();
-    let style = skia_safe::FontStyle::normal();
+    let style = winisland_render::FontStyle::normal();
     let (completed_width, active_width) = font_manager.measure_text_prefixes_cached(
         text,
         highlight.start_byte,
@@ -551,7 +552,7 @@ fn draw_highlighted_lyric(
             true,
         );
         draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text,
             x,
             y,

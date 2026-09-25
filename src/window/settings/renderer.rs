@@ -1,7 +1,6 @@
 use crate::ui::expanded::widget_view::draw_plugin_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
 use crate::utils::settings_ui::{
     ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
@@ -10,6 +9,8 @@ use crate::utils::settings_ui::{
 use crate::window::renderer::Renderer;
 use skia_safe::{Canvas, Color, Contains, Paint, Point, RRect, Rect};
 use winisland_core::i18n::tr;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 use super::{
     PAGE_NAV_GAP, PAGE_NAV_HEIGHT, PAGE_NAV_WIDTH, PAGE_NAV_X, PAGE_NAV_Y, PLUGINS_PAGE_INDEX,
@@ -40,7 +41,7 @@ impl SettingsApp {
         });
         let font = FontManager::global();
         font.draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text: "注意",
             x: 38.0,
             y: top + 32.0,
@@ -60,7 +61,7 @@ impl SettingsApp {
             ),
         ] {
             font.draw_text_cached(DrawTextCachedParams {
-                canvas,
+                painter: Painter::from_canvas(canvas),
                 text: line,
                 x: 38.0,
                 y,
@@ -79,10 +80,11 @@ impl SettingsApp {
         };
         canvas.draw_round_rect(button, 7.0, 7.0, &settings_paint(color));
         font.draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text: "我已知晓",
             x: button.center_x()
-                - font.measure_text_cached("我已知晓", 12.0, skia_safe::FontStyle::bold()) / 2.0,
+                - font.measure_text_cached("我已知晓", 12.0, winisland_render::FontStyle::bold())
+                    / 2.0,
             y: button.top + 18.0,
             size: 12.0,
             bold: true,
@@ -429,7 +431,7 @@ impl SettingsApp {
             FontManager::global(),
             &title,
             17.0,
-            skia_safe::FontStyle::bold(),
+            winisland_render::FontStyle::bold(),
             (win_w - title_x - 20.0).max(0.0),
         );
         let mut paint = settings_paint(theme.separator);
@@ -490,7 +492,7 @@ impl SettingsApp {
             let width = FontManager::global().measure_text_cached(
                 &label,
                 size,
-                skia_safe::FontStyle::normal(),
+                winisland_render::FontStyle::normal(),
             );
             SettingsPainter::new(canvas).text(
                 &label,

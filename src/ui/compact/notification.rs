@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use skia_safe::canvas::SrcRectConstraint;
 use skia_safe::{
-    Canvas, ClipOp, Color, Data, FilterMode, FontStyle, Image, MipmapMode, Paint, RRect, Rect,
-    SamplingOptions,
+    Canvas, ClipOp, Color, Data, FilterMode, Image, MipmapMode, Paint, RRect, Rect, SamplingOptions,
 };
+
 use windows::ApplicationModel::AppDisplayInfo;
 use windows::Foundation::Size;
 use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
@@ -20,8 +20,10 @@ use windows::core::HRESULT;
 
 use crate::ui::compact::notification_event::{self, NotificationEventSubscription};
 use crate::ui::compact::{CompactOverlayState, CompactSize};
-use crate::utils::font::DrawTextCachedParams;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
+use winisland_render::FontStyle;
+use winisland_render::Painter;
+use winisland_render::text::DrawTextCachedParams;
 
 const DISPLAY_DURATION: Duration = Duration::from_secs(5);
 const ENTER_DURATION: Duration = Duration::from_millis(220);
@@ -804,7 +806,7 @@ impl NotificationIndicator {
             draw_notification_text(
                 &self.app_name_scroll,
                 DrawTextCachedParams {
-                    canvas,
+                    painter: Painter::from_canvas(canvas),
                     text: &self.app_name,
                     x: content_left,
                     y: top + 22.0 * scale,
@@ -826,7 +828,7 @@ impl NotificationIndicator {
         draw_notification_text(
             &self.title_scroll,
             DrawTextCachedParams {
-                canvas,
+                painter: Painter::from_canvas(canvas),
                 text: &self.title,
                 x: content_left,
                 y: title_y,
@@ -841,7 +843,7 @@ impl NotificationIndicator {
             draw_notification_text(
                 &self.detail_scroll,
                 DrawTextCachedParams {
-                    canvas,
+                    painter: Painter::from_canvas(canvas),
                     text: &self.detail,
                     x: content_left,
                     y: title_y + DETAIL_LINE_GAP * scale,
@@ -906,17 +908,19 @@ fn draw_notification_text(
     } else {
         FontStyle::normal()
     };
-    scroll.borrow_mut().draw(ScrollDrawParams {
-        canvas: params.canvas,
-        text: params.text,
-        x: params.x,
-        y: params.y,
-        max_w: max_width,
-        size: params.size,
-        style,
-        paint: params.paint,
-        scale,
-        render_as_paths: false,
+    params.painter.legacy(|canvas| {
+        scroll.borrow_mut().draw(ScrollDrawParams {
+            canvas,
+            text: params.text,
+            x: params.x,
+            y: params.y,
+            max_w: max_width,
+            size: params.size,
+            style,
+            paint: params.paint,
+            scale,
+            render_as_paths: false,
+        });
     });
 }
 

@@ -517,7 +517,7 @@ impl App {
                     }
 
                     if old_font != self.config.custom_font_path {
-                        crate::utils::font::FontManager::global()
+                        winisland_render::text::FontManager::global()
                             .set_custom_font_path(self.config.custom_font_path.as_deref());
                     }
 

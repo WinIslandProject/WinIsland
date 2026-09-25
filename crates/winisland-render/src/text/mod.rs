@@ -1,8 +1,22 @@
-use skia_safe::{Canvas, Font, FontMgr, FontStyle, Paint, Path, Typeface};
+//! 文本层：字体缓存、文本分组、测量与绘制（普通绘制与按路径绘制两条路径）。
+//!
+//! 与迁移前的 `src/utils/font.rs` 逐行等价，改动只有两处：
+//! - 参数结构体用 `Painter` 取代 `&Canvas`；
+//! - `FontStyle` 换成 `winisland_render::FontStyle`。
+//!
+//! `paint` 暂时仍是后端 `Paint`：线条下方 `core/render/mini.rs:264,285` 会把**带模糊
+//! image_filter 的 Paint** 传给歌词绘制，只收颜色会丢掉切换模糊（观感回归）。颜色与模糊
+//! 的语义化（`color: Rgba` + `blur: Option<BlurSpec>`）随各调用文件自己的批次一起改。
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
+
+use skia_safe::{Font, FontMgr, FontStyle as SkFontStyle, Paint, Path, Typeface};
+
+use crate::painter::Painter;
+use crate::types::{FontStyle, Slant};
 
 static GLOBAL_FONT_MANAGER: OnceLock<FontManager> = OnceLock::new();
 
@@ -13,8 +27,9 @@ type TextCacheMap = HashMap<u64, TextCacheValue>;
 type TextPathCacheMap = HashMap<u64, Vec<Path>>;
 type TextPrefixCacheMap = HashMap<u64, Vec<(usize, f32)>>;
 
+/// 在矩形内居中绘制文本；超宽时按字符截断并追加 `...`。
 pub struct DrawTextInRectParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub text: &'a str,
     pub x: f32,
     pub y: f32,
@@ -24,8 +39,9 @@ pub struct DrawTextInRectParams<'a> {
     pub paint: &'a Paint,
 }
 
+/// 一次缓存文本绘制：`x`/`y` 为基线原点，单位逻辑像素。
 pub struct DrawTextCachedParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub text: &'a str,
     pub x: f32,
     pub y: f32,
@@ -34,6 +50,10 @@ pub struct DrawTextCachedParams<'a> {
     pub paint: &'a Paint,
 }
 
+/// 字体门面。单例：`FontManager::global()`。
+///
+/// 线程要求：内部缓存是 `thread_local`，与迁移前一致（只在渲染线程访问）。
+/// 失败语义：字体解析失败时逐级回退到系统默认字体，不返回错误。
 pub struct FontManager;
 
 struct CustomTypefaceState {
@@ -61,6 +81,19 @@ const TEXT_PATH_CACHE_LIMIT: usize = 100;
 const TEXT_PREFIX_CACHE_LIMIT: usize = 100;
 const TEXT_PREFIX_WIDTH_LIMIT: usize = 256;
 
+fn to_skia_font_style(style: FontStyle) -> SkFontStyle {
+    let slant = match style.slant() {
+        Slant::Upright => skia_safe::font_style::Slant::Upright,
+        Slant::Italic => skia_safe::font_style::Slant::Italic,
+        Slant::Oblique => skia_safe::font_style::Slant::Oblique,
+    };
+    SkFontStyle::new(
+        i32::from(style.weight().value()).into(),
+        i32::from(style.width().value()).into(),
+        slant,
+    )
+}
+
 fn evict_one_if_full<K, V>(cache: &mut HashMap<K, V>, limit: usize)
 where
     K: Clone + std::cmp::Eq + std::hash::Hash,
@@ -75,20 +108,13 @@ where
 fn hash_cache_key(text: &str, style: FontStyle, size: f32) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
-    style_to_key(style).hash(&mut hasher);
+    style.cache_key().hash(&mut hasher);
     ((size * 100.0).round() as i32).hash(&mut hasher);
     hasher.finish()
 }
 
-fn style_to_key(style: FontStyle) -> u32 {
-    let weight = *style.weight() as u32;
-    let width = *style.width() as u32;
-    let slant = style.slant() as u32;
-    (weight << 16) | (width << 8) | slant
-}
-
 fn needs_synthetic_bold(tf: &Typeface, style: FontStyle) -> bool {
-    *style.weight() >= 600 && *tf.font_style().weight() < 600
+    style.weight().value() >= 600 && *tf.font_style().weight() < 600
 }
 
 fn make_font(tf: Typeface, size: f32, style: FontStyle) -> Font {
@@ -132,7 +158,8 @@ fn typeface_supports_char(typeface: &Typeface, character: char) -> bool {
 }
 
 fn get_typeface_for_char(c: char, style: FontStyle) -> (Typeface, bool) {
-    let s_key = style_to_key(style);
+    let sk_style = to_skia_font_style(style);
+    let s_key = style.cache_key();
     FALLBACK_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(tf) = cache.get(&(c, s_key)) {
@@ -152,7 +179,7 @@ fn get_typeface_for_char(c: char, style: FontStyle) -> (Typeface, bool) {
         }
 
         let tf = FONT_MGR.with(|mgr| {
-            mgr.match_family_style_character("", style, &["zh-CN", "ja-JP", "en-US"], c as i32)
+            mgr.match_family_style_character("", sk_style, &["zh-CN", "ja-JP", "en-US"], c as i32)
                 .filter(|tf| typeface_supports_char(tf, c))
                 .or_else(|| {
                     [
@@ -163,11 +190,11 @@ fn get_typeface_for_char(c: char, style: FontStyle) -> (Typeface, bool) {
                     ]
                     .into_iter()
                     .find_map(|family| {
-                        mgr.match_family_style(family, style)
+                        mgr.match_family_style(family, sk_style)
                             .filter(|tf| typeface_supports_char(tf, c))
                     })
                 })
-                .unwrap_or_else(|| mgr.legacy_make_typeface(None, style).unwrap())
+                .unwrap_or_else(|| mgr.legacy_make_typeface(None, sk_style).unwrap())
         });
         let embolden = needs_synthetic_bold(&tf, style);
         cache.insert((c, s_key), tf.clone());
@@ -188,15 +215,16 @@ fn is_ascii_text(text: &str) -> bool {
 /// Compute text groups and total width.
 /// Falls back to a single typeface for ASCII-only text to skip per-char lookups.
 fn compute_text_groups(text: &str, size: f32, style: FontStyle) -> (f32, TextGroups) {
+    let sk_style = to_skia_font_style(style);
     let mut current_w = 0.0;
     let mut groups: TextGroups = Vec::new();
 
     if is_ascii_text(text) {
         let tf = get_custom_typeface().unwrap_or_else(|| {
             FONT_MGR.with(|mgr| {
-                mgr.match_family_style("Microsoft YaHei", style)
-                    .or_else(|| mgr.match_family_style("Segoe UI", style))
-                    .unwrap_or_else(|| mgr.legacy_make_typeface(None, style).unwrap())
+                mgr.match_family_style("Microsoft YaHei", sk_style)
+                    .or_else(|| mgr.match_family_style("Segoe UI", sk_style))
+                    .unwrap_or_else(|| mgr.legacy_make_typeface(None, sk_style).unwrap())
             })
         });
         let embolden = needs_synthetic_bold(&tf, style);
@@ -285,7 +313,7 @@ impl FontManager {
         TEXT_PREFIX_CACHE.with(|cache| cache.borrow_mut().clear());
     }
 
-    pub fn get_font(&self, size: f32, bold: bool) -> Font {
+    fn get_font(&self, size: f32, bold: bool) -> Font {
         let style = if bold {
             FontStyle::bold()
         } else {
@@ -294,19 +322,49 @@ impl FontManager {
         if let Some(tf) = get_custom_typeface() {
             return make_font(tf, size, style);
         }
+        let sk_style = to_skia_font_style(style);
         let typeface = FONT_MGR.with(|mgr| {
-            mgr.match_family_style("Microsoft YaHei", style)
-                .or_else(|| mgr.match_family_style("Segoe UI", style))
-                .unwrap_or_else(|| mgr.legacy_make_typeface(None, style).unwrap())
+            mgr.match_family_style("Microsoft YaHei", sk_style)
+                .or_else(|| mgr.match_family_style("Segoe UI", sk_style))
+                .unwrap_or_else(|| mgr.legacy_make_typeface(None, sk_style).unwrap())
         });
         make_font(typeface, size, style)
     }
 
+    /// 测量文本的字形边界，返回包围盒（逻辑像素）。
+    pub fn measure_str(&self, text: &str, size: f32, bold: bool) -> crate::types::Rect {
+        let font = self.get_font(size, bold);
+        let (_, bounds) = font.measure_str(text, None);
+        crate::types::Rect::from_ltrb(bounds.left, bounds.top, bounds.right, bounds.bottom)
+    }
+
+    /// 字体的 ascent（负值，逻辑像素），用于把"文本框顶部"换算成绘制基线。
+    pub fn ascent(&self, size: f32, bold: bool) -> f32 {
+        let font = self.get_font(size, bold);
+        let (_, metrics) = font.metrics();
+        metrics.ascent
+    }
+
+    /// 在给定基线原点绘制文本。
+    pub fn draw_str(
+        &self,
+        painter: Painter<'_>,
+        text: &str,
+        at: crate::types::Point,
+        size: f32,
+        bold: bool,
+        paint: &Paint,
+    ) {
+        let font = self.get_font(size, bold);
+        painter.canvas().draw_str(text, (at.x, at.y), &font, paint);
+    }
+
     pub fn draw_text_in_rect(&self, params: DrawTextInRectParams<'_>) {
         let font = self.get_font(params.size, params.bold);
+        let canvas = params.painter.canvas();
         let (_, rect) = font.measure_str(params.text, None);
         if rect.width() <= params.w {
-            params.canvas.draw_str(
+            canvas.draw_str(
                 params.text,
                 (params.x + (params.w - rect.width()) / 2.0, params.y),
                 &font,
@@ -326,9 +384,7 @@ impl FontManager {
                 truncated.push(c);
             }
             truncated.push_str("...");
-            params
-                .canvas
-                .draw_str(&truncated, (params.x, params.y), &font, params.paint);
+            canvas.draw_str(&truncated, (params.x, params.y), &font, params.paint);
         }
     }
 
@@ -396,6 +452,7 @@ impl FontManager {
                 .entry(cache_key)
                 .or_insert_with(|| compute_text_groups(params.text, params.size, style));
             let (_, groups) = entry;
+            let canvas = params.painter.canvas();
             let mut x = params.x;
             let y = params.y;
             for (s, tf, embolden, width) in groups {
@@ -404,7 +461,7 @@ impl FontManager {
                 if *embolden {
                     font.set_embolden(true);
                 }
-                params.canvas.draw_str(&**s, (x, y), &font, params.paint);
+                canvas.draw_str(&**s, (x, y), &font, params.paint);
                 x += *width;
             }
         });
@@ -425,12 +482,13 @@ impl FontManager {
             let paths = cache
                 .entry(cache_key)
                 .or_insert_with(|| compute_text_paths(params.text, params.size, style));
-            params.canvas.save();
-            params.canvas.translate((params.x, params.y));
+            let canvas = params.painter.canvas();
+            canvas.save();
+            canvas.translate((params.x, params.y));
             for path in paths {
-                params.canvas.draw_path(path, params.paint);
+                canvas.draw_path(path, params.paint);
             }
-            params.canvas.restore();
+            canvas.restore();
         });
     }
 }

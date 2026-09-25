@@ -4,9 +4,11 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use skia_safe::{Canvas, Color, FontStyle, Paint, Rect};
+use skia_safe::{Canvas, Color, Paint, Rect};
 
-use crate::utils::font::{DrawTextCachedParams, FontManager};
+use winisland_render::FontStyle;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 const BODY_SIZE: f32 = 12.0;
 const LINE_HEIGHT: f32 = 18.0;
@@ -897,7 +899,7 @@ fn draw_text(
         canvas.translate((x, baseline));
         canvas.skew((-0.12, 0.0));
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text,
             x: 0.0,
             y: 0.0,
@@ -908,7 +910,7 @@ fn draw_text(
         canvas.restore();
     } else {
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text,
             x,
             y: baseline,

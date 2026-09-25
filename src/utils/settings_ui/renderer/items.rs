@@ -1,10 +1,11 @@
 use skia_safe::{
-    Canvas, Color, Contains, FilterMode, FontStyle, Image, MipmapMode, Paint, Point, Rect,
-    SamplingOptions,
+    Canvas, Color, Contains, FilterMode, Image, MipmapMode, Paint, Point, Rect, SamplingOptions,
 };
+use winisland_render::FontStyle;
 
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::{DrawTextInRectParams, FontManager};
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextInRectParams, FontManager};
 
 use super::super::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, GROUP_RADIUS, POPUP_BTN_H, POPUP_BTN_R, POPUP_BTN_W,
@@ -427,7 +428,7 @@ fn draw_row_source_select(
         });
         let text_w = POPUP_BTN_W - 22.0;
         fm.draw_text_in_rect(DrawTextInRectParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text: selected_label,
             x: btn_x + 4.0,
             y: btn_y + 17.0,

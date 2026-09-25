@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use skia_safe::{Canvas, Color, FontStyle, Paint, Rect};
+use skia_safe::{Canvas, Color, Paint, Rect};
 use tokio_util::sync::CancellationToken;
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, PROPERTYKEY, WPARAM};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
@@ -25,8 +25,10 @@ use windows::core::{PCWSTR, Result};
 use crate::icons::brightness::draw_brightness_icon;
 use crate::icons::volume::draw_volume_icon;
 use crate::ui::compact::{CompactOverlayState, CompactSize};
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use winisland_core::i18n::tr;
+use winisland_render::FontStyle;
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const ENDPOINT_RETRY_INTERVAL: Duration = Duration::from_millis(500);
@@ -710,7 +712,7 @@ impl VolumeIndicator {
         label_paint.set_anti_alias(true);
         label_paint.set_color(Color::from_argb((alpha as f32 * 0.9) as u8, 255, 255, 255));
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter: Painter::from_canvas(canvas),
             text: &self.label,
             x: label_x,
             y: center_y + 4.0 * scale,

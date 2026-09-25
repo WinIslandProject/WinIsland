@@ -4,11 +4,12 @@ use super::draw_widget_rounded_background;
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_expanded_config, with_resource_usage,
 };
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use winisland_core::config::{
     ResourceMetricConfig, ResourceMetricKind, ResourceMetricStyle, default_resource_metrics,
     resource_widget_span,
 };
+use winisland_render::Painter;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 const CELL_GAP: f32 = 3.0;
 
@@ -124,17 +125,20 @@ fn draw_bar(
         );
     }
     let fonts = FontManager::global();
-    let label_width =
-        fonts.measure_text_cached(config.kind.label(), font_size, skia_safe::FontStyle::bold());
+    let label_width = fonts.measure_text_cached(
+        config.kind.label(),
+        font_size,
+        winisland_render::FontStyle::bold(),
+    );
     let measured_value_width =
-        fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+        fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     let available = (right - left - 2.0 * scale).max(1.0);
     let fit = (available / (label_width + measured_value_width).max(1.0)).min(1.0);
     font_size = (font_size * fit).max(3.8 * scale);
     value_size = (value_size * fit).max(3.8 * scale);
     paint.set_color(alpha_color(accent, (alpha as f32 * 0.82) as u8));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: config.kind.label(),
         x: left,
         y: baseline,
@@ -142,10 +146,11 @@ fn draw_bar(
         bold: true,
         paint: &paint,
     });
-    let value_w = fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+    let value_w =
+        fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     paint.set_color(alpha_color(text_color, alpha));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: usage.text,
         x: right - value_w,
         y: baseline,
@@ -195,14 +200,14 @@ fn draw_ring(
     let mut value_size = (diameter * 0.22).clamp(4.0 * scale, 9.0 * scale);
     let max_value_width = diameter * 0.78;
     let mut value_width =
-        fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+        fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     if value_width > max_value_width {
         value_size = (value_size * max_value_width / value_width).max(3.2 * scale);
         value_width =
-            fonts.measure_text_cached(usage.text, value_size, skia_safe::FontStyle::bold());
+            fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     }
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: usage.text,
         x: center.0 - value_width / 2.0,
         y: center.1 + value_size * 0.32,
@@ -215,14 +220,14 @@ fn draw_ring(
     let measured_label = fonts.measure_text_cached(
         config.kind.label(),
         label_size,
-        skia_safe::FontStyle::bold(),
+        winisland_render::FontStyle::bold(),
     );
     if measured_label > label_space {
         label_size = (label_size * label_space / measured_label).max(3.5 * scale);
     }
     paint.set_color(alpha_color(accent, (alpha as f32 * 0.84) as u8));
     fonts.draw_text_cached(DrawTextCachedParams {
-        canvas,
+        painter: Painter::from_canvas(canvas),
         text: config.kind.label(),
         x: bounds.left + inset,
         y: bounds.center_y() + label_size * 0.34,
