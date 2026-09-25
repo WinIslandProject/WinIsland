@@ -77,7 +77,15 @@ pub fn draw_widget_page(
             let (slot_x, slot_y, tile_w, tile_h) = layout.footprint_rect(kind, slot);
 
             draw_widget(
-                canvas, kind, slot_x, slot_y, tile_w, tile_h, scale, alpha, text_color,
+                Painter::from_canvas(canvas),
+                kind,
+                slot_x,
+                slot_y,
+                tile_w,
+                tile_h,
+                scale,
+                alpha,
+                rgba(text_color),
             );
 
             for cell in widget_footprint(kind, slot) {

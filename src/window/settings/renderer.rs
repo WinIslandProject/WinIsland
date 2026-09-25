@@ -279,7 +279,13 @@ impl SettingsApp {
             );
             paint.set_color(Color::from_rgb(10, 10, 10));
             canvas.draw_round_rect(rect, height / 2.0, height / 2.0, &paint);
-            crate::ui::widget::compact::draw_widget(canvas, widget, rect, 1.0, 255);
+            crate::ui::widget::compact::draw_widget(
+                Painter::from_canvas(canvas),
+                widget,
+                winisland_render::Rect::from_xywh(x, y, width, height),
+                1.0,
+                255,
+            );
             return;
         }
         let Some(source) = self.widget_dragging.as_ref() else {
@@ -320,7 +326,9 @@ impl SettingsApp {
         );
 
         match source {
-            WidgetSource::BuiltIn(widget) => draw_mini_card(canvas, *widget, x, y, w, h),
+            WidgetSource::BuiltIn(widget) => {
+                draw_mini_card(Painter::from_canvas(canvas), *widget, x, y, w, h)
+            }
             WidgetSource::Plugin(id) => {
                 if let Some(widget) = self
                     .plugin_widgets

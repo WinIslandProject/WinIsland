@@ -23,6 +23,7 @@ use winisland_core::config::{
     CompactWidgetSlot, LyricTransitionAnimation, PluginWidgetSlot, WidgetSlot,
 };
 use winisland_core::lyrics::LyricHighlight;
+use winisland_render::Painter;
 
 pub struct LayoutParams {
     pub current_w: f32,
@@ -389,9 +390,9 @@ fn draw_compact_layer(
         text_color: Color::WHITE,
     });
     crate::ui::widget::compact::draw(
-        canvas,
+        Painter::from_canvas(canvas),
         style.compact_widget_layout,
-        Rect::from_xywh(
+        winisland_render::Rect::from_xywh(
             layout.island_x,
             layout.stable_island_y,
             layout.current_w,

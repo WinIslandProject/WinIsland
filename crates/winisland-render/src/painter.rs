@@ -148,13 +148,24 @@ impl<'a> Painter<'a> {
     }
 
     /// 画一段圆弧（不画扇形）。`start`/`sweep` 用 12 点钟约定，换算在后端完成。
-    pub fn stroke_arc(&self, rect: Rect, start: Angle, sweep: Angle, width: f32, color: Rgba) {
+    /// `cap` 决定弧线两端的样式；实测的两个环状站点都用 `StrokeCap::Round`。
+    pub fn stroke_arc(
+        &self,
+        rect: Rect,
+        start: Angle,
+        sweep: Angle,
+        width: f32,
+        color: Rgba,
+        cap: StrokeCap,
+    ) {
+        let mut paint = stroked(width, color);
+        paint.set_stroke_cap(to_skia_cap(cap));
         self.canvas.draw_arc(
             to_skia_rect(rect),
             start.as_degrees() - 90.0,
             sweep.as_degrees(),
             false,
-            &stroked(width, color),
+            &paint,
         );
     }
 

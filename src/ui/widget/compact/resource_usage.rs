@@ -1,16 +1,13 @@
-use skia_safe::{Canvas, Color, Paint, Rect};
-
 use crate::ui::widget::resource_usage::{
     MetricUsage, alpha_color, metric_color, usage_color, with_compact_config, with_resource_usage,
 };
-use crate::utils::color::rgba_of_paint;
 use winisland_core::config::{ResourceMetricConfig, ResourceMetricStyle};
-use winisland_render::Painter;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{Angle, Painter, Point, Radius, Rect, Rgba, StrokeCap};
 
 const METRIC_GAP: f32 = 4.0;
 
-pub(super) fn draw(canvas: &Canvas, rect: Rect, scale: f32, alpha: u8) {
+pub(super) fn draw(painter: Painter<'_>, rect: Rect, scale: f32, alpha: u8) {
     with_compact_config(|config| {
         let enabled: Vec<_> = config.iter().filter(|metric| metric.enabled).collect();
         if enabled.is_empty() {
@@ -28,7 +25,7 @@ pub(super) fn draw(canvas: &Canvas, rect: Rect, scale: f32, alpha: u8) {
                     rect.height(),
                 );
                 draw_metric(
-                    canvas,
+                    painter,
                     bounds,
                     metric,
                     usage.metric(metric.kind),
@@ -41,24 +38,24 @@ pub(super) fn draw(canvas: &Canvas, rect: Rect, scale: f32, alpha: u8) {
 }
 
 fn draw_metric(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     rect: Rect,
     config: &ResourceMetricConfig,
     usage: MetricUsage<'_>,
     scale: f32,
     alpha: u8,
 ) {
-    let save_count = canvas.save();
-    canvas.clip_rect(rect, None, true);
+    let save_count = painter.save();
+    painter.clip_rect(rect);
     match config.style {
-        ResourceMetricStyle::Bar => draw_bar(canvas, rect, config, usage, scale, alpha),
-        ResourceMetricStyle::Ring => draw_ring(canvas, rect, config, usage, scale, alpha),
+        ResourceMetricStyle::Bar => draw_bar(painter, rect, config, usage, scale, alpha),
+        ResourceMetricStyle::Ring => draw_ring(painter, rect, config, usage, scale, alpha),
     }
-    canvas.restore_to_count(save_count);
+    painter.restore_to(save_count);
 }
 
 fn draw_bar(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     rect: Rect,
     config: &ResourceMetricConfig,
     usage: MetricUsage<'_>,
@@ -75,49 +72,46 @@ fn draw_bar(
     let value_size = (8.5 * scale).min(rect.width() * 0.28).max(5.5);
     let track_h = (2.0 * scale).max(1.5);
     let track = Rect::from_xywh(left, baseline + 4.5 * scale, width, track_h);
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_color(Color::from_argb((alpha as f32 * 0.13) as u8, 255, 255, 255));
-    canvas.draw_round_rect(track, track_h / 2.0, track_h / 2.0, &paint);
+    painter.fill_round_rect(
+        track,
+        Radius::uniform(track_h / 2.0),
+        Rgba::from_argb((alpha as f32 * 0.13) as u8, 255, 255, 255),
+    );
     if usage.value.is_some() && value > 0.0 {
         let fill_w = (track.width() * value).max(track_h).min(track.width());
-        paint.set_color(alpha_color(accent, (alpha as f32 * 0.9) as u8));
-        canvas.draw_round_rect(
+        painter.fill_round_rect(
             Rect::from_xywh(track.left, track.top, fill_w, track_h),
-            track_h / 2.0,
-            track_h / 2.0,
-            &paint,
+            Radius::uniform(track_h / 2.0),
+            alpha_color(accent, (alpha as f32 * 0.9) as u8),
         );
     }
     let fonts = FontManager::global();
-    paint.set_color(alpha_color(accent, (alpha as f32 * 0.78) as u8));
     fonts.draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text: config.kind.label(),
         x: left,
         y: baseline,
         size: label_size,
         bold: true,
-        color: rgba_of_paint(&paint),
+        color: alpha_color(accent, (alpha as f32 * 0.78) as u8),
         blur: None,
     });
     let value_w =
         fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
-    paint.set_color(Color::from_argb(alpha, 255, 255, 255));
     fonts.draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text: usage.text,
         x: rect.right - inset - value_w,
         y: baseline,
         size: value_size,
         bold: true,
-        color: rgba_of_paint(&paint),
+        color: Rgba::from_argb(alpha, 255, 255, 255),
         blur: None,
     });
 }
 
 fn draw_ring(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     rect: Rect,
     config: &ResourceMetricConfig,
     usage: MetricUsage<'_>,
@@ -130,23 +124,29 @@ fn draw_ring(
         .min(rect.width() * 0.42)
         .max(10.0 * scale);
     let inset = 1.0 * scale;
-    let center = (rect.right - inset - diameter / 2.0, rect.center_y());
+    let center = Point::new(rect.right - inset - diameter / 2.0, rect.center_y());
     let ring = Rect::from_xywh(
-        center.0 - diameter / 2.0,
-        center.1 - diameter / 2.0,
+        center.x - diameter / 2.0,
+        center.y - diameter / 2.0,
         diameter,
         diameter,
     );
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_style(skia_safe::paint::Style::Stroke);
-    paint.set_stroke_width((2.0 * scale).min(diameter * 0.13));
-    paint.set_stroke_cap(skia_safe::paint::Cap::Round);
-    paint.set_color(Color::from_argb((alpha as f32 * 0.14) as u8, 255, 255, 255));
-    canvas.draw_circle(center, diameter / 2.0, &paint);
+    let stroke_width = (2.0 * scale).min(diameter * 0.13);
+    painter.stroke_circle(
+        center,
+        diameter / 2.0,
+        stroke_width,
+        Rgba::from_argb((alpha as f32 * 0.14) as u8, 255, 255, 255),
+    );
     if usage.value.is_some() && value > 0.0 {
-        paint.set_color(alpha_color(accent, (alpha as f32 * 0.92) as u8));
-        canvas.draw_arc(ring, -90.0, value * 360.0, false, &paint);
+        painter.stroke_arc(
+            ring,
+            Angle::ZERO,
+            Angle::from_degrees(value * 360.0),
+            stroke_width,
+            alpha_color(accent, (alpha as f32 * 0.92) as u8),
+            StrokeCap::Round,
+        );
     }
     let fonts = FontManager::global();
     let mut value_size = (diameter * 0.22).max(4.0);
@@ -158,28 +158,25 @@ fn draw_ring(
         value_w =
             fonts.measure_text_cached(usage.text, value_size, winisland_render::FontStyle::bold());
     }
-    paint.set_style(skia_safe::paint::Style::Fill);
-    paint.set_color(Color::from_argb(alpha, 255, 255, 255));
     fonts.draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text: usage.text,
-        x: center.0 - value_w / 2.0,
-        y: center.1 + value_size * 0.32,
+        x: center.x - value_w / 2.0,
+        y: center.y + value_size * 0.32,
         size: value_size,
         bold: true,
-        color: rgba_of_paint(&paint),
+        color: Rgba::from_argb(alpha, 255, 255, 255),
         blur: None,
     });
     let label_size = (6.0 * scale).max(4.5);
-    paint.set_color(alpha_color(accent, (alpha as f32 * 0.8) as u8));
     fonts.draw_text_cached(DrawTextCachedParams {
-        painter: Painter::from_canvas(canvas),
+        painter,
         text: config.kind.label(),
         x: rect.left + inset,
         y: rect.center_y() + label_size * 0.34,
         size: label_size,
         bold: true,
-        color: rgba_of_paint(&paint),
+        color: alpha_color(accent, (alpha as f32 * 0.8) as u8),
         blur: None,
     });
 }

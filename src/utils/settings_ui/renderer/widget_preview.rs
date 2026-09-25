@@ -18,6 +18,7 @@ use winisland_core::config::{
 };
 use winisland_core::i18n::tr;
 use winisland_core::widgets::PluginWidget;
+use winisland_render::Painter;
 
 use super::super::input::{
     COMPACT_WIDGET_ISLAND_PANEL_H, CompactWidgetGridGeom, WIDGET_ISLAND_PANEL_H,
@@ -457,7 +458,7 @@ fn draw_library_tile(
                 WidgetKind::Settings => (54.0, 54.0),
             };
             draw_mini_card(
-                canvas,
+                Painter::from_canvas(canvas),
                 *kind,
                 preview_rect.center_x() - preview_width / 2.0,
                 preview_rect.center_y() - preview_height / 2.0,
@@ -699,7 +700,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         begin_card_transform(canvas, rect, hover, drop);
         draw_card_feedback(canvas, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
         draw_widget_card_preview(
-            canvas,
+            Painter::from_canvas(canvas),
             kind,
             x,
             y,
@@ -707,7 +708,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             height,
             geometry.cap_scale,
             255,
-            Color::WHITE,
+            crate::utils::color::rgba(Color::WHITE),
         );
         canvas.restore();
 
@@ -904,9 +905,9 @@ fn draw_compact_library_tile(
         &paint,
     );
     crate::ui::widget::compact::draw_widget(
-        canvas,
+        Painter::from_canvas(canvas),
         widget,
-        Rect::from_xywh(
+        winisland_render::Rect::from_xywh(
             preview.left + 9.0 * preview_scale,
             preview.top,
             widget_width * preview_scale,
@@ -1004,9 +1005,9 @@ fn draw_compact_widget_preview(params: WidgetPreviewParams<'_>) {
         begin_card_transform(canvas, rect, hover, drop);
         draw_card_feedback(canvas, rect, height / 2.0, hover, drop, theme);
         crate::ui::widget::compact::draw_widget(
-            canvas,
+            Painter::from_canvas(canvas),
             widget,
-            Rect::from_xywh(x, y, width, height),
+            winisland_render::Rect::from_xywh(x, y, width, height),
             geometry.cap_scale,
             255,
         );
