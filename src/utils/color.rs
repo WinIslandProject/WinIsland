@@ -1,4 +1,12 @@
 use skia_safe::Color;
+use winisland_render::Rgba;
+
+/// 把后端 8 位颜色转成渲染语义颜色。
+///
+/// 过渡用：`SettingsTheme` 与 `COLOR_*` 仍在用后端 `Color`，等它们换成 `Rgba` 后本函数删除。
+pub(crate) fn rgba(color: Color) -> Rgba {
+    Rgba::from_argb(color.a(), color.r(), color.g(), color.b())
+}
 
 pub const COLOR_CARD_HIGHLIGHT: Color = Color::from_rgb(72, 72, 74);
 pub const COLOR_ACCENT: Color = Color::from_rgb(10, 132, 255);

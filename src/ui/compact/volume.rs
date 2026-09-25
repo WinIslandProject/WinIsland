@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use winisland_render::Point;
+use winisland_render::Rgba;
 
 use skia_safe::{Canvas, Color, Paint, Rect};
 use tokio_util::sync::CancellationToken;
@@ -687,22 +689,28 @@ impl VolumeIndicator {
 
         let center_y = rect.center_y();
         let icon_size = 20.0 * scale;
-        let icon_center = skia_safe::Point::new(rect.left() + 21.0 * scale, center_y);
+        let icon_center = Point::new(rect.left() + 21.0 * scale, center_y);
         let level = self.preview.map_or(self.snapshot.level, |(level, _)| level);
         let muted = self
             .preview
             .map_or(self.snapshot.muted, |(level, _)| level <= 0.0)
             || level <= VOLUME_CHANGE_THRESHOLD;
         if brightness {
-            draw_brightness_icon(canvas, icon_center, icon_size, alpha, level);
+            draw_brightness_icon(
+                Painter::from_canvas(canvas),
+                icon_center,
+                icon_size,
+                alpha,
+                level,
+            );
         } else {
             draw_volume_icon(
-                canvas,
+                Painter::from_canvas(canvas),
                 icon_center,
                 icon_size,
                 alpha,
                 if muted { 0.0 } else { level },
-                Color::WHITE,
+                Rgba::WHITE,
             );
         }
 

@@ -15,6 +15,7 @@ use self::palette::get_palette_from_image;
 use crate::core::smtc::MediaInfo;
 use crate::icons::arrows::draw_arrow_right;
 use crate::icons::controls::{draw_control_triangle, draw_pause_button, draw_play_button};
+use crate::utils::color::rgba;
 use crate::utils::cover::decode_cover_image;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 use crate::utils::shape::continuous_rounded_rect_path;
@@ -246,12 +247,12 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
         (alpha as f32 * (1.0 - view_offset * PAGE_ARROW_FADE_RATE).clamp(0.0, 1.0)) as u8;
     if arrow_alpha > 0 {
         draw_arrow_right(
-            canvas,
+            Painter::from_canvas(canvas),
             ox + w - PAGE_ARROW_RIGHT_INSET * scale,
             oy + h / 2.0,
             arrow_alpha,
             scale,
-            text_color,
+            rgba(text_color),
         );
     }
     let base_img_size = COVER_SIZE * scale;
@@ -870,9 +871,23 @@ fn draw_pause_control(
         (alpha as f32 * icon_progress * icon_progress * (3.0 - 2.0 * icon_progress)) as u8;
     if icon_alpha > 0 {
         if pause_t >= 0.5 {
-            draw_pause_button(canvas, 0.0, 0.0, icon_alpha, scale, text_color);
+            draw_pause_button(
+                Painter::from_canvas(canvas),
+                0.0,
+                0.0,
+                icon_alpha,
+                scale,
+                rgba(text_color),
+            );
         } else {
-            draw_play_button(canvas, 0.0, 0.0, icon_alpha, scale, text_color);
+            draw_play_button(
+                Painter::from_canvas(canvas),
+                0.0,
+                0.0,
+                icon_alpha,
+                scale,
+                rgba(text_color),
+            );
         }
     }
     if pause_blur > 0.1 && use_blur {
@@ -915,28 +930,68 @@ fn draw_skip_button(
         let shoot_x = 10.92 * scale + 22.0 * scale * shoot_t;
         let shoot_alpha = ((alpha as f32) * (1.0 - shoot_t)) as u8;
         if shoot_alpha > 0 {
-            draw_control_triangle(canvas, shoot_x, 0.0, shoot_alpha, 0.055, scale, text_color);
+            draw_control_triangle(
+                Painter::from_canvas(canvas),
+                shoot_x,
+                0.0,
+                shoot_alpha,
+                0.055,
+                scale,
+                rgba(text_color),
+            );
         }
 
         let move_t = (t / 0.55).min(1.0);
         let mid_x = -10.92 * scale + (10.92 * 2.0) * scale * move_t;
         let mid_s = 0.050 + (0.055 - 0.050) * move_t;
-        draw_control_triangle(canvas, mid_x, 0.0, alpha, mid_s, scale, text_color);
+        draw_control_triangle(
+            Painter::from_canvas(canvas),
+            mid_x,
+            0.0,
+            alpha,
+            mid_s,
+            scale,
+            rgba(text_color),
+        );
 
         let fade_raw = ((t - 0.15) / 0.85).clamp(0.0, 1.0);
         let fade_eased = ease_out_back(fade_raw);
         let new_x = -25.0 * scale + (25.0 - 10.92) * scale * fade_eased;
         let new_alpha = ((alpha as f32) * fade_raw) as u8;
         if new_alpha > 0 {
-            draw_control_triangle(canvas, new_x, 0.0, new_alpha, 0.050, scale, text_color);
+            draw_control_triangle(
+                Painter::from_canvas(canvas),
+                new_x,
+                0.0,
+                new_alpha,
+                0.050,
+                scale,
+                rgba(text_color),
+            );
         }
 
         if skip_blur > 0.1 && use_blur {
             canvas.restore();
         }
     } else {
-        draw_control_triangle(canvas, -10.92 * scale, 0.0, alpha, 0.050, scale, text_color);
-        draw_control_triangle(canvas, 10.92 * scale, 0.0, alpha, 0.055, scale, text_color);
+        draw_control_triangle(
+            Painter::from_canvas(canvas),
+            -10.92 * scale,
+            0.0,
+            alpha,
+            0.050,
+            scale,
+            rgba(text_color),
+        );
+        draw_control_triangle(
+            Painter::from_canvas(canvas),
+            10.92 * scale,
+            0.0,
+            alpha,
+            0.055,
+            scale,
+            rgba(text_color),
+        );
     }
     canvas.restore();
 }
@@ -967,5 +1022,12 @@ fn draw_placeholder(
 
     let cx = x + size / 2.0;
     let cy = y + size / 2.0;
-    crate::icons::music::draw_music_icon(canvas, cx, cy, alpha, scale * 1.8, text_color);
+    crate::icons::music::draw_music_icon(
+        Painter::from_canvas(canvas),
+        cx,
+        cy,
+        alpha,
+        scale * 1.8,
+        rgba(text_color),
+    );
 }

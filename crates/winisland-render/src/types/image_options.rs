@@ -56,6 +56,9 @@ pub struct ImageOptions {
     pub sampling: Sampling,
     pub constraint: SrcConstraint,
     pub fit: ImageFit,
+    /// 整体不透明度（0..=255）。后端图像绘制只用 Paint 的 alpha 调制像素、RGB 不参与，
+    /// 因此这里只表达 alpha（对应原 `Paint::set_alpha` / `set_alpha_f`）。
+    pub alpha: u8,
 }
 
 impl Default for ImageOptions {
@@ -65,6 +68,7 @@ impl Default for ImageOptions {
             sampling: Sampling::Default,
             constraint: SrcConstraint::Fast,
             fit: ImageFit::Fill,
+            alpha: 255,
         }
     }
 }
@@ -89,6 +93,11 @@ impl ImageOptions {
 
     pub fn with_fit(mut self, fit: ImageFit) -> Self {
         self.fit = fit;
+        self
+    }
+
+    pub fn with_alpha(mut self, alpha: u8) -> Self {
+        self.alpha = alpha;
         self
     }
 }

@@ -206,6 +206,7 @@ impl<'a> Painter<'a> {
         };
         let mut paint = skia_safe::Paint::default();
         paint.set_anti_alias(true);
+        paint.set_alpha(options.alpha);
         let sampling = to_skia_sampling(options.sampling);
         match options.constraint {
             SrcConstraint::Fast => {

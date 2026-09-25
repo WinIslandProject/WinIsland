@@ -1,6 +1,7 @@
 use crate::icons::arrows::draw_arrow_left;
 use crate::plugin::types::{INTERFACE_VERSION_1, WidgetDrawContextV1};
 use crate::ui::widget::expanded::{draw_widget, widget_animates, widget_grid_layout};
+use crate::utils::color::rgba;
 use skia_safe::{Canvas, Color, Rect};
 use std::ffi::c_void;
 use winisland_core::config::{
@@ -8,6 +9,7 @@ use winisland_core::config::{
     span_cells, widget_footprint,
 };
 use winisland_core::widgets::WidgetManager;
+use winisland_render::Painter;
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_plugin_widget(
@@ -114,12 +116,12 @@ pub fn draw_widget_page(
 
     if show_page_switcher && alpha > 0 {
         draw_arrow_left(
-            canvas,
+            Painter::from_canvas(canvas),
             ox + 7.5 * scale,
             oy + h / 2.0,
             alpha,
             scale,
-            text_color,
+            rgba(text_color),
         );
     }
 

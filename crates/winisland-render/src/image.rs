@@ -69,8 +69,25 @@ impl Image {
         skia_safe::Image::from_encoded(Data::new_copy(bytes)).map(|inner| Self { inner })
     }
 
-    /// 由紧凑排布的 8 位非预乘 RGBA 像素构造光栅图像，`rgba` 长度必须覆盖 `width * height * 4`。
+    /// 由紧凑排布的 8 位**非预乘** RGBA 像素构造光栅图像（封面解码流程使用）。
     pub fn from_rgba8(width: i32, height: i32, rgba: &[u8]) -> Option<Self> {
+        Self::from_rgba8_with_alpha(width, height, rgba, AlphaType::Unpremul)
+    }
+
+    /// 由紧凑排布的 8 位**预乘** RGBA 像素构造光栅图像。
+    ///
+    /// 与 `from_rgba8` 的唯一区别是 alpha 类型：预乘数据（如"RGB 已乘以 alpha"的白色图标）
+    /// 必须走这个入口，否则后端会再做一次解预乘，颜色会变暗。
+    pub fn from_rgba8_premul(width: i32, height: i32, rgba: &[u8]) -> Option<Self> {
+        Self::from_rgba8_with_alpha(width, height, rgba, AlphaType::Premul)
+    }
+
+    fn from_rgba8_with_alpha(
+        width: i32,
+        height: i32,
+        rgba: &[u8],
+        alpha_type: AlphaType,
+    ) -> Option<Self> {
         if width <= 0 || height <= 0 {
             return None;
         }
@@ -80,12 +97,7 @@ impl Image {
         if rgba.len() < pixels.checked_mul(4)? {
             return None;
         }
-        let info = ImageInfo::new(
-            (width, height),
-            ColorType::RGBA8888,
-            AlphaType::Unpremul,
-            None,
-        );
+        let info = ImageInfo::new((width, height), ColorType::RGBA8888, alpha_type, None);
         images::raster_from_data(&info, Data::new_copy(rgba), info.min_row_bytes())
             .map(|inner| Self { inner })
     }
