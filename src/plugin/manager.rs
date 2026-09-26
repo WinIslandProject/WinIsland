@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::loader::NativePlugin;
 use super::types::{
@@ -22,6 +22,7 @@ use super::types::{
     context_from_ffi, read_c_str, widget_from_ffi,
 };
 use super::zip_loader::{self, PluginManifest};
+use pollkit::Job;
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
 use winisland_render::plugin_v1_backend as skia_safe;
 
@@ -2426,22 +2427,13 @@ impl PluginManager {
         collect_installed_plugins(&self.plugin_dir, &disabled, self.loaded_plugin_snapshot())
     }
 
-    pub fn installed_plugins_async(&self) -> mpsc::Receiver<Vec<InstalledPlugin>> {
+    pub fn installed_plugins_async(&self) -> Job<Vec<InstalledPlugin>> {
         let plugin_dir = self.plugin_dir.clone();
         let loaded_plugins = self.loaded_plugin_snapshot();
-        let (tx, rx) = mpsc::channel();
-        let spawn_result = std::thread::Builder::new()
-            .name("winisland-plugin-scan".to_string())
-            .spawn(move || {
-                let disabled = disabled_plugin_ids(&plugin_dir);
-                let plugins = collect_installed_plugins(&plugin_dir, &disabled, loaded_plugins);
-                let _ = tx.send(plugins);
-                crate::platform::wake();
-            });
-        if let Err(error) = spawn_result {
-            log::warn!("Failed to start plugin scan: {error}");
-        }
-        rx
+        Job::spawn_named("winisland-plugin-scan", move || {
+            let disabled = disabled_plugin_ids(&plugin_dir);
+            collect_installed_plugins(&plugin_dir, &disabled, loaded_plugins)
+        })
     }
 
     fn loaded_plugin_snapshot(&self) -> Vec<InstalledPlugin> {

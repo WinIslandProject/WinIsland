@@ -1,0 +1,10 @@
+[package]
+name = "pollkit"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Background jobs, interval throttles and cooldowns for synchronous polled event loops"
+license = "MIT"
+
+[dependencies]
+log = "0.4"

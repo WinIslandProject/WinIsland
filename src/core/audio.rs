@@ -1,5 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, Stream, StreamConfig};
+use pollkit::Cooldown;
 use realfft::RealFftPlanner;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -394,7 +395,7 @@ impl AudioProcessor {
         tokio::task::spawn_blocking(move || {
             let mut active_process_id = 0;
             let mut unavailable_process_id = None;
-            let mut retry_after = Instant::now();
+            let mut retry = Cooldown::ready();
             let mut analyzer = SpectrumAnalyzer::new(LOOPBACK_SAMPLE_RATE as u32);
 
             while !context.cancel.is_cancelled() && context.is_current() {
@@ -409,17 +410,17 @@ impl AudioProcessor {
                 if process_id != active_process_id {
                     active_process_id = process_id;
                     unavailable_process_id = None;
-                    retry_after = Instant::now();
+                    retry.clear();
                 }
 
-                if Instant::now() < retry_after {
+                if !retry.is_ready_now() {
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
 
                 if let Err(error) = capture_process_audio(process_id, &context, &mut analyzer) {
                     context.set_process_capture_active(false);
-                    retry_after = Instant::now() + PROCESS_CAPTURE_RETRY_INTERVAL;
+                    retry.start_now(PROCESS_CAPTURE_RETRY_INTERVAL);
                     if unavailable_process_id != Some(process_id) {
                         unavailable_process_id = Some(process_id);
                         log::warn!(

@@ -1,4 +1,3 @@
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use winisland_platform::WindowPosition;
@@ -20,7 +19,7 @@ const INTERACTIVE_FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const IDLE_FRAME_INTERVAL: Duration = Duration::from_millis(50);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_millis(100);
-const WORKING_SET_TRIM_INTERVAL: Duration = Duration::from_secs(20);
+pub(super) const WORKING_SET_TRIM_INTERVAL: Duration = Duration::from_secs(20);
 const RENDERER_RECOVERY_INTERVAL: Duration = Duration::from_secs(1);
 const LYRIC_TRANSITION_STEP: f32 = 0.05;
 const LYRIC_TRANSITION_LEAD_MS: u64 = (1000.0 / (60.0 * LYRIC_TRANSITION_STEP as f64)) as u64;
@@ -60,9 +59,8 @@ impl App {
             self.geom.win_y = self.geom.configured_y;
             window.set_outer_position(WindowPosition::new(self.geom.win_x, self.geom.win_y));
         }
-        if now.duration_since(self.last_topmost_check) >= Duration::from_secs(1) {
+        if self.topmost_check.due(now) {
             Self::enforce_overlay_window(&window);
-            self.last_topmost_check = now;
         }
         self.handle_tray_events(&window);
         self.reload_config_if_changed(&window);
@@ -103,7 +101,7 @@ impl App {
 
         let (music_active, media_is_playing) = self.poll_media_info(&window);
 
-        if now.duration_since(self.last_fullscreen_check) >= Duration::from_millis(100) {
+        if self.fullscreen_check.due(now) {
             self.update_fullscreen_suppression(&window, now);
         }
 
@@ -219,11 +217,8 @@ impl App {
     }
 
     fn poll_pending_plugin_install(&mut self) {
-        let Some(rx) = self.pending_install.take() else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(Ok((manifest, staging))) => {
+        match self.pending_install.poll() {
+            Some(Ok(Ok((manifest, staging)))) => {
                 if let Err(error) = self.plugin_mgr.activate_staged_plugin(&manifest, &staging) {
                     let _ = std::fs::remove_dir_all(staging);
                     Self::show_toast("Plugin Error", &error);
@@ -240,8 +235,7 @@ impl App {
                 );
                 if let Some(settings) = self.settings.as_mut() {
                     settings.finish_marketplace_install();
-                    settings
-                        .set_plugin_inventory_receiver(self.plugin_mgr.installed_plugins_async());
+                    settings.set_plugin_inventory_scan(self.plugin_mgr.installed_plugins_async());
                     settings.set_plugin_status(
                         winisland_core::i18n::tr("plugin_install_success"),
                         false,
@@ -249,7 +243,7 @@ impl App {
                 }
                 log::info!("Plugin '{}' installed via drop", manifest.name);
             }
-            Ok(Err(e)) => {
+            Some(Ok(Err(e))) => {
                 Self::show_toast("Plugin Error", &e);
                 self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
@@ -257,10 +251,7 @@ impl App {
                 ));
                 log::error!("Failed to install plugin from drop: {e}");
             }
-            Err(mpsc::TryRecvError::Empty) => {
-                self.pending_install = Some(rx);
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Some(Err(_)) => {
                 Self::show_toast("Plugin Error", "Installation thread crashed");
                 log::error!("Plugin installation thread disconnected unexpectedly");
                 self.set_plugin_install_error(winisland_core::i18n::tr_args(
@@ -268,68 +259,59 @@ impl App {
                     &["installation thread crashed"],
                 ));
             }
+            None => {}
         }
     }
 
     fn poll_pending_plugin_marketplace(&mut self) {
-        if let Some(rx) = self.pending_marketplace_catalog.take() {
-            match rx.try_recv() {
-                Ok(Ok(catalog)) => {
-                    self.marketplace_catalog = Some(catalog.clone());
-                    if let Some(settings) = self.settings.as_mut() {
-                        settings.set_marketplace_catalog(catalog);
-                    }
-                }
-                Ok(Err(error)) => {
-                    log::error!("Failed to load plugin marketplace: {error}");
-                    if self.marketplace_catalog.is_none()
-                        && let Some(settings) = self.settings.as_mut()
-                    {
-                        settings.set_marketplace_error(error);
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    self.pending_marketplace_catalog = Some(rx);
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    if self.marketplace_catalog.is_none()
-                        && let Some(settings) = self.settings.as_mut()
-                    {
-                        settings.set_marketplace_error(
-                            "The marketplace task stopped unexpectedly".into(),
-                        );
-                    }
+        match self.pending_marketplace_catalog.poll() {
+            Some(Ok(Ok(catalog))) => {
+                self.marketplace_catalog = Some(catalog.clone());
+                if let Some(settings) = self.settings.as_mut() {
+                    settings.set_marketplace_catalog(catalog);
                 }
             }
+            Some(Ok(Err(error))) => {
+                log::error!("Failed to load plugin marketplace: {error}");
+                if self.marketplace_catalog.is_none()
+                    && let Some(settings) = self.settings.as_mut()
+                {
+                    settings.set_marketplace_error(error);
+                }
+            }
+            Some(Err(_)) => {
+                if self.marketplace_catalog.is_none()
+                    && let Some(settings) = self.settings.as_mut()
+                {
+                    settings
+                        .set_marketplace_error("The marketplace task stopped unexpectedly".into());
+                }
+            }
+            None => {}
         }
 
-        let Some(rx) = self.pending_marketplace_download.take() else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(Ok(path)) => {
+        match self.pending_marketplace_download.poll() {
+            Some(Ok(Ok(path))) => {
                 if let Some(settings) = self.settings.as_mut() {
                     settings
                         .set_plugin_status(winisland_core::i18n::tr("plugin_installing"), false);
                 }
                 self.install_zip_drop(&path);
             }
-            Ok(Err(error)) => {
+            Some(Ok(Err(error))) => {
                 log::error!("Failed to download marketplace plugin: {error}");
                 self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
                     &[&error],
                 ));
             }
-            Err(mpsc::TryRecvError::Empty) => {
-                self.pending_marketplace_download = Some(rx);
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
+            Some(Err(_)) => {
                 self.set_plugin_install_error(winisland_core::i18n::tr_args(
                     "plugin_install_failed",
                     &["the marketplace download task stopped unexpectedly"],
                 ));
             }
+            None => {}
         }
     }
 
@@ -371,7 +353,6 @@ impl App {
     }
 
     fn update_fullscreen_suppression(&mut self, window: &WindowRef, now: Instant) {
-        self.last_fullscreen_check = now;
         let prev_fullscreen = self.is_fullscreen_suppressed;
         self.is_fullscreen_suppressed = is_foreground_fullscreen(
             self.geom.monitor_pos.0,
@@ -881,30 +862,24 @@ impl App {
             || self.is_hidden()
             || self.compact_overlay.is_visible()
         {
-            self.compact_widget_refresh_at = now;
+            self.compact_widget_refresh.clear();
             return;
         }
         let Some(delay) =
             crate::ui::widget::compact::next_refresh_delay(&self.config.compact_widget_layout)
         else {
-            self.compact_widget_refresh_at = now;
+            self.compact_widget_refresh.clear();
             return;
         };
-        if now >= self.compact_widget_refresh_at {
+        if self.compact_widget_refresh.is_ready(now) {
             window.request_redraw();
-            self.compact_widget_refresh_at = now + delay;
+            self.compact_widget_refresh.start(now, delay);
         }
     }
 
     fn periodic_effect_redraw_due(&mut self) -> bool {
         let is_dynamic = self.config.island_style == "dynamic";
-        let due = !self.is_hidden()
-            && self.last_effect_refresh.elapsed().as_millis() >= 1000
-            && (is_dynamic || self.expanded);
-        if due {
-            self.last_effect_refresh = Instant::now();
-        }
-        due
+        !self.is_hidden() && (is_dynamic || self.expanded) && self.effect_refresh.due_now()
     }
 
     fn schedule_next_frame(&mut self, window: &WindowRef, now: Instant, pacing: FramePacing) {
@@ -938,12 +913,10 @@ impl App {
             && !interactive_active
             && !resource_usage_active
             && (!self.expanded || (!playback_active && !dynamic_effect_active))
-            && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL
+            && self.working_set_trim.due(now)
+            && let Err(error) = crate::platform::metrics().trim_working_set()
         {
-            if let Err(error) = crate::platform::metrics().trim_working_set() {
-                log::warn!("Working set trim failed: {error}");
-            }
-            self.last_working_set_trim = now;
+            log::warn!("Working set trim failed: {error}");
         }
         let frame_interval = if transition_active {
             self.animation_frame_interval

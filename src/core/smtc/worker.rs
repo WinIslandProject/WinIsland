@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use pollkit::Every;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use winisland_platform::{MediaCommand, MediaContext};
@@ -105,7 +106,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         }
     }
 
-    let mut last_regular_update = Instant::now();
+    let mut regular_update = Every::millis(300);
     let mut regular_poll_count = 0u32;
 
     while !cancel.is_cancelled() {
@@ -145,7 +146,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             enabled = next_enabled;
             if enabled {
                 media_state.thumbnail_fetcher = ThumbnailFetcher::new(info_tx.clone());
-                last_regular_update = Instant::now() - Duration::from_millis(301);
+                regular_update.expire();
                 media_state.last_session_seen = Instant::now();
                 media_state.timeline_cache.clear();
                 log::info!("SMTC: listener enabled");
@@ -204,10 +205,10 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
                 current_lyrics_local_dir.as_deref(),
                 true,
             );
-            last_regular_update = Instant::now();
+            regular_update.restart(Instant::now());
         }
 
-        if last_regular_update.elapsed() > Duration::from_millis(300) {
+        if regular_update.due_now() {
             regular_poll_count += 1;
             let do_auto_allow = regular_poll_count.is_multiple_of(10);
             media_state.update(
@@ -218,7 +219,6 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
                 current_lyrics_local_dir.as_deref(),
                 do_auto_allow,
             );
-            last_regular_update = Instant::now();
         }
 
         let _ = wake_rx.recv_timeout(Duration::from_millis(300));

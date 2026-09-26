@@ -8,7 +8,7 @@ use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
-use std::sync::mpsc;
+use pollkit::Job;
 use std::time::{Duration, Instant};
 use winisland_core::anim::AnimPool;
 use winisland_core::config::AppConfig;
@@ -202,7 +202,7 @@ pub struct SettingsApp {
     pub(crate) last_frame_time: Instant,
     pub(crate) next_frame_deadline: Instant,
     pub(crate) detected_apps: Vec<String>,
-    detected_apps_rx: Option<mpsc::Receiver<Vec<String>>>,
+    detected_apps_scan: Job<Vec<String>>,
     pub(crate) sidebar_hover: i32,
     pub(crate) popup: Option<PopupState>,
     pub(crate) number_input: Option<NumberInput>,
@@ -235,7 +235,7 @@ pub struct SettingsApp {
     pub(crate) resource_editor_open: bool,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
     pub(crate) plugins: Vec<InstalledPlugin>,
-    plugin_inventory_rx: Option<mpsc::Receiver<Vec<InstalledPlugin>>>,
+    plugin_inventory_scan: Job<Vec<InstalledPlugin>>,
     pub(crate) plugin_page_tab: PluginPageTab,
     pub(crate) marketplace_state: MarketplaceViewState,
     pub(crate) marketplace_installing_id: Option<String>,
@@ -333,7 +333,7 @@ impl SettingsApp {
             last_frame_time: Instant::now(),
             next_frame_deadline: Instant::now(),
             detected_apps,
-            detected_apps_rx: None,
+            detected_apps_scan: Job::idle(),
             sidebar_hover: -1,
             popup: None,
             number_input: None,
@@ -366,7 +366,7 @@ impl SettingsApp {
             resource_editor_open: false,
             plugin_widgets,
             plugins,
-            plugin_inventory_rx: None,
+            plugin_inventory_scan: Job::idle(),
             plugin_page_tab: PluginPageTab::Installed,
             marketplace_state: MarketplaceViewState::NotLoaded,
             marketplace_installing_id: None,
@@ -478,42 +478,31 @@ impl SettingsApp {
         if changed {
             self.items_dirty = true;
         }
-        if self.detected_apps_rx.is_none() {
-            self.detected_apps_rx = Some(crate::core::smtc::detect_active_apps_async());
+        if !self.detected_apps_scan.is_running() {
+            self.detected_apps_scan = crate::core::smtc::detect_active_apps_async();
         }
     }
 
     fn poll_detected_apps(&mut self) {
-        let Some(rx) = self.detected_apps_rx.take() else {
+        let Some(apps) = self.detected_apps_scan.poll_ok() else {
             return;
         };
-        match rx.try_recv() {
-            Ok(apps) => {
-                let mut changed = false;
-                for app in apps {
-                    if !self.detected_apps.contains(&app) {
-                        self.detected_apps.push(app);
-                        changed = true;
-                    }
-                }
-                if changed {
-                    self.items_dirty = true;
-                    self.request_redraw();
-                }
+        let mut changed = false;
+        for app in apps {
+            if !self.detected_apps.contains(&app) {
+                self.detected_apps.push(app);
+                changed = true;
             }
-            Err(mpsc::TryRecvError::Empty) => self.detected_apps_rx = Some(rx),
-            Err(mpsc::TryRecvError::Disconnected) => {}
+        }
+        if changed {
+            self.items_dirty = true;
+            self.request_redraw();
         }
     }
 
     fn poll_plugin_inventory(&mut self) {
-        let Some(rx) = self.plugin_inventory_rx.take() else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(plugins) => self.set_plugins(plugins),
-            Err(mpsc::TryRecvError::Empty) => self.plugin_inventory_rx = Some(rx),
-            Err(mpsc::TryRecvError::Disconnected) => {}
+        if let Some(plugins) = self.plugin_inventory_scan.poll_ok() {
+            self.set_plugins(plugins);
         }
     }
 }
@@ -1339,11 +1328,8 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    pub(crate) fn set_plugin_inventory_receiver(
-        &mut self,
-        receiver: mpsc::Receiver<Vec<InstalledPlugin>>,
-    ) {
-        self.plugin_inventory_rx = Some(receiver);
+    pub(crate) fn set_plugin_inventory_scan(&mut self, scan: Job<Vec<InstalledPlugin>>) {
+        self.plugin_inventory_scan = scan;
     }
 
     pub(crate) fn set_plugin_widgets(&mut self, plugin_widgets: Vec<PluginWidget>) {
