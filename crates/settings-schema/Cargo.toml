@@ -1,0 +1,10 @@
+[package]
+name = "settings-schema"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Derive a runtime schema for settings structs and read or write their fields through it"
+license = "MIT"
+
+[dependencies]
+settings-schema-derive = { path = "../settings-schema-derive" }

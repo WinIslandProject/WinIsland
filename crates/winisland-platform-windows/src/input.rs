@@ -1,7 +1,7 @@
 use std::cell::RefCell;
-use std::sync::Mutex;
 use std::time::Duration;
 
+use parking_lot::Mutex;
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -43,30 +43,25 @@ impl InputHooks for WindowsInput {
             if slot.borrow().is_none() {
                 // SAFETY: The current module contains the static callback; the caller pumps messages.
                 let hook = unsafe {
-                    let module = GetModuleHandleW(None)
-                        .map_err(|error| PlatformError::Backend(error.to_string()))?;
+                    let module = GetModuleHandleW(None).map_err(PlatformError::backend)?;
                     SetWindowsHookExW(
                         WH_KEYBOARD_LL,
                         Some(volume_keyboard_hook),
                         Some(HINSTANCE(module.0)),
                         0,
                     )
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?
+                    .map_err(PlatformError::backend)?
                 };
                 *slot.borrow_mut() = Some(HookGuard(hook));
                 log::info!("Volume keys are handled by WinIsland");
             }
-            *VOLUME_CALLBACK
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(callback);
+            *VOLUME_CALLBACK.lock() = Some(callback);
             Ok(())
         })
     }
 
     fn uninstall_volume_keys(&self) -> Result<(), PlatformError> {
-        *VOLUME_CALLBACK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *VOLUME_CALLBACK.lock() = None;
         VOLUME_HOOK.with(|slot| {
             if slot.borrow_mut().take().is_some() {
                 log::info!("Native volume flyout replacement disabled");
@@ -115,7 +110,6 @@ unsafe extern "system" fn volume_keyboard_hook(
             };
             let handled = VOLUME_CALLBACK
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .as_ref()
                 .is_some_and(|callback| callback(event));
             if handled {

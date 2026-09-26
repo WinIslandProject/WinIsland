@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Arc, Mutex};
 
+use parking_lot::Mutex;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Variant::{VARIANT, VT_I4, VT_UI1, VT_UI4};
 use windows::Win32::System::Wmi::{ISWbemLocator, ISWbemObject, ISWbemServices, SWbemLocator};
@@ -9,6 +10,10 @@ use windows::core::BSTR;
 use winisland_platform::{BrightnessFeed, BrightnessSnapshot};
 
 use crate::com::ComGuard;
+
+const BRIGHTNESS_QUERY: &str =
+    "SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active = TRUE";
+const METHODS_QUERY: &str = "SELECT * FROM WmiMonitorBrightnessMethods WHERE Active = TRUE";
 
 pub(super) struct WindowsBrightnessFeed {
     snapshot: Arc<Mutex<BrightnessSnapshot>>,
@@ -44,10 +49,7 @@ impl WindowsBrightnessFeed {
 
 impl BrightnessFeed for WindowsBrightnessFeed {
     fn snapshot(&self) -> BrightnessSnapshot {
-        *self
-            .snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self.snapshot.lock()
     }
 
     fn set_level(&self, level: f32) {
@@ -70,36 +72,12 @@ pub(super) fn available() -> bool {
     let Ok(_com) = ComGuard::mta() else {
         return false;
     };
-    // SAFETY: The WMI locator, service, and queried objects remain on this COM thread.
+    // SAFETY: The WMI service and queried objects remain on this COM thread.
     unsafe {
-        let Ok(locator) =
-            CoCreateInstance::<_, ISWbemLocator>(&SWbemLocator, None, CLSCTX_INPROC_SERVER)
-        else {
-            return false;
-        };
-        let empty = BSTR::new();
-        let Ok(services) = locator.ConnectServer(
-            &empty,
-            &BSTR::from("ROOT\\WMI"),
-            &empty,
-            &empty,
-            &empty,
-            &empty,
-            0,
-            None,
-        ) else {
-            return false;
-        };
-        query_first(
-            &services,
-            "SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active = TRUE",
-        )
-        .is_ok()
-            && query_first(
-                &services,
-                "SELECT * FROM WmiMonitorBrightnessMethods WHERE Active = TRUE",
-            )
-            .is_ok()
+        connect_wmi().is_ok_and(|services| {
+            query_first(&services, BRIGHTNESS_QUERY).is_ok()
+                && query_first(&services, METHODS_QUERY).is_ok()
+        })
     }
 }
 
@@ -110,28 +88,11 @@ fn run_monitor(
 ) -> windows::core::Result<()> {
     // SAFETY: All WMI objects stay on this COM-initialized worker thread.
     unsafe {
-        let locator: ISWbemLocator = CoCreateInstance(&SWbemLocator, None, CLSCTX_INPROC_SERVER)?;
-        let empty = BSTR::new();
-        let services = locator.ConnectServer(
-            &empty,
-            &BSTR::from("ROOT\\WMI"),
-            &empty,
-            &empty,
-            &empty,
-            &empty,
-            0,
-            None,
-        )?;
-        let initial = query_first(
-            &services,
-            "SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active = TRUE",
-        )?;
+        let services = connect_wmi()?;
+        let initial = query_first(&services, BRIGHTNESS_QUERY)?;
         let level = property_u32(&initial, "CurrentBrightness")?.min(100) as f32 / 100.0;
         publish(snapshot, level, false);
-        let setter = query_first(
-            &services,
-            "SELECT * FROM WmiMonitorBrightnessMethods WHERE Active = TRUE",
-        )?;
+        let setter = query_first(&services, METHODS_QUERY)?;
         let events = services.ExecNotificationQuery(
             &BSTR::from("SELECT * FROM WmiMonitorBrightnessEvent WHERE Active = TRUE"),
             &BSTR::from("WQL"),
@@ -152,6 +113,24 @@ fn run_monitor(
         }
     }
     Ok(())
+}
+
+unsafe fn connect_wmi() -> windows::core::Result<ISWbemServices> {
+    // SAFETY: Caller runs on a COM-initialized thread and keeps the service on it.
+    unsafe {
+        let locator: ISWbemLocator = CoCreateInstance(&SWbemLocator, None, CLSCTX_INPROC_SERVER)?;
+        let empty = BSTR::new();
+        locator.ConnectServer(
+            &empty,
+            &BSTR::from("ROOT\\WMI"),
+            &empty,
+            &empty,
+            &empty,
+            &empty,
+            0,
+            None,
+        )
+    }
 }
 
 unsafe fn query_first(
@@ -205,9 +184,7 @@ unsafe fn set_brightness(object: &ISWbemObject, level: u8) -> windows::core::Res
 }
 
 fn publish(snapshot: &Mutex<BrightnessSnapshot>, level: f32, notify: bool) {
-    let mut current = snapshot
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut current = snapshot.lock();
     if (current.level - level).abs() > 0.001 && notify {
         current.revision = current.revision.wrapping_add(1);
     }

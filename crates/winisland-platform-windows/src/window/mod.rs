@@ -14,10 +14,11 @@ use winisland_platform::{
     WindowPosition, WindowSize, WindowSystem,
 };
 use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::platform::windows::{MonitorHandleExtWindows, WindowExtWindows};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use winit::window::{CursorIcon, Theme as WinitTheme, Window};
+use winit::window::{CursorIcon, Theme as WinitTheme, Window, WindowAttributes};
 
 use crate::backdrop::HostBackdrop;
 use crate::display::WindowsDisplay;
@@ -54,6 +55,29 @@ fn get_window(id: WindowId) -> Option<Arc<Window>> {
 fn with_window<T>(id: WindowId, f: impl FnOnce(&Window) -> T) -> Option<T> {
     let window = get_window(id)?;
     Some(f(&window))
+}
+
+fn create_window(
+    event_loop: &ActiveEventLoop,
+    attributes: WindowAttributes,
+) -> Result<Arc<Window>, PlatformError> {
+    event_loop
+        .create_window(attributes)
+        .map(Arc::new)
+        .map_err(PlatformError::backend)
+}
+
+fn register_window(window: Arc<Window>, backdrop: Option<Arc<Window>>) -> WindowId {
+    let id = WindowId(u64::from(window.id()));
+    let record = WindowRecord {
+        host_backdrop: None,
+        window,
+        backdrop,
+    };
+    WINDOWS.with(|windows| {
+        windows.borrow_mut().insert(id, record);
+    });
+    id
 }
 
 fn monitor_id(monitor: &MonitorHandle) -> MonitorId {
@@ -187,32 +211,13 @@ impl WindowSystem for WindowsWindowSystem {
 
     fn create_overlay(&self, spec: OverlaySpec) -> Result<WindowId, PlatformError> {
         r#loop::with_active_event_loop(|event_loop| {
-            let backdrop = Arc::new(
-                event_loop
-                    .create_window(attrs::backdrop_attributes())
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?,
-            );
+            let backdrop = create_window(event_loop, attrs::backdrop_attributes())?;
             let _ = backdrop.set_cursor_hittest(false);
             let owner = window_hwnd(&backdrop)
                 .ok_or(PlatformError::Unavailable("Win32 backdrop window handle"))?
                 as isize;
-            let window = Arc::new(
-                event_loop
-                    .create_window(attrs::overlay_attributes(spec, owner))
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?,
-            );
-            let id = WindowId(u64::from(window.id()));
-            WINDOWS.with(|windows| {
-                windows.borrow_mut().insert(
-                    id,
-                    WindowRecord {
-                        host_backdrop: None,
-                        window,
-                        backdrop: Some(backdrop),
-                    },
-                );
-            });
-            Ok(id)
+            let window = create_window(event_loop, attrs::overlay_attributes(spec, owner))?;
+            Ok(register_window(window, Some(backdrop)))
         })
         .ok_or(PlatformError::Unavailable("active event loop"))?
     }
@@ -224,23 +229,11 @@ impl WindowSystem for WindowsWindowSystem {
                     .available_monitors()
                     .find(|monitor| monitor_id(monitor) == id)
             });
-            let window = Arc::new(
-                event_loop
-                    .create_window(attrs::settings_attributes(spec, monitor.as_ref()))
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?,
-            );
-            let id = WindowId(u64::from(window.id()));
-            WINDOWS.with(|windows| {
-                windows.borrow_mut().insert(
-                    id,
-                    WindowRecord {
-                        host_backdrop: None,
-                        window,
-                        backdrop: None,
-                    },
-                );
-            });
-            Ok(id)
+            let attributes = attrs::settings_attributes(spec, monitor.as_ref());
+            Ok(register_window(
+                create_window(event_loop, attributes)?,
+                None,
+            ))
         })
         .ok_or(PlatformError::Unavailable("active event loop"))?
     }
@@ -495,7 +488,7 @@ impl WindowSystem for WindowsWindowSystem {
         };
         if let Err(error) = host_backdrop.update(params) {
             self.release_host_backdrop(id);
-            return Err(PlatformError::Backend(error.to_string()));
+            return Err(PlatformError::backend(error));
         }
         Ok(true)
     }

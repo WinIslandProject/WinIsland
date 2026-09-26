@@ -1,7 +1,7 @@
 use std::path::Path;
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use pollkit::Job;
 use winisland_platform::{HostBackdropParams, TrayAction, WindowSize};
 
 use crate::core::persistence::{get_config_path, load_config};
@@ -67,8 +67,8 @@ impl App {
                 if let Some(settings) = self.settings.as_mut() {
                     match result {
                         Ok(()) => {
-                            if let Some(receiver) = plugin_inventory {
-                                settings.set_plugin_inventory_receiver(receiver);
+                            if let Some(scan) = plugin_inventory {
+                                settings.set_plugin_inventory_scan(scan);
                             }
                             settings.set_plugin_status(
                                 winisland_core::i18n::tr("plugin_state_restart"),
@@ -94,8 +94,8 @@ impl App {
                     match result {
                         Ok(()) => {
                             settings.set_plugin_widgets(self.widget_mgr.configurable_widgets());
-                            if let Some(receiver) = plugin_inventory {
-                                settings.set_plugin_inventory_receiver(receiver);
+                            if let Some(scan) = plugin_inventory {
+                                settings.set_plugin_inventory_scan(scan);
                             }
                             settings.set_plugin_status(
                                 winisland_core::i18n::tr("plugin_uninstalled"),
@@ -219,7 +219,7 @@ impl App {
     }
 
     pub(super) fn install_zip_drop(&mut self, path: &Path) {
-        if self.pending_install.is_some() || self.pending_marketplace_download.is_some() {
+        if self.pending_install.is_running() || self.pending_marketplace_download.is_running() {
             Self::show_toast("Plugin Info", "Another installation is already in progress");
             if let Some(settings) = self.settings.as_mut() {
                 settings.set_plugin_status(
@@ -235,31 +235,21 @@ impl App {
 
         let plugin_dir = self.plugin_mgr.plugin_dir.clone();
         let zip_path = path.to_path_buf();
-        let (tx, rx) = mpsc::channel();
-
-        std::thread::spawn(move || {
-            let result = zip_loader::extract_plugin(&zip_path, &plugin_dir);
-            let _ = tx.send(result);
-        });
-
-        self.pending_install = Some(rx);
+        self.pending_install =
+            Job::spawn(move || zip_loader::extract_plugin(&zip_path, &plugin_dir));
         log::info!("Plugin extraction started in background thread");
     }
 
     fn load_plugin_marketplace(&mut self) {
-        if self.pending_marketplace_catalog.is_some() {
+        if self.pending_marketplace_catalog.is_running() {
             return;
         }
         if let Some(settings) = self.settings.as_mut() {
             settings.set_marketplace_loading();
         }
-        let (tx, rx) = mpsc::channel();
-        tokio::spawn(async move {
-            let result = marketplace::load_catalog().await;
-            let _ = tx.send(result);
-            crate::platform::wake();
-        });
-        self.pending_marketplace_catalog = Some(rx);
+        let (job, done) = Job::pending();
+        tokio::spawn(async move { done.send(marketplace::load_catalog().await) });
+        self.pending_marketplace_catalog = job;
     }
 
     fn install_marketplace_plugin(&mut self, plugin: MarketplacePlugin) {
@@ -273,7 +263,7 @@ impl App {
             }
             return;
         }
-        if self.pending_install.is_some() || self.pending_marketplace_download.is_some() {
+        if self.pending_install.is_running() || self.pending_marketplace_download.is_running() {
             if let Some(settings) = self.settings.as_mut() {
                 settings.finish_marketplace_install();
                 settings.set_plugin_status(
@@ -292,13 +282,9 @@ impl App {
                 false,
             );
         }
-        let (tx, rx) = mpsc::channel();
-        tokio::spawn(async move {
-            let result = marketplace::download_plugin(&plugin).await;
-            let _ = tx.send(result);
-            crate::platform::wake();
-        });
-        self.pending_marketplace_download = Some(rx);
+        let (job, done) = Job::pending();
+        tokio::spawn(async move { done.send(marketplace::download_plugin(&plugin).await) });
+        self.pending_marketplace_download = job;
     }
 
     pub(super) fn open_settings(&mut self) {
@@ -333,7 +319,7 @@ impl App {
             return;
         };
         settings.create_window(renderer, target_monitor);
-        settings.set_plugin_inventory_receiver(self.plugin_mgr.installed_plugins_async());
+        settings.set_plugin_inventory_scan(self.plugin_mgr.installed_plugins_async());
         if let Some(catalog) = self.marketplace_catalog.clone() {
             settings.set_marketplace_catalog(catalog);
         }
@@ -360,7 +346,7 @@ impl App {
                 if let Err(error) = crate::platform::metrics().trim_working_set() {
                     log::warn!("Working set trim failed: {error}");
                 }
-                self.last_working_set_trim = Instant::now();
+                self.working_set_trim.restart(Instant::now());
             }
             log::info!("Settings window closed and resources released");
         }
@@ -409,8 +395,7 @@ impl App {
 
     pub(super) fn reload_config_if_changed(&mut self, window_ref: &WindowRef) {
         let now = Instant::now();
-        if now.duration_since(self.last_config_check) >= Duration::from_millis(500) {
-            self.last_config_check = now;
+        if self.config_check.due(now) {
             let modified = std::fs::metadata(get_config_path())
                 .and_then(|metadata| metadata.modified())
                 .ok();
@@ -539,10 +524,9 @@ impl App {
             }
         }
 
-        if now.duration_since(self.last_monitor_check) < Duration::from_secs(1) {
+        if !self.monitor_check.due(now) {
             return;
         }
-        self.last_monitor_check = now;
         if let Some(monitor) = Self::get_target_monitor(window_ref, self.config.monitor_index) {
             if let Some(settings) = self.settings.as_mut() {
                 settings.set_target_monitor(monitor.clone());

@@ -22,8 +22,7 @@ struct WinRtGuard;
 impl WinRtGuard {
     fn new() -> Result<Self, PlatformError> {
         // SAFETY: Each successful initialization is balanced by this guard on the same thread.
-        unsafe { RoInitialize(RO_INIT_MULTITHREADED) }
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.map_err(PlatformError::backend)?;
         Ok(Self)
     }
 }
@@ -47,7 +46,7 @@ impl WindowsMediaContext {
         let guard = WinRtGuard::new()?;
         let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
             .and_then(|operation| operation.join())
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+            .map_err(PlatformError::backend)?;
         let (event_tx, event_rx) = mpsc::sync_channel(1);
         let handler = TypedEventHandler::new(move |_manager, _args| {
             let _ = event_tx.try_send(());
@@ -131,13 +130,8 @@ impl MediaSessionHandle for WindowsMediaSession {
     }
 
     fn playback(&self) -> Result<bool, PlatformError> {
-        let info = self
-            .0
-            .GetPlaybackInfo()
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
-        let status = info
-            .PlaybackStatus()
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+        let info = self.0.GetPlaybackInfo().map_err(PlatformError::backend)?;
+        let status = info.PlaybackStatus().map_err(PlatformError::backend)?;
         Ok(status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
     }
 
@@ -146,7 +140,7 @@ impl MediaSessionHandle for WindowsMediaSession {
             .0
             .TryGetMediaPropertiesAsync()
             .and_then(|operation| operation.join())
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+            .map_err(PlatformError::backend)?;
         Ok(read_track(&props))
     }
 
@@ -190,12 +184,10 @@ impl MediaSessionHandle for WindowsMediaSession {
                     .0
                     .TryChangePlaybackPositionAsync(ticks)
                     .and_then(|operation| operation.join())
-                    .map_err(|error| PlatformError::Backend(error.to_string()));
+                    .map_err(PlatformError::backend);
             }
         };
-        operation
-            .map(|_| true)
-            .map_err(|error| PlatformError::Backend(error.to_string()))
+        operation.map(|_| true).map_err(PlatformError::backend)
     }
 
     fn thumbnail(&self, expected_title: &str) -> Result<Vec<u8>, ThumbnailError> {

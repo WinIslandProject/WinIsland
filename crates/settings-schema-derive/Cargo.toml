@@ -1,0 +1,16 @@
+[package]
+name = "settings-schema-derive"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Derive macro for settings-schema"
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+heck = "0.5"
+proc-macro2 = "1"
+quote = "1"
+syn = "2"

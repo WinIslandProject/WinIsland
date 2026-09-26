@@ -10,6 +10,7 @@ mod input;
 mod media;
 mod metrics;
 mod notify;
+mod process;
 mod shell;
 pub mod window;
 

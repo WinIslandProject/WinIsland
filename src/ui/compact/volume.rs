@@ -1,6 +1,7 @@
+use parking_lot::Mutex;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use winisland_platform::{VolumeCommand, VolumeKey, VolumeKeyEvent};
@@ -75,11 +76,7 @@ impl VolumeMonitor {
     }
 
     pub(super) fn snapshot(&self) -> VolumeSnapshot {
-        *self
-            .state
-            .snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self.state.snapshot.lock()
     }
 
     pub(super) fn set_key_handling_enabled(&self, enabled: bool) {
@@ -92,11 +89,7 @@ impl VolumeMonitor {
 
     pub(super) fn set_level(&self, level: f32) {
         if self.can_set_level() && level.is_finite() {
-            *self
-                .state
-                .pending_level
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(level.clamp(0.0, 1.0));
+            *self.state.pending_level.lock() = Some(level.clamp(0.0, 1.0));
         }
     }
 
@@ -197,11 +190,7 @@ fn spawn_volume_monitor(
             }
 
             let mut command_handled = false;
-            let pending_level = state
-                .pending_level
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
+            let pending_level = state.pending_level.lock().take();
             for command in command_receiver
                 .try_iter()
                 .chain(pending_level.map(VolumeCommand::SetLevel))
@@ -243,10 +232,7 @@ fn publish_volume_snapshot(
             (last.level - current.level).abs() > VOLUME_CHANGE_THRESHOLD
                 || last.muted != current.muted
         });
-    let mut snapshot = state
-        .snapshot
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut snapshot = state.snapshot.lock();
     let revision = if changed {
         snapshot.revision.wrapping_add(1)
     } else {

@@ -1,9 +1,9 @@
 use log::{Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
+use parking_lot::Mutex;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::panic::{self, PanicHookInfo};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 const LOG_FILE: &str = "winisland.log";
 const MAX_LOG_SIZE: u64 = 1_024_000; // 1MB
@@ -89,18 +89,14 @@ impl Log for FileLogger {
             record.target(),
             record.args()
         );
-        if let Ok(mut state) = self.state.lock()
-            && state.write(msg.as_bytes()).is_ok()
-            && record.level() <= Level::Warn
-        {
+        let mut state = self.state.lock();
+        if state.write(msg.as_bytes()).is_ok() && record.level() <= Level::Warn {
             let _ = state.flush();
         }
     }
 
     fn flush(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            let _ = state.flush();
-        }
+        let _ = self.state.lock().flush();
     }
 }
 

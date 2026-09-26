@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use pollkit::Job;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -14,19 +15,10 @@ mod worker;
 
 const SEEK_GUARD_DURATION: Duration = Duration::from_secs(4);
 
-pub(crate) fn detect_active_apps_async() -> std::sync::mpsc::Receiver<Vec<String>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let spawn_result = std::thread::Builder::new()
-        .name("winisland-smtc-settings".to_string())
-        .spawn(move || {
-            let apps = crate::platform::media().detect_active_apps();
-            let _ = tx.send(apps);
-            crate::platform::wake();
-        });
-    if let Err(error) = spawn_result {
-        log::warn!("Failed to start settings media app scan: {error}");
-    }
-    rx
+pub(crate) fn detect_active_apps_async() -> Job<Vec<String>> {
+    Job::spawn_named("winisland-smtc-settings", || {
+        crate::platform::media().detect_active_apps()
+    })
 }
 
 #[derive(Clone, Debug)]

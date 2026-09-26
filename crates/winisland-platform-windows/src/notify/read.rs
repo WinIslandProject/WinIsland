@@ -1,10 +1,9 @@
+use pollkit::Done;
 use windows::ApplicationModel::AppDisplayInfo;
 use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
 use windows::UI::Notifications::Management::UserNotificationListener;
 use windows::UI::Notifications::{KnownNotificationBindings, UserNotification};
 use winisland_platform::{IconBounds, NotificationIconData, NotificationPayload};
-
-use super::CancelSlot;
 
 const MAX_ICON_BYTES: u64 = 2 * 1024 * 1024;
 pub(super) fn read_notification(
@@ -83,9 +82,9 @@ fn read_notification_text(notification: &UserNotification) -> (String, String) {
     )
 }
 
-pub(super) fn read_app_icon(
+pub(super) fn read_app_icon<T>(
     stream: IRandomAccessStreamWithContentType,
-    cancel: &CancelSlot,
+    done: &Done<T>,
 ) -> Option<NotificationIconData> {
     let size = stream.Size().ok()?;
     if size == 0 || size > MAX_ICON_BYTES {
@@ -94,7 +93,7 @@ pub(super) fn read_app_icon(
     let reader = DataReader::CreateDataReader(&stream).ok()?;
     let operation = reader.LoadAsync(size as u32).ok()?;
     let cancel_operation = operation.clone();
-    cancel.set(move || {
+    done.on_cancel(move || {
         let _ = cancel_operation.Cancel();
     });
     operation.join().ok()?;

@@ -111,6 +111,16 @@ impl PluginResultC {
     }
 }
 
+/// Build a result from a Rust `Result`, using the error's `Display` text as the message.
+impl<E: std::fmt::Display> From<Result<(), E>> for PluginResultC {
+    fn from(result: Result<(), E>) -> Self {
+        match result {
+            Ok(()) => Self::ok(),
+            Err(error) => Self::err(&error.to_string()),
+        }
+    }
+}
+
 /// Fill a fixed-size byte buffer with a string, zeroing the rest.
 ///
 /// Useful for initialising `#[repr(C)]` struct fields with a

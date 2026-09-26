@@ -51,13 +51,11 @@ pub(super) fn run(handler: &mut dyn AppHandler) -> Result<(), PlatformError> {
         }
         false
     });
-    let event_loop = builder
-        .build()
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
+    let event_loop = builder.build().map_err(PlatformError::backend)?;
     let _ = PROXY.set(event_loop.create_proxy());
     event_loop
         .run_app(&mut EventAdapter { handler })
-        .map_err(|error| PlatformError::Backend(error.to_string()))
+        .map_err(PlatformError::backend)
 }
 
 pub(super) fn exit() {

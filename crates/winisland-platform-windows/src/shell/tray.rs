@@ -23,11 +23,10 @@ fn icon(theme: TrayTheme) -> Result<Icon, PlatformError> {
         TrayTheme::Dark => include_bytes!("../../../../resources/icon.png"),
     };
     let rgba = image::load_from_memory(bytes)
-        .map_err(|error| PlatformError::Backend(error.to_string()))?
+        .map_err(PlatformError::backend)?
         .to_rgba8();
     let (width, height) = rgba.dimensions();
-    Icon::from_rgba(rgba.into_raw(), width, height)
-        .map_err(|error| PlatformError::Backend(error.to_string()))
+    Icon::from_rgba(rgba.into_raw(), width, height).map_err(PlatformError::backend)
 }
 
 pub(super) fn install(theme: TrayTheme, labels: TrayLabels) -> Result<(), PlatformError> {
@@ -36,20 +35,16 @@ pub(super) fn install(theme: TrayTheme, labels: TrayLabels) -> Result<(), Platfo
     let settings = MenuItem::new(&labels.settings, true, None);
     let restart = MenuItem::new(&labels.restart, true, None);
     let exit = MenuItem::new(&labels.exit, true, None);
-    menu.append(&toggle)
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
-    menu.append(&settings)
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
-    menu.append(&restart)
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
-    menu.append(&exit)
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
+    menu.append(&toggle).map_err(PlatformError::backend)?;
+    menu.append(&settings).map_err(PlatformError::backend)?;
+    menu.append(&restart).map_err(PlatformError::backend)?;
+    menu.append(&exit).map_err(PlatformError::backend)?;
     let tray = TrayIconBuilder::new()
         .with_tooltip(&labels.tooltip)
         .with_menu(Box::new(menu))
         .with_icon(icon(theme)?)
         .build()
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
+        .map_err(PlatformError::backend)?;
     TRAY.with(|slot| {
         *slot.borrow_mut() = Some(WindowsTray {
             tray,
@@ -70,7 +65,7 @@ pub(super) fn update(theme: TrayTheme, labels: TrayLabels) -> Result<(), Platfor
         if tray.theme != theme {
             tray.tray
                 .set_icon(Some(icon(theme)?))
-                .map_err(|error| PlatformError::Backend(error.to_string()))?;
+                .map_err(PlatformError::backend)?;
             tray.theme = theme;
         }
         tray.toggle.set_text(&labels.toggle);

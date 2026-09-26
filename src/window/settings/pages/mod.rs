@@ -1,3 +1,4 @@
+use winisland_core::config::AppConfigField;
 use winisland_render::{Image, Rect, Rgba};
 
 use crate::utils::settings_ui::items::{
@@ -13,11 +14,17 @@ pub mod general;
 pub mod music;
 pub mod plugin_settings;
 pub mod plugins;
+mod schema;
 pub mod widgets;
 
 pub(crate) struct SettingsPage<A> {
     items: Vec<SettingsItem>,
-    actions: Vec<Option<A>>,
+    actions: Vec<Option<RowAction<A>>>,
+}
+
+enum RowAction<A> {
+    Page(A),
+    Setting(AppConfigField),
 }
 
 impl<A> SettingsPage<A> {
@@ -35,7 +42,12 @@ impl<A> SettingsPage<A> {
 
     pub(crate) fn push_action(&mut self, item: SettingsItem, action: A) {
         self.items.push(item);
-        self.actions.push(Some(action));
+        self.actions.push(Some(RowAction::Page(action)));
+    }
+
+    pub(crate) fn push_setting(&mut self, item: SettingsItem, field: AppConfigField) {
+        self.items.push(item);
+        self.actions.push(Some(RowAction::Setting(field)));
     }
 
     pub(crate) fn section(&mut self, label: String) {
@@ -187,6 +199,20 @@ impl<A> SettingsPage<A> {
     }
 
     pub(crate) fn action(&self, result: &ClickResult) -> Option<&A> {
+        match self.row_action(result)? {
+            RowAction::Page(action) => Some(action),
+            RowAction::Setting(_) => None,
+        }
+    }
+
+    pub(crate) fn setting_field(&self, result: &ClickResult) -> Option<AppConfigField> {
+        match self.row_action(result)? {
+            RowAction::Setting(field) => Some(*field),
+            RowAction::Page(_) => None,
+        }
+    }
+
+    fn row_action(&self, result: &ClickResult) -> Option<&RowAction<A>> {
         result
             .item_index()
             .and_then(|index| self.actions.get(index))
@@ -211,21 +237,24 @@ impl PageInput {
         hit_test(page.items(), self.x, self.y, self.start_y, self.width)
     }
 
+    fn row_top<A>(&self, page: &SettingsPage<A>, item_index: usize, scroll_y: f32) -> f32 {
+        let above: f32 = page
+            .items()
+            .iter()
+            .take(item_index)
+            .map(SettingsItem::height)
+            .sum();
+        self.start_y + above - scroll_y
+    }
+
     pub(crate) fn popup_button_rect<A>(
         &self,
         page: &SettingsPage<A>,
         item_index: usize,
         scroll_y: f32,
     ) -> Rect {
-        let item_y = self.start_y
-            + page
-                .items()
-                .iter()
-                .take(item_index)
-                .map(SettingsItem::height)
-                .sum::<f32>();
         let button_x = SIDEBAR_W + CONTENT_PADDING + self.width - GROUP_INNER_PAD - POPUP_BTN_W;
-        let button_y = item_y + (ROW_HEIGHT - POPUP_BTN_H) / 2.0 - scroll_y;
+        let button_y = self.row_top(page, item_index, scroll_y) + (ROW_HEIGHT - POPUP_BTN_H) / 2.0;
         Rect::from_xywh(button_x, button_y, POPUP_BTN_W, POPUP_BTN_H)
     }
 
@@ -235,17 +264,11 @@ impl PageInput {
         item_index: usize,
         scroll_y: f32,
     ) -> Rect {
-        let item_y = self.start_y
-            + page
-                .items()
-                .iter()
-                .take(item_index)
-                .map(SettingsItem::height)
-                .sum::<f32>();
         let content_w = self.width - CONTENT_PADDING * 2.0;
         let button_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - STEPPER_BTN_SIZE;
         let value_x = button_x - STEPPER_GAP - STEPPER_VALUE_W;
-        let value_y = item_y + (ROW_HEIGHT - STEPPER_BTN_SIZE) / 2.0 - scroll_y;
+        let value_y =
+            self.row_top(page, item_index, scroll_y) + (ROW_HEIGHT - STEPPER_BTN_SIZE) / 2.0;
         Rect::from_xywh(
             SIDEBAR_W + value_x,
             value_y,

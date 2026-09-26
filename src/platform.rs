@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use winisland_platform::{
     AudioProvider, Capabilities, DisplayProvider, HitRegion, InputHooks, MediaProvider,
@@ -20,17 +20,11 @@ static CAPABILITIES: Mutex<Capabilities> = Mutex::new(Capabilities {
 });
 
 pub(crate) fn capabilities() -> Capabilities {
-    *CAPABILITIES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    *CAPABILITIES.lock()
 }
 
 pub(crate) fn update_capabilities(update: impl FnOnce(&mut Capabilities)) {
-    update(
-        &mut CAPABILITIES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    );
+    update(&mut CAPABILITIES.lock());
 }
 
 pub(crate) fn shell() -> &'static dyn ShellIntegration {

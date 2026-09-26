@@ -477,12 +477,7 @@ fn draw_highlighted_lyric(
     blur: Option<BlurSpec>,
     highlight: Option<LyricHighlight>,
 ) {
-    let Some(highlight) = highlight.filter(|highlight| {
-        highlight.start_byte <= highlight.end_byte
-            && highlight.end_byte <= text.len()
-            && text.is_char_boundary(highlight.start_byte)
-            && text.is_char_boundary(highlight.end_byte)
-    }) else {
+    let draw = |color: Rgba| {
         draw_text_cached(DrawTextCachedParams {
             painter,
             text,
@@ -490,28 +485,26 @@ fn draw_highlighted_lyric(
             y,
             size,
             bold: false,
-            color: active_color,
+            color,
             blur,
         });
+    };
+    let Some(highlight) = highlight.filter(|highlight| {
+        highlight.start_byte <= highlight.end_byte
+            && highlight.end_byte <= text.len()
+            && text.is_char_boundary(highlight.start_byte)
+            && text.is_char_boundary(highlight.end_byte)
+    }) else {
+        draw(active_color);
         return;
     };
 
-    let pending_color = Rgba::from_argb(
+    draw(Rgba::from_argb(
         active_color.a(),
         PENDING_LYRIC_CHANNEL,
         PENDING_LYRIC_CHANNEL,
         PENDING_LYRIC_CHANNEL,
-    );
-    draw_text_cached(DrawTextCachedParams {
-        painter,
-        text,
-        x,
-        y,
-        size,
-        bold: false,
-        color: pending_color,
-        blur,
-    });
+    ));
 
     let font_manager = FontManager::global();
     let style = winisland_render::FontStyle::normal();
@@ -533,16 +526,7 @@ fn draw_highlighted_lyric(
             clip_right,
             y + size * 0.5,
         ));
-        draw_text_cached(DrawTextCachedParams {
-            painter,
-            text,
-            x,
-            y,
-            size,
-            bold: false,
-            color,
-            blur,
-        });
+        draw(color);
         painter.restore();
     };
     draw_layer(active_color, x, x + completed_width);

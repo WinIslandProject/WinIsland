@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use super::default_true;
-
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WidgetKind {
@@ -101,6 +99,10 @@ pub struct ResourceMetricConfig {
     #[serde(default)]
     pub style: ResourceMetricStyle,
     pub color: u32,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 pub fn default_resource_metrics() -> Vec<ResourceMetricConfig> {

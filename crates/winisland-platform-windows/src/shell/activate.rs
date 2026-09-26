@@ -1,13 +1,8 @@
 use std::path::Path;
 
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE, HWND, LPARAM,
-};
-use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
+use windows::Win32::Foundation::{HANDLE, HWND, LPARAM};
 use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance};
-use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-};
+use windows::Win32::System::Threading::{PROCESS_NAME_WIN32, QueryFullProcessImageNameW};
 use windows::Win32::UI::Shell::{
     ACTIVATEOPTIONS, ApplicationActivationManager, IApplicationActivationManager,
 };
@@ -15,10 +10,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GW_OWNER, GetWindow, GetWindowThreadProcessId, IsWindowVisible, SW_RESTORE,
     SetForegroundWindow, ShowWindow,
 };
-use windows::core::{BOOL, PCWSTR, PWSTR};
+use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
 use winisland_platform::PlatformError;
 
 use crate::com::ComGuard;
+use crate::process;
 
 pub(super) fn application(app_user_model_id: &str) -> Result<bool, PlatformError> {
     if app_user_model_id.is_empty() {
@@ -32,17 +28,13 @@ pub(super) fn application(app_user_model_id: &str) -> Result<bool, PlatformError
 
 fn activate_on_sta(app_user_model_id: &str) -> Result<bool, PlatformError> {
     let _com = ComGuard::sta()?;
-    let app_id: Vec<u16> = app_user_model_id.encode_utf16().chain(Some(0)).collect();
-    // SAFETY: The COM apartment is initialized here; both UTF-16 buffers live through the call.
+    let app_id = HSTRING::from(app_user_model_id);
+    // SAFETY: The COM apartment is initialized here, and the app ID outlives the call.
     let result = unsafe {
         let manager: IApplicationActivationManager =
             CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
-                .map_err(|error| PlatformError::Backend(error.to_string()))?;
-        manager.ActivateApplication(
-            PCWSTR(app_id.as_ptr()),
-            PCWSTR::null(),
-            ACTIVATEOPTIONS::default(),
-        )
+                .map_err(PlatformError::backend)?;
+        manager.ActivateApplication(&app_id, PCWSTR::null(), ACTIVATEOPTIONS::default())
     };
     match result {
         Ok(process_id) => {
@@ -108,43 +100,19 @@ unsafe extern "system" fn find_media_window(hwnd: HWND, lparam: LPARAM) -> BOOL 
     if process_id == 0 || process_id == std::process::id() {
         return true.into();
     }
-    // SAFETY: OpenProcess only queries a process handle by the ID returned above.
-    let Ok(process) =
-        (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
-    else {
+    let Some(process) = process::open(process_id) else {
         return true.into();
     };
-    let matches = process_application_user_model_id(process)
+    let matches = process::app_user_model_id(*process)
         .is_some_and(|id| id.eq_ignore_ascii_case(&search.source_app_id))
-        || process_executable_name(process)
+        || process_executable_name(*process)
             .is_some_and(|name| name.eq_ignore_ascii_case(&search.executable_name));
-    // SAFETY: process is the one owned handle returned by OpenProcess.
-    let _ = unsafe { CloseHandle(process) };
     if matches {
         search.window = Some(hwnd);
         false.into()
     } else {
         true.into()
     }
-}
-
-fn process_application_user_model_id(process: HANDLE) -> Option<String> {
-    let mut length = 0;
-    // SAFETY: The first call only queries the required buffer length.
-    if unsafe { GetApplicationUserModelId(process, &mut length, None) } != ERROR_INSUFFICIENT_BUFFER
-        || length == 0
-    {
-        return None;
-    }
-    let mut buffer = vec![0u16; length as usize];
-    // SAFETY: The buffer has the length reported by the first call.
-    if unsafe { GetApplicationUserModelId(process, &mut length, Some(PWSTR(buffer.as_mut_ptr()))) }
-        != ERROR_SUCCESS
-    {
-        return None;
-    }
-    buffer.truncate(length.saturating_sub(1) as usize);
-    String::from_utf16(&buffer).ok()
 }
 
 fn process_executable_name(process: HANDLE) -> Option<String> {

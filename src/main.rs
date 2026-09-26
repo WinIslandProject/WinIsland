@@ -77,6 +77,7 @@ fn main() {
 
     utils::updater::start_update_checker();
 
+    pollkit::set_wake_hook(platform::wake);
     let mut app = App::default();
     platform::window().run(&mut app).unwrap();
     if let Some(probe) = capability_probe {

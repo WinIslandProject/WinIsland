@@ -1,8 +1,9 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use parking_lot::{Condvar, Mutex};
 use tokio::sync::watch;
 use winisland_platform::{MediaSessionHandle, PlatformError, ThumbnailError, TrackInfo};
 
@@ -60,19 +61,13 @@ impl ThumbnailFetcher {
             .name("winisland-smtc-thumbnail".to_string())
             .spawn(move || {
                 loop {
-                    let mut pending = worker_state
-                        .request
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut pending = worker_state.request.lock();
                     while pending.is_none()
                         && !worker_state
                             .closed
                             .load(std::sync::atomic::Ordering::Acquire)
                     {
-                        pending = worker_state
-                            .changed
-                            .wait(pending)
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        worker_state.changed.wait(&mut pending);
                     }
                     if worker_state
                         .closed
@@ -108,11 +103,7 @@ impl ThumbnailFetcher {
         artist: String,
         is_song_change: bool,
     ) {
-        let mut request = self
-            .state
-            .request
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut request = self.state.request.lock();
         *request = Some(ThumbnailFetchRequest {
             session: Arc::clone(session),
             source_app_id,
