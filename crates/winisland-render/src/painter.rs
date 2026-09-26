@@ -1,4 +1,4 @@
-use skia_safe::{Canvas, ClipOp, image_filters};
+use skia_safe::{Canvas, ClipOp, Matrix, image_filters};
 
 use crate::convert::{
     filled, stroked, to_skia_cap, to_skia_gradient, to_skia_join, to_skia_point, to_skia_rect,
@@ -39,6 +39,19 @@ impl<'a> Painter<'a> {
 
     pub fn scale(&self, factor: Vec2) {
         self.canvas.scale((factor.x, factor.y));
+    }
+
+    pub fn concat_affine(&self, affine: [f32; 6]) {
+        let [a, b, c, d, e, f] = affine;
+        self.canvas
+            .concat(&Matrix::new_all(a, c, e, b, d, f, 0.0, 0.0, 1.0));
+    }
+
+    pub fn save_alpha(&self, alpha: u8) {
+        let mut paint = skia_safe::Paint::default();
+        paint.set_alpha(alpha);
+        self.canvas
+            .save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&paint));
     }
 
     pub fn rotate_degrees(&self, degrees: f32) {
@@ -228,10 +241,6 @@ impl<'a> Painter<'a> {
     pub fn draw_image_at(&self, image: &Image, position: Point) {
         self.canvas
             .draw_image(image.as_skia(), to_skia_point(position), None);
-    }
-
-    pub fn plugin_canvas_handle_v1(&self) -> *mut std::ffi::c_void {
-        self.canvas as *const Canvas as *mut std::ffi::c_void
     }
 
     pub fn draw_image(&self, image: &Image, dst: Rect, options: &ImageOptions) {

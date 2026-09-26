@@ -1,4 +1,4 @@
-use crate::plugin::types::ResourceId;
+pub type PluginSettingsResourceId = u64;
 
 #[derive(Clone)]
 pub struct PluginSettingsOption {
@@ -56,7 +56,7 @@ impl PluginSettingsItem {
 
 #[derive(Clone)]
 pub struct PluginSettingsPage {
-    pub resource_id: ResourceId,
+    pub resource_id: PluginSettingsResourceId,
     pub key: String,
     pub title: String,
     pub icon: Vec<u8>,

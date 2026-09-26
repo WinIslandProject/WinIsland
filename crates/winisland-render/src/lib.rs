@@ -21,7 +21,6 @@ pub use image::Image;
 pub use painter::Painter;
 pub use path::{Path, PathBuilder};
 #[doc(hidden)]
-pub use skia_safe as plugin_v1_backend;
 pub use surface::{NativeSurface, RasterSurface, SURFACE_TAG_WIN32_HWND};
 pub use types::{
     Angle, BlurSpec, FontStyle, FontWeight, FontWidth, GradientStop, ImageFit, ImageOptions,

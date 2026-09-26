@@ -28,4 +28,5 @@ pub mod i18n;
 pub mod lyrics;
 pub mod persistence;
 pub mod physics;
+pub mod plugin_settings;
 pub mod widgets;

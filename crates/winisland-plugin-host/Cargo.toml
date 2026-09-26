@@ -1,0 +1,13 @@
+[package]
+name = "winisland-plugin-host"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+libloading = "0.9"
+log = "0.4"
+sha2 = "0.10"
+winisland-plugin-api = { path = "../winisland-plugin-api", default-features = false }
+winisland-plugin-package = { path = "../winisland-plugin-package" }
+winisland-core = { path = "../winisland-core" }
+winisland-render = { path = "../winisland-render" }
