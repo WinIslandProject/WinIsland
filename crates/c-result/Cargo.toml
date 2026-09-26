@@ -1,0 +1,14 @@
+[package]
+name = "c-result"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Write extern \"C\" functions with Result and ? while exporting a C result type"
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1"
+syn = { version = "2", features = ["full"] }

@@ -22,9 +22,12 @@ use super::types::{
     context_from_ffi, read_c_str, widget_from_ffi,
 };
 use super::zip_loader::{self, PluginManifest};
+use c_result::c_result;
 use pollkit::Job;
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
 use winisland_render::plugin_v1_backend as skia_safe;
+
+type HostResult = Result<(), &'static str>;
 
 const MAX_COVER_BYTES: u32 = 16 * 1024 * 1024;
 const MAX_CONTEXTS_PER_PLUGIN: usize = 64;
@@ -243,19 +246,10 @@ fn release_runtime(state: MutexGuard<'static, RuntimeState>) {
     crate::platform::wake();
 }
 
-macro_rules! lock_runtime_or_return {
-    () => {
-        match lock_runtime() {
-            Ok(state) => state,
-            Err(error) => return PluginResultC::err(error),
-        }
-    };
-}
-
 macro_rules! require_output {
     ($ptr:expr, $message:literal) => {
         if $ptr.is_null() {
-            return PluginResultC::err($message);
+            return Err($message);
         }
     };
 }
@@ -719,26 +713,20 @@ unsafe fn read_utf8(value: Utf8SliceV1, max_len: u32) -> Result<String, &'static
         .map_err(|_| "value is not valid UTF-8")
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn context_create(
     token: PluginToken,
     data: *const ContextDataV1,
     out_id: *mut ResourceId,
-) -> PluginResultC {
+) -> HostResult {
     require_output!(out_id, "resource output pointer is null");
     // SAFETY: read_widget_data validates and copies the versioned widget structure.
-    let data = match unsafe { read_struct(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
-    if let Err(error) = validate_context_data(&data) {
-        return PluginResultC::err(error);
-    }
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_CONTEXT) {
-        return PluginResultC::err(error);
-    }
+    let data = unsafe { read_struct(data) }?;
+    validate_context_data(&data)?;
+    let mut state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_CONTEXT)?;
     if resource_count(&state, token, ResourceKind::Context) >= MAX_CONTEXTS_PER_PLUGIN {
-        return PluginResultC::err("context resource limit reached");
+        return Err("context resource limit reached");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
     let context = context_from_ffi(id, &data);
@@ -757,28 +745,22 @@ unsafe extern "C" fn context_create(
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn context_update(
     token: PluginToken,
     id: ResourceId,
     data: *const ContextDataV1,
-) -> PluginResultC {
+) -> HostResult {
     // SAFETY: read_widget_data validates and copies the versioned widget structure.
-    let data = match unsafe { read_struct(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
-    if let Err(error) = validate_context_data(&data) {
-        return PluginResultC::err(error);
-    }
+    let data = unsafe { read_struct(data) }?;
+    validate_context_data(&data)?;
     let context = context_from_ffi(id, &data);
     let size_bytes = context.title.len() + context.body.len() + context.compact_text.len();
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Context) {
-        return PluginResultC::err(error);
-    }
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Context)?;
     if let Some(owner) = state.resources.get_mut(&id) {
         owner.size_bytes = size_bytes;
     }
@@ -786,21 +768,20 @@ unsafe extern "C" fn context_update(
         .context_events
         .insert(id, ContextEvent::Upsert(context));
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn context_release(token: PluginToken, id: ResourceId) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Context) {
-        return PluginResultC::err(error);
-    }
+#[c_result(PluginResultC)]
+unsafe extern "C" fn context_release(token: PluginToken, id: ResourceId) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Context)?;
     state.resources.remove(&id);
     state.context_events.remove(&id);
     if state.visible_contexts.remove(&id) {
         state.context_events.insert(id, ContextEvent::Remove(id));
     }
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
 fn copy_media(data: &MediaSourceDataV1, id: ResourceId) -> Result<MediaResource, &'static str> {
@@ -851,34 +832,27 @@ fn copy_media(data: &MediaSourceDataV1, id: ResourceId) -> Result<MediaResource,
     })
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn media_create(
     token: PluginToken,
     data: *const MediaSourceDataV1,
     out_id: *mut ResourceId,
-) -> PluginResultC {
+) -> HostResult {
     require_output!(out_id, "resource output pointer is null");
     // SAFETY: Validation is performed by read_struct before the value is used.
-    let data = match unsafe { read_struct(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
+    let data = unsafe { read_struct(data) }?;
     let id = next_id(&NEXT_RESOURCE_ID);
-    let mut media = match copy_media(&data, id) {
-        Ok(media) => media,
-        Err(error) => return PluginResultC::err(error),
-    };
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_MEDIA) {
-        return PluginResultC::err(error);
-    }
+    let mut media = copy_media(&data, id)?;
+    let mut state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_MEDIA)?;
     if resource_count(&state, token, ResourceKind::Media) >= MAX_MEDIA_SOURCES_PER_PLUGIN {
-        return PluginResultC::err("media resource limit reached");
+        return Err("media resource limit reached");
     }
     if resource_bytes(&state, token, ResourceKind::Media, None)
         .saturating_add(media.data.cover_data.len())
         > MAX_MEDIA_BYTES_PER_PLUGIN
     {
-        return PluginResultC::err("media resources exceed the 32 MiB limit");
+        return Err("media resources exceed the 32 MiB limit");
     }
     state.media_sequence = state.media_sequence.wrapping_add(1);
     media.sequence = state.media_sequence;
@@ -895,39 +869,32 @@ unsafe extern "C" fn media_create(
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn media_update(
     token: PluginToken,
     id: ResourceId,
     data: *const MediaSourceDataV1,
-) -> PluginResultC {
+) -> HostResult {
     // SAFETY: Validation is performed by read_struct before the value is used.
-    let data = match unsafe { read_struct(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
-    let mut media = match copy_media(&data, id) {
-        Ok(media) => media,
-        Err(error) => return PluginResultC::err(error),
-    };
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Media) {
-        return PluginResultC::err(error);
-    }
+    let data = unsafe { read_struct(data) }?;
+    let mut media = copy_media(&data, id)?;
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Media)?;
     if state
         .media
         .get(&id)
         .is_some_and(|media| media.in_flight != 0)
     {
-        return PluginResultC::err("media callback is in progress");
+        return Err("media callback is in progress");
     }
     if resource_bytes(&state, token, ResourceKind::Media, Some(id))
         .saturating_add(media.data.cover_data.len())
         > MAX_MEDIA_BYTES_PER_PLUGIN
     {
-        return PluginResultC::err("media resources exceed the 32 MiB limit");
+        return Err("media resources exceed the 32 MiB limit");
     }
     state.media_sequence = state.media_sequence.wrapping_add(1);
     media.sequence = state.media_sequence;
@@ -937,86 +904,75 @@ unsafe extern "C" fn media_update(
     state.media.insert(id, media);
     state.media_dirty = true;
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn media_release(token: PluginToken, id: ResourceId) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Media) {
-        return PluginResultC::err(error);
-    }
+#[c_result(PluginResultC)]
+unsafe extern "C" fn media_release(token: PluginToken, id: ResourceId) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Media)?;
     if state
         .media
         .get(&id)
         .is_some_and(|media| media.in_flight != 0)
     {
-        return PluginResultC::err("media callback is in progress");
+        return Err("media callback is in progress");
     }
     state.resources.remove(&id);
     state.media.remove(&id);
     state.media_dirty = true;
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn i18n_register_bundle(
     token: PluginToken,
     language: Utf8SliceV1,
     pairs: *const TranslationPairV1,
     count: u32,
     out_id: *mut ResourceId,
-) -> PluginResultC {
+) -> HostResult {
     require_output!(out_id, "resource output pointer is null");
     if count == 0 || count > MAX_TRANSLATION_PAIRS || pairs.is_null() {
-        return PluginResultC::err("translation bundle is empty or too large");
+        return Err("translation bundle is empty or too large");
     }
     // SAFETY: The plugin owns the borrowed language bytes for this call.
-    let language = match unsafe { read_utf8(language, 64) } {
-        Ok(language) if !language.is_empty() => language,
-        Ok(_) => return PluginResultC::err("language is empty"),
-        Err(error) => return PluginResultC::err(error),
-    };
+    let language = unsafe { read_utf8(language, 64) }?;
+    if language.is_empty() {
+        return Err("language is empty");
+    }
     // SAFETY: count is bounded and the plugin guarantees this borrowed array is valid.
     let pairs = unsafe { std::slice::from_raw_parts(pairs, count as usize) };
     let mut copied = Vec::with_capacity(pairs.len());
     let mut total_bytes = 0usize;
     for pair in pairs {
         // SAFETY: Translation strings are borrowed for this call and copied immediately.
-        let key = match unsafe { read_utf8(pair.key, MAX_TRANSLATION_STRING_BYTES) } {
-            Ok(key) if !key.is_empty() => key,
-            Ok(_) => return PluginResultC::err("translation key is empty"),
-            Err(error) => return PluginResultC::err(error),
-        };
+        let key = unsafe { read_utf8(pair.key, MAX_TRANSLATION_STRING_BYTES) }?;
+        if key.is_empty() {
+            return Err("translation key is empty");
+        }
         // SAFETY: Translation strings are borrowed for this call and copied immediately.
-        let value = match unsafe { read_utf8(pair.value, MAX_TRANSLATION_STRING_BYTES) } {
-            Ok(value) => value,
-            Err(error) => return PluginResultC::err(error),
-        };
+        let value = unsafe { read_utf8(pair.value, MAX_TRANSLATION_STRING_BYTES) }?;
         total_bytes = match total_bytes.checked_add(key.len() + value.len()) {
             Some(total) if total <= MAX_TRANSLATION_BUNDLE_BYTES => total,
-            _ => return PluginResultC::err("translation bundle exceeds 1 MiB"),
+            _ => return Err("translation bundle exceeds 1 MiB"),
         };
         copied.push((key, value));
     }
 
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_I18N) {
-        return PluginResultC::err(error);
-    }
+    let mut state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_I18N)?;
     if resource_count(&state, token, ResourceKind::I18n) >= MAX_I18N_BUNDLES_PER_PLUGIN {
-        return PluginResultC::err("translation bundle limit reached");
+        return Err("translation bundle limit reached");
     }
     if resource_bytes(&state, token, ResourceKind::I18n, None).saturating_add(total_bytes)
         > MAX_I18N_BYTES_PER_PLUGIN
     {
-        return PluginResultC::err("translation bundles exceed the 4 MiB limit");
+        return Err("translation bundles exceed the 4 MiB limit");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
-    if let Err(error) =
-        winisland_core::i18n::register_plugin_translation_bundle(id, language, copied)
-    {
-        return PluginResultC::err(error);
-    }
+    winisland_core::i18n::register_plugin_translation_bundle(id, language, copied)?;
     state.resources.insert(
         id,
         ResourceOwner {
@@ -1028,69 +984,58 @@ unsafe extern "C" fn i18n_register_bundle(
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn i18n_release_bundle(token: PluginToken, id: ResourceId) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::I18n) {
-        return PluginResultC::err(error);
-    }
-    if let Err(error) = winisland_core::i18n::release_plugin_translation_bundle(id) {
-        return PluginResultC::err(error);
-    }
+#[c_result(PluginResultC)]
+unsafe extern "C" fn i18n_release_bundle(token: PluginToken, id: ResourceId) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::I18n)?;
+    winisland_core::i18n::release_plugin_translation_bundle(id)?;
     state.resources.remove(&id);
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn host_state_get(
-    token: PluginToken,
-    out_state: *mut HostStateV1,
-) -> PluginResultC {
+#[c_result(PluginResultC)]
+unsafe extern "C" fn host_state_get(token: PluginToken, out_state: *mut HostStateV1) -> HostResult {
     if out_state.is_null() {
-        return PluginResultC::err("host state output pointer is null");
+        return Err("host state output pointer is null");
     }
     // SAFETY: HostStateV1 begins with struct_size, which is readable by contract.
     let struct_size = unsafe { std::ptr::read_unaligned(out_state.cast::<u32>()) };
     if struct_size < std::mem::size_of::<HostStateV1>() as u32 {
-        return PluginResultC::err("host state output struct is truncated");
+        return Err("host state output struct is truncated");
     }
-    let state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_HOST_STATE) {
-        return PluginResultC::err(error);
-    }
+    let state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_HOST_STATE)?;
     let snapshot = HostStateV1::from(&state.host_state);
     // SAFETY: The size check proves the caller provided a complete v1 output struct.
     unsafe { out_state.write(snapshot) };
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn lyrics_transform_register(
     token: PluginToken,
     data: *const LyricsTransformerDataV1,
     out_id: *mut ResourceId,
-) -> PluginResultC {
+) -> HostResult {
     require_output!(out_id, "resource output pointer is null");
     // SAFETY: Validation is performed by read_struct before the value is used.
-    let data = match unsafe { read_struct(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
+    let data = unsafe { read_struct(data) }?;
     if data.flags != 0 {
-        return PluginResultC::err("lyrics transformer contains unknown flags");
+        return Err("lyrics transformer contains unknown flags");
     }
     let Some(on_transform) = data.on_transform else {
-        return PluginResultC::err("lyrics transform callback is required");
+        return Err("lyrics transform callback is required");
     };
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_LYRICS_TRANSFORM) {
-        return PluginResultC::err(error);
-    }
+    let mut state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_LYRICS_TRANSFORM)?;
     if resource_count(&state, token, ResourceKind::LyricsTransform)
         >= MAX_LYRICS_TRANSFORMERS_PER_PLUGIN
     {
-        return PluginResultC::err("lyrics transformer resource limit reached");
+        return Err("lyrics transformer resource limit reached");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
     state.lyrics_transformer_sequence = state.lyrics_transformer_sequence.wrapping_add(1);
@@ -1114,24 +1059,23 @@ unsafe extern "C" fn lyrics_transform_register(
     );
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn lyrics_transform_release(token: PluginToken, id: ResourceId) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::LyricsTransform) {
-        return PluginResultC::err(error);
-    }
+#[c_result(PluginResultC)]
+unsafe extern "C" fn lyrics_transform_release(token: PluginToken, id: ResourceId) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::LyricsTransform)?;
     if state
         .lyrics_transformers
         .get(&id)
         .is_some_and(|transformer| transformer.in_flight != 0)
     {
-        return PluginResultC::err("lyrics transform callback is in progress");
+        return Err("lyrics transform callback is in progress");
     }
     state.resources.remove(&id);
     state.lyrics_transformers.remove(&id);
-    PluginResultC::ok()
+    Ok(())
 }
 
 fn ctx_ref<'a>(ctx: *const WidgetDrawContextV1) -> Option<&'a WidgetDrawContextV1> {
@@ -1479,45 +1423,36 @@ unsafe extern "C" fn ffi_translate(ctx: *const WidgetDrawContextV1, dx: f32, dy:
     });
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn widget_create(
     token: PluginToken,
     data: *const WidgetDataV1,
     out_id: *mut ResourceId,
-) -> PluginResultC {
+) -> HostResult {
     require_output!(out_id, "widget output pointer is null");
     // SAFETY: Validation is performed by read_struct before the value is used.
-    let data = match unsafe { read_widget_data(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
-    if let Err(error) = validate_widget_data(&data) {
-        return PluginResultC::err(error);
-    }
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_WIDGET) {
-        return PluginResultC::err(error);
-    }
+    let data = unsafe { read_widget_data(data) }?;
+    validate_widget_data(&data)?;
+    let mut state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_WIDGET)?;
     if resource_count(&state, token, ResourceKind::Widget) >= MAX_WIDGETS_PER_PLUGIN {
-        return PluginResultC::err("widget resource limit reached");
+        return Err("widget resource limit reached");
     }
     let plugin_id = match state.plugins.get(&token) {
         Some(plugin) => plugin.id.clone(),
-        None => return PluginResultC::err("invalid plugin token"),
+        None => return Err("invalid plugin token"),
     };
-    let key = match validate_widget_key(&data.key) {
-        Ok(key) => key,
-        Err(error) => return PluginResultC::err(error),
-    };
+    let key = validate_widget_key(&data.key)?;
     if key
         .as_ref()
         .is_some_and(|key| state.widget_keys.contains_key(&(token, key.to_string())))
     {
-        return PluginResultC::err("widget key is already registered by this plugin");
+        return Err("widget key is already registered by this plugin");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
     let widget = widget_from_ffi(&plugin_id, id, &data);
     let Some(on_draw) = data.on_draw else {
-        return PluginResultC::err("widget render callback is required");
+        return Err("widget render callback is required");
     };
     let size_bytes = widget.title.len() + widget.body.len();
     state.resources.insert(
@@ -1543,30 +1478,21 @@ unsafe extern "C" fn widget_create(
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn widget_update(
     token: PluginToken,
     id: ResourceId,
     data: *const WidgetDataV1,
-) -> PluginResultC {
+) -> HostResult {
     // SAFETY: Validation is performed by read_struct before the value is used.
-    let data = match unsafe { read_widget_data(data) } {
-        Ok(data) => data,
-        Err(error) => return PluginResultC::err(error),
-    };
-    if let Err(error) = validate_widget_data(&data) {
-        return PluginResultC::err(error);
-    }
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Widget) {
-        return PluginResultC::err(error);
-    }
-    let key = match validate_widget_key(&data.key) {
-        Ok(key) => key,
-        Err(error) => return PluginResultC::err(error),
-    };
+    let data = unsafe { read_widget_data(data) }?;
+    validate_widget_data(&data)?;
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Widget)?;
+    let key = validate_widget_key(&data.key)?;
     let existing_key = state
         .widget_keys
         .iter()
@@ -1574,18 +1500,18 @@ unsafe extern "C" fn widget_update(
             (*owner == token && *resource == id).then_some(key.as_str())
         });
     if existing_key != key.as_deref() {
-        return PluginResultC::err("widget key cannot change after creation");
+        return Err("widget key cannot change after creation");
     }
     if state
         .widgets
         .get(&id)
         .is_some_and(|widget| widget.in_flight != 0)
     {
-        return PluginResultC::err("widget render callback is in progress");
+        return Err("widget render callback is in progress");
     }
     let plugin_id = match state.plugins.get(&token) {
         Some(plugin) => plugin.id.clone(),
-        None => return PluginResultC::err("invalid plugin token"),
+        None => return Err("invalid plugin token"),
     };
     let widget = widget_from_ffi(&plugin_id, id, &data);
     let size_bytes = widget.title.len() + widget.body.len();
@@ -1593,7 +1519,7 @@ unsafe extern "C" fn widget_update(
         owner.size_bytes = size_bytes;
     }
     let Some(on_draw) = data.on_draw else {
-        return PluginResultC::err("widget render callback is required");
+        return Err("widget render callback is required");
     };
     state.widgets.insert(
         id,
@@ -1605,20 +1531,19 @@ unsafe extern "C" fn widget_update(
     );
     state.widget_events.insert(id, WidgetEvent::Upsert(widget));
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn widget_release(token: PluginToken, id: ResourceId) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Widget) {
-        return PluginResultC::err(error);
-    }
+#[c_result(PluginResultC)]
+unsafe extern "C" fn widget_release(token: PluginToken, id: ResourceId) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Widget)?;
     if state
         .widgets
         .get(&id)
         .is_some_and(|widget| widget.in_flight != 0)
     {
-        return PluginResultC::err("widget render callback is in progress");
+        return Err("widget render callback is in progress");
     }
     state.resources.remove(&id);
     state.widgets.remove(&id);
@@ -1628,39 +1553,35 @@ unsafe extern "C" fn widget_release(token: PluginToken, id: ResourceId) -> Plugi
     state.widget_events.remove(&id);
     state.widget_events.insert(id, WidgetEvent::Remove(id));
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn settings_create(
     token: PluginToken,
     data: *const SettingsPageDataV1,
     out_id: *mut ResourceId,
-) -> PluginResultC {
+) -> HostResult {
     require_output!(out_id, "settings page output pointer is null");
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_capability(&state, token, CAPABILITY_SETTINGS) {
-        return PluginResultC::err(error);
-    }
+    let mut state = lock_runtime()?;
+    require_capability(&state, token, CAPABILITY_SETTINGS)?;
     if resource_count(&state, token, ResourceKind::Settings) >= MAX_SETTINGS_PAGES_PER_PLUGIN {
-        return PluginResultC::err("settings page limit reached");
+        return Err("settings page limit reached");
     }
     let id = next_id(&NEXT_RESOURCE_ID);
     let sequence = state.settings_sequence.wrapping_add(1);
     // SAFETY: The plugin keeps the page and nested borrowed data valid for this call.
-    let (resource, size_bytes) = match unsafe { copy_settings_page(id, sequence, data) } {
-        Ok(resource) => resource,
-        Err(error) => return PluginResultC::err(error),
-    };
+    let (resource, size_bytes) = unsafe { copy_settings_page(id, sequence, data) }?;
     if state
         .settings_keys
         .contains_key(&(token, resource.page.key.clone()))
     {
-        return PluginResultC::err("settings page key is already registered by this plugin");
+        return Err("settings page key is already registered by this plugin");
     }
     if resource_bytes(&state, token, ResourceKind::Settings, None).saturating_add(size_bytes)
         > MAX_SETTINGS_BYTES_PER_PLUGIN
     {
-        return PluginResultC::err("settings page exceeds the 2 MiB limit");
+        return Err("settings page exceeds the 2 MiB limit");
     }
     state.settings_sequence = sequence;
     state.resources.insert(
@@ -1679,36 +1600,32 @@ unsafe extern "C" fn settings_create(
     // SAFETY: out_id was checked non-null and belongs to the caller.
     unsafe { out_id.write(id) };
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
+#[c_result(PluginResultC)]
 unsafe extern "C" fn settings_update(
     token: PluginToken,
     id: ResourceId,
     data: *const SettingsPageDataV1,
-) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Settings) {
-        return PluginResultC::err(error);
-    }
+) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Settings)?;
     let Some(existing) = state.settings.get(&id) else {
-        return PluginResultC::err("settings page was not found");
+        return Err("settings page was not found");
     };
     let existing_key = existing.page.key.clone();
     let sequence = existing.page.sequence;
     let in_flight = existing.in_flight;
     // SAFETY: The plugin keeps the page and nested borrowed data valid for this call.
-    let (mut resource, size_bytes) = match unsafe { copy_settings_page(id, sequence, data) } {
-        Ok(resource) => resource,
-        Err(error) => return PluginResultC::err(error),
-    };
+    let (mut resource, size_bytes) = unsafe { copy_settings_page(id, sequence, data) }?;
     if resource.page.key != existing_key {
-        return PluginResultC::err("settings page key cannot change after creation");
+        return Err("settings page key cannot change after creation");
     }
     if resource_bytes(&state, token, ResourceKind::Settings, Some(id)).saturating_add(size_bytes)
         > MAX_SETTINGS_BYTES_PER_PLUGIN
     {
-        return PluginResultC::err("settings page exceeds the 2 MiB limit");
+        return Err("settings page exceeds the 2 MiB limit");
     }
     resource.in_flight = in_flight;
     if let Some(owner) = state.resources.get_mut(&id) {
@@ -1717,20 +1634,19 @@ unsafe extern "C" fn settings_update(
     state.settings.insert(id, resource);
     state.settings_dirty = true;
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
-unsafe extern "C" fn settings_release(token: PluginToken, id: ResourceId) -> PluginResultC {
-    let mut state = lock_runtime_or_return!();
-    if let Err(error) = require_resource(&state, token, id, ResourceKind::Settings) {
-        return PluginResultC::err(error);
-    }
+#[c_result(PluginResultC)]
+unsafe extern "C" fn settings_release(token: PluginToken, id: ResourceId) -> HostResult {
+    let mut state = lock_runtime()?;
+    require_resource(&state, token, id, ResourceKind::Settings)?;
     if state
         .settings
         .get(&id)
         .is_some_and(|settings| settings.in_flight != 0)
     {
-        return PluginResultC::err("settings callback is in progress");
+        return Err("settings callback is in progress");
     }
     state.resources.remove(&id);
     state.settings.remove(&id);
@@ -1739,7 +1655,7 @@ unsafe extern "C" fn settings_release(token: PluginToken, id: ResourceId) -> Plu
         .retain(|_, resource_id| *resource_id != id);
     state.settings_dirty = true;
     release_runtime(state);
-    PluginResultC::ok()
+    Ok(())
 }
 
 pub fn update_host_state(state: HostState) {

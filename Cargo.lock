@@ -7,6 +7,7 @@ name = "WinIsland"
 version = "1.3.9"
 dependencies = [
  "base64 0.23.1",
+ "c-result",
  "cpal",
  "dirs",
  "ed25519-dalek 3.0.0",
@@ -468,6 +469,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c"
 dependencies = [
  "libbz2-rs-sys",
+]
+
+[[package]]
+name = "c-result"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
