@@ -10,6 +10,7 @@ import pluginServicesEn from '../plugin-dev/services.md?raw'
 import downloadZh from '../zh/download.md?raw'
 import gettingStartedZh from '../zh/getting-started.md?raw'
 import guideZh from '../zh/guide.md?raw'
+import faqZh from '../zh/faq.md?raw'
 import pluginZh from '../zh/plugin-dev.md?raw'
 import pluginAbiZh from '../zh/plugin-dev/abi-lifecycle.md?raw'
 import pluginPackagingZh from '../zh/plugin-dev/packaging.md?raw'
@@ -21,6 +22,7 @@ import changelogZh from '../../Changelog-zh.md?raw'
 export const docs = {
   en: {
     guide: guideEn,
+    faq: faqZh,
     'getting-started': gettingStartedEn,
     download: downloadEn,
     'plugin-dev': pluginEn,
@@ -33,6 +35,7 @@ export const docs = {
   },
   zh: {
     guide: guideZh,
+    faq: faqZh,
     'getting-started': gettingStartedZh,
     download: downloadZh,
     'plugin-dev': pluginZh,

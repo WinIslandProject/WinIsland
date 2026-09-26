@@ -16,15 +16,5 @@
 ## 故障排除
 
 - **没有媒体信息？**：确保你的媒体播放器支持 Windows SMTC（大多数浏览器、Spotify 和现代音乐应用都支持）。
-- **国产音乐软件（网易云、酷狗等）媒体信息不正常？**：
-  > [!WARNING]
-  > 网易云，酷狗等国产音乐软件的 SMTC 均无法读取正常的数据，与此相关的 Issue 将会标记为重复。
-
-  **网易云修复方案**：
-  1. 确保网易云设置中的 SMTC 选项关闭。
-  2. 下载并安装 [BetterNCM](https://github.com/std-microblock/chromatic/releases/tag/1.3.4) (或者 [chromatic](https://github.com/std-microblock/chromatic) 不确定是否能用)。
-  3. 安装 [Inflink-rs](https://github.com/apoint123/inflink-rs) 插件。
-  4. 在 BetterNCM 的设置中找到 Inflink，打开 SMTC 选项。
-
-  其他音乐软件暂无替代方案，等待更新适配。
+- **国产音乐软件（网易云、酷狗等）媒体信息不正常？**：请查看[常见问题 Q&A](/faq) 中的「为什么网易云获取不到？」和「支不支持其他音乐播放软件？」。
 - **模糊效果无效？**：检查你的系统是否支持硬件加速，并且是否安装了最新的显卡驱动。
