@@ -9,10 +9,9 @@ use winisland_platform::{
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use parking_lot::Mutex;
+use pollkit::Job;
 use windows::ApplicationModel::AppDisplayInfo;
 use windows::Foundation::Size;
 use windows::UI::Notifications::Management::{
@@ -36,21 +35,6 @@ struct NotificationRecord {
     creation_time: i64,
 }
 
-#[derive(Default)]
-struct CancelSlot(Mutex<Option<Box<dyn Fn() + Send + Sync>>>);
-
-impl CancelSlot {
-    fn set(&self, cancel: impl Fn() + Send + Sync + 'static) {
-        *self.0.lock() = Some(Box::new(cancel));
-    }
-
-    fn cancel(&self) {
-        if let Some(cancel) = self.0.lock().take() {
-            cancel();
-        }
-    }
-}
-
 enum NotificationReadResult {
     Notifications(Vec<NotificationRecord>),
     Failed(HRESULT),
@@ -61,12 +45,9 @@ pub struct WindowsNotificationFeed {
     listener: Option<UserNotificationListener>,
     event_subscription: Option<NotificationEventSubscription>,
     subscription_status: Option<bool>,
-    access_receiver: Option<Receiver<bool>>,
-    access_cancel: Option<Arc<CancelSlot>>,
-    read_receiver: Option<Receiver<(NotificationReadKind, NotificationReadResult)>>,
-    read_cancel: Option<Arc<CancelSlot>>,
-    icon_receiver: Option<Receiver<(u32, Option<NotificationIconData>)>>,
-    icon_cancel: Option<Arc<CancelSlot>>,
+    access: Job<bool>,
+    read: Job<(NotificationReadKind, NotificationReadResult)>,
+    icon: Job<(u32, Option<NotificationIconData>)>,
     access_attempted: bool,
     retry_after: Option<Instant>,
     seen_notifications: HashSet<(u32, i64)>,
@@ -84,7 +65,7 @@ impl WindowsNotificationFeed {
 
         self.finish_access_request();
         if self.listener.is_none()
-            && self.access_receiver.is_none()
+            && !self.access.is_running()
             && !self.access_attempted
             && self
                 .retry_after
@@ -113,23 +94,18 @@ impl WindowsNotificationFeed {
                     self.schedule_retry();
                     return;
                 };
-                let (sender, receiver) = mpsc::sync_channel(1);
+                let (job, done) = Job::pending();
                 let cancel_operation = operation.clone();
-                let cancel = Arc::new(CancelSlot::default());
-                cancel.set(move || {
+                done.on_cancel(move || {
                     let _ = cancel_operation.Cancel();
                 });
-                self.access_cancel = Some(cancel);
                 tokio::task::spawn_blocking(move || {
-                    let granted = matches!(
+                    done.send(matches!(
                         operation.join(),
                         Ok(UserNotificationListenerAccessStatus::Allowed)
-                    );
-                    if sender.send(granted).is_ok() {
-                        wake();
-                    }
+                    ));
                 });
-                self.access_receiver = Some(receiver);
+                self.access = job;
             }
             Ok(status) => log::warn!("Notification access was not granted: {status:?}"),
             Err(error) => {
@@ -140,14 +116,8 @@ impl WindowsNotificationFeed {
     }
 
     fn finish_access_request(&mut self) {
-        let result = self
-            .access_receiver
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
-        match result {
+        match self.access.poll() {
             Some(Ok(true)) => {
-                self.access_receiver = None;
-                self.access_cancel = None;
                 let Ok(listener) = UserNotificationListener::Current() else {
                     log::warn!("Notification listener is unavailable after access was granted");
                     self.schedule_retry();
@@ -155,18 +125,12 @@ impl WindowsNotificationFeed {
                 };
                 self.start_monitor(listener);
             }
-            Some(Ok(false)) => {
-                self.access_receiver = None;
-                self.access_cancel = None;
-                log::warn!("Notification access was not granted");
-            }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.access_receiver = None;
-                self.access_cancel = None;
+            Some(Ok(false)) => log::warn!("Notification access was not granted"),
+            Some(Err(_)) => {
                 log::warn!("Notification access request ended unexpectedly");
                 self.schedule_retry();
             }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => {}
+            None => {}
         }
     }
 
@@ -182,29 +146,19 @@ impl WindowsNotificationFeed {
     }
 
     fn finish_notification_read(&mut self) {
-        let result = self
-            .read_receiver
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
-        match result {
+        match self.read.poll() {
             Some(Ok((kind, NotificationReadResult::Notifications(notifications)))) => {
-                self.read_receiver = None;
-                self.read_cancel = None;
                 self.handle_notification_snapshot(kind, notifications);
             }
             Some(Ok((_, NotificationReadResult::Failed(error)))) => {
-                self.read_receiver = None;
-                self.read_cancel = None;
                 log::warn!("Notification history could not be read: {error:?}");
                 self.restart_monitor();
             }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.read_receiver = None;
-                self.read_cancel = None;
+            Some(Err(_)) => {
                 log::warn!("Notification history request ended unexpectedly");
                 self.restart_monitor();
             }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => {}
+            None => {}
         }
     }
 
@@ -271,7 +225,7 @@ impl WindowsNotificationFeed {
 
     fn read_notifications_when_signaled(&mut self) {
         if self.event_subscription.is_none()
-            || self.read_receiver.is_some()
+            || self.read.is_running()
             || !notification_event::take_delivery()
         {
             return;
@@ -289,13 +243,11 @@ impl WindowsNotificationFeed {
             log::warn!("Notification history request could not be started");
             return false;
         };
-        let (sender, receiver) = mpsc::sync_channel(1);
+        let (job, done) = Job::pending();
         let cancel_operation = operation.clone();
-        let cancel = Arc::new(CancelSlot::default());
-        cancel.set(move || {
+        done.on_cancel(move || {
             let _ = cancel_operation.Cancel();
         });
-        self.read_cancel = Some(cancel);
         tokio::task::spawn_blocking(move || {
             let result = operation.join().map(|notifications| {
                 let mut records = Vec::new();
@@ -321,30 +273,18 @@ impl WindowsNotificationFeed {
                 Ok(notifications) => NotificationReadResult::Notifications(notifications),
                 Err(error) => NotificationReadResult::Failed(error.code()),
             };
-            if sender.send((kind, result)).is_ok() {
-                wake();
-            }
+            done.send((kind, result));
         });
-        self.read_receiver = Some(receiver);
+        self.read = job;
         true
     }
 
     fn stop(&mut self) {
-        for cancel in [
-            self.access_cancel.take(),
-            self.read_cancel.take(),
-            self.icon_cancel.take(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            cancel.cancel();
-        }
+        self.access.cancel();
+        self.read.cancel();
+        self.icon.cancel();
         self.listener = None;
         self.event_subscription = None;
-        self.access_receiver = None;
-        self.read_receiver = None;
-        self.icon_receiver = None;
         self.seen_notifications.clear();
         self.pending_notification_id = None;
         notification_event::reset_signals();
@@ -374,10 +314,7 @@ impl WindowsNotificationFeed {
     }
 
     fn start_icon_read(&mut self, notification_id: u32, display: AppDisplayInfo) {
-        if let Some(cancel) = self.icon_cancel.take() {
-            cancel.cancel();
-        }
-        self.icon_receiver = None;
+        self.icon.cancel();
         let Some(operation) = display
             .GetLogo(Size {
                 Width: 64.0,
@@ -388,46 +325,27 @@ impl WindowsNotificationFeed {
         else {
             return;
         };
-        let (sender, receiver) = mpsc::sync_channel(1);
+        let (job, done) = Job::pending();
         let cancel_operation = operation.clone();
-        let cancel = Arc::new(CancelSlot::default());
-        cancel.set(move || {
+        done.on_cancel(move || {
             let _ = cancel_operation.Cancel();
         });
-        self.icon_cancel = Some(Arc::clone(&cancel));
         tokio::task::spawn_blocking(move || {
             let icon = operation
                 .join()
                 .ok()
-                .and_then(|stream| read_app_icon(stream, &cancel));
-            if sender.send((notification_id, icon)).is_ok() {
-                wake();
-            }
+                .and_then(|stream| read_app_icon(stream, &done));
+            done.send((notification_id, icon));
         });
-        self.icon_receiver = Some(receiver);
+        self.icon = job;
     }
 
     fn finish_icon_read(&mut self) -> Option<NotificationMonitorUpdate> {
-        let result = self
-            .icon_receiver
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
-        match result {
-            Some(Ok((notification_id, icon))) => {
-                self.icon_receiver = None;
-                self.icon_cancel = None;
-                icon.map(|icon| NotificationMonitorUpdate::Icon {
-                    notification_id,
-                    icon,
-                })
-            }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.icon_receiver = None;
-                self.icon_cancel = None;
-                None
-            }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => None,
-        }
+        let (notification_id, icon) = self.icon.poll_ok()?;
+        icon.map(|icon| NotificationMonitorUpdate::Icon {
+            notification_id,
+            icon,
+        })
     }
 
     pub(super) fn remove_notification(&self, notification_id: u32) {

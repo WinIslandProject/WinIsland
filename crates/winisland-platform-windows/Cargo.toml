@@ -11,6 +11,7 @@ windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Co
 dirs = "6.0"
 log = { version = "0.4", features = ["std"] }
 parking_lot = "0.12"
+pollkit = { path = "../pollkit" }
 tray-icon = "0.24.1"
 image = "0.25"
 wasapi = "0.24.0"
