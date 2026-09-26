@@ -239,7 +239,7 @@ fn lock_runtime() -> Result<MutexGuard<'static, RuntimeState>, &'static str> {
 
 fn release_runtime(state: MutexGuard<'static, RuntimeState>) {
     drop(state);
-    crate::utils::event_loop::wake();
+    crate::platform::wake();
 }
 
 macro_rules! lock_runtime_or_return {
@@ -2165,7 +2165,7 @@ pub fn dispatch_media_command(
         command,
         position_ms,
     };
-    // SAFETY: Media callbacks are invoked on the winit thread while the plugin is loaded.
+    // SAFETY: Media callbacks are invoked on the event loop thread while the plugin is loaded.
     unsafe { callback(callback_data as *mut c_void, resource_id, &command) };
     if let Ok(mut runtime) = runtime().lock()
         && let Some(media) = runtime.media.get_mut(&resource_id)
@@ -2299,7 +2299,7 @@ fn revoke_plugin(token: PluginToken) {
             log::error!("Failed to release plugin translation bundle {id}: {error}");
         }
     }
-    crate::utils::event_loop::wake();
+    crate::platform::wake();
 }
 
 pub struct PluginManager {
@@ -2436,7 +2436,7 @@ impl PluginManager {
                 let disabled = disabled_plugin_ids(&plugin_dir);
                 let plugins = collect_installed_plugins(&plugin_dir, &disabled, loaded_plugins);
                 let _ = tx.send(plugins);
-                crate::utils::event_loop::wake();
+                crate::platform::wake();
             });
         if let Err(error) = spawn_result {
             log::warn!("Failed to start plugin scan: {error}");

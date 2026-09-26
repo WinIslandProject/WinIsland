@@ -1,10 +1,9 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use winit::dpi::PhysicalPosition;
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::window::Window;
+use winisland_platform::WindowPosition;
 
+use crate::platform::WindowRef;
 use crate::ui::compact::CompactOverlayState;
 use crate::ui::expanded::music_view::{
     get_progress_bar_rect, set_progress_dragging, set_progress_hover,
@@ -34,8 +33,8 @@ impl App {
                 .is_none_or(|time| time.elapsed() >= Duration::from_millis(250))
                 && is_left_button_pressed())
     }
-    pub(super) fn on_about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let window = match self.window.clone() {
+    pub(super) fn on_about_to_wait(&mut self) {
+        let window = match self.window {
             Some(w) => w,
             None => return,
         };
@@ -47,12 +46,8 @@ impl App {
         {
             self.invalidate_renderer(&error, now);
         }
-        if crate::window::take_dwm_composition_changed() {
-            self.invalidate_renderer("DWM composition changed", now);
-        }
         self.recover_renderer(&window, now, RENDERER_RECOVERY_INTERVAL);
         if now < self.next_frame_deadline {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
             return;
         }
         if self
@@ -63,13 +58,13 @@ impl App {
             self.geom.position_restore_after = None;
             self.geom.win_x = self.geom.configured_x;
             self.geom.win_y = self.geom.configured_y;
-            window.set_outer_position(PhysicalPosition::new(self.geom.win_x, self.geom.win_y));
+            window.set_outer_position(WindowPosition::new(self.geom.win_x, self.geom.win_y));
         }
         if now.duration_since(self.last_topmost_check) >= Duration::from_secs(1) {
             Self::enforce_overlay_window(&window);
             self.last_topmost_check = now;
         }
-        self.handle_tray_events(&window, event_loop);
+        self.handle_tray_events(&window);
         self.reload_config_if_changed(&window);
         if self.is_hidden() && !self.can_hide() {
             self.reveal_island();
@@ -94,7 +89,6 @@ impl App {
             self.compact_overlay.finish_brightness_drag();
             self.audio.set_gate_override(false);
             self.next_frame_deadline = now + HIDDEN_FRAME_INTERVAL;
-            event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
             return;
         }
         let (px, py) = if self.touch_id.is_some() {
@@ -168,9 +162,9 @@ impl App {
         }
 
         if interaction_suppressed {
-            let _ = window.set_cursor_hittest(false);
+            window.set_cursor_hittest(false);
         } else {
-            let _ = window.set_cursor_hittest(
+            window.set_cursor_hittest(
                 is_hovering_visible
                     || is_on_hidden_reveal
                     || self.compact_overlay.is_volume_dragging()
@@ -213,7 +207,6 @@ impl App {
         self.update_compact_widget_refresh(&window, now);
 
         self.schedule_next_frame(
-            event_loop,
             &window,
             now,
             FramePacing {
@@ -347,7 +340,7 @@ impl App {
         }
     }
 
-    fn update_right_drag(&mut self, window: &Window, px: i32, py: i32) {
+    fn update_right_drag(&mut self, window: &WindowRef, px: i32, py: i32) {
         let (Some((start_cx, start_cy)), Some((start_ox, start_oy))) =
             (self.right_press_cursor, self.right_drag_start_offset)
         else {
@@ -377,7 +370,7 @@ impl App {
         window.request_redraw();
     }
 
-    fn update_fullscreen_suppression(&mut self, window: &Window, now: Instant) {
+    fn update_fullscreen_suppression(&mut self, window: &WindowRef, now: Instant) {
         self.last_fullscreen_check = now;
         let prev_fullscreen = self.is_fullscreen_suppressed;
         self.is_fullscreen_suppressed = is_foreground_fullscreen(
@@ -429,7 +422,7 @@ impl App {
         }
     }
 
-    fn poll_media_info(&mut self, window: &Window) -> (bool, bool) {
+    fn poll_media_info(&mut self, window: &WindowRef) -> (bool, bool) {
         self.smtc
             .set_enabled(self.config.smtc_enabled && crate::platform::capabilities().media_session);
         let smtc_cover_changed = self.smtc.take_info_if_changed().is_some_and(|media| {
@@ -479,7 +472,7 @@ impl App {
 
     fn update_compact_and_auto_hide(
         &mut self,
-        window: &Window,
+        window: &WindowRef,
         is_hovering_visible: bool,
         music_active: bool,
         media_is_playing: bool,
@@ -611,7 +604,7 @@ impl App {
         compact_overlay_visible
     }
 
-    fn update_seeking_input(&mut self, window: &Window, rel_x: i32) {
+    fn update_seeking_input(&mut self, window: &WindowRef, rel_x: i32) {
         if self.seek.active && self.input_pressed() {
             let page_shift = self.springs.view.value * self.springs.w.value;
             let click_x = rel_x as f32 - page_shift;
@@ -661,7 +654,7 @@ impl App {
         set_progress_dragging(self.seek.active);
     }
 
-    fn update_hide_drag(&mut self, window: &Window, px: i32, py: i32, dt: f32) {
+    fn update_hide_drag(&mut self, window: &WindowRef, px: i32, py: i32, dt: f32) {
         if self.is_dragging && !self.dismissing_notification && !self.is_hidden() {
             let upward_distance = self.drag_start_py - py;
             let horizontal_distance = px - self.drag_start_px;
@@ -715,7 +708,7 @@ impl App {
         }
     }
 
-    fn update_expand_collapse_click(&mut self, window: &Window, is_hovering_visible: bool) {
+    fn update_expand_collapse_click(&mut self, window: &WindowRef, is_hovering_visible: bool) {
         if self.config.fullscreen_auto_hide && self.is_fullscreen_suppressed {
             return;
         }
@@ -735,7 +728,7 @@ impl App {
         }
     }
 
-    fn update_lyrics(&mut self, window: &Window, music_active: bool, is_paused: bool, dt: f32) {
+    fn update_lyrics(&mut self, window: &WindowRef, music_active: bool, is_paused: bool, dt: f32) {
         let current_lyric = if music_active && self.config.show_lyrics && !is_paused {
             self.current_media_info()
                 .current_lyric(
@@ -794,7 +787,7 @@ impl App {
 
     fn update_spring_targets(
         &mut self,
-        window: &Window,
+        window: &WindowRef,
         music_active: bool,
         is_paused: bool,
         dt: f32,
@@ -882,7 +875,7 @@ impl App {
         }
     }
 
-    fn update_compact_widget_refresh(&mut self, window: &Window, now: Instant) {
+    fn update_compact_widget_refresh(&mut self, window: &WindowRef, now: Instant) {
         if self.expanded
             || self.components_hidden
             || self.is_hidden()
@@ -914,13 +907,7 @@ impl App {
         due
     }
 
-    fn schedule_next_frame(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window: &Window,
-        now: Instant,
-        pacing: FramePacing,
-    ) {
+    fn schedule_next_frame(&mut self, window: &WindowRef, now: Instant, pacing: FramePacing) {
         let should_periodic_redraw = self.periodic_effect_redraw_due();
         let transition_active = self.springs.any_animating()
             || self
@@ -988,7 +975,6 @@ impl App {
         {
             window.request_redraw();
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_deadline));
     }
 
     fn aligned_frame_interval(&self, desired: Duration) -> Duration {

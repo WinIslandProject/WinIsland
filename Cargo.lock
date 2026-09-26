@@ -33,13 +33,11 @@ dependencies = [
  "wasapi",
  "windows",
  "windows-core",
- "windows-numerics",
  "winisland-core",
  "winisland-platform",
  "winisland-platform-windows",
  "winisland-plugin-api",
  "winisland-render",
- "winit",
  "winres",
  "zip",
 ]
@@ -5214,7 +5212,9 @@ dependencies = [
  "wasapi",
  "windows",
  "windows-core",
+ "windows-numerics",
  "winisland-platform",
+ "winit",
 ]
 
 [[package]]
@@ -5244,6 +5244,7 @@ dependencies = [
  "skia-safe",
  "thiserror 2.0.20",
  "windows",
+ "winisland-platform",
 ]
 
 [[package]]

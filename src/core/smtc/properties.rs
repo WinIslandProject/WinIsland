@@ -564,7 +564,7 @@ fn publish_thumbnail(
     });
     if applied {
         log::info!("SMTC: thumbnail fetched ({byte_len} bytes, hash={hash:#x})");
-        crate::utils::event_loop::wake();
+        crate::platform::wake();
     }
 }
 

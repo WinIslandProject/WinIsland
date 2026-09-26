@@ -10,11 +10,8 @@ use crate::utils::logger;
 use crate::window::app::App;
 use std::env;
 use std::time::{Duration, Instant};
-use windows::Win32::UI::WindowsAndMessaging::{MSG, WM_DWMCOMPOSITIONCHANGED};
 use winisland_core::i18n::{init_i18n, set_system_locale_provider};
 use winisland_platform::InstanceLock;
-use winit::event_loop::EventLoop;
-use winit::platform::windows::EventLoopBuilderExtWindows;
 
 const RESTART_ARG: &str = "--restart";
 const RESTART_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -74,28 +71,14 @@ fn main() {
                 capabilities.autostart &= probed.autostart;
             });
             log::info!("Platform capabilities: {:?}", platform::capabilities());
-            utils::event_loop::wake();
+            platform::wake();
         })
         .ok();
 
     utils::updater::start_update_checker();
 
-    let mut event_loop_builder = EventLoop::builder();
-    event_loop_builder.with_msg_hook(|message| {
-        if !message.is_null() {
-            // SAFETY: winit invokes the hook with a valid pointer to the MSG currently being
-            // dispatched, and the pointer is only read during this synchronous callback.
-            let message = unsafe { &*message.cast::<MSG>() };
-            if message.message == WM_DWMCOMPOSITIONCHANGED {
-                window::signal_dwm_composition_changed();
-            }
-        }
-        false
-    });
-    let event_loop = event_loop_builder.build().unwrap();
-    utils::event_loop::set_proxy(event_loop.create_proxy());
     let mut app = App::default();
-    event_loop.run_app(&mut app).unwrap();
+    platform::window().run(&mut app).unwrap();
     if let Some(probe) = capability_probe {
         let _ = probe.join();
     }
