@@ -258,7 +258,7 @@ fn publish_volume_snapshot(
     };
     drop(snapshot);
     if changed {
-        crate::utils::event_loop::wake();
+        crate::platform::wake();
     }
 }
 

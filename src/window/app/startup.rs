@@ -1,13 +1,8 @@
-use std::sync::Arc;
 use std::time::Duration;
 
-use winit::dpi::PhysicalSize;
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::platform::windows::WindowAttributesExtWindows;
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use winit::window::{Window, WindowButtons, WindowLevel};
+use winisland_platform::{OverlaySpec, Theme};
 
-use crate::utils::icon::get_app_icon;
+use crate::platform::{WindowRef, window};
 use crate::utils::logger;
 use winisland_core::config::WINDOW_TITLE;
 use winisland_core::i18n::tr;
@@ -15,51 +10,25 @@ use winisland_core::i18n::tr;
 use super::App;
 
 impl App {
-    pub(super) fn on_resumed(&mut self, event_loop: &ActiveEventLoop) {
-        event_loop.set_control_flow(ControlFlow::Wait);
+    pub(super) fn on_resumed(&mut self) {
         if self.window.is_none() {
             Self::set_aumid();
             let window_size = self.required_window_size();
             self.geom.os_w = window_size.width;
             self.geom.os_h = window_size.height;
-            let backdrop_attrs = Window::default_attributes()
-                .with_title("WinIsland Backdrop")
-                .with_inner_size(PhysicalSize::new(1, 1))
-                .with_transparent(true)
-                .with_no_redirection_bitmap(true)
-                .with_visible(false)
-                .with_decorations(false)
-                .with_resizable(false)
-                .with_enabled_buttons(WindowButtons::empty())
-                .with_window_level(WindowLevel::AlwaysOnTop)
-                .with_skip_taskbar(true);
-            let backdrop_window = Arc::new(event_loop.create_window(backdrop_attrs).unwrap());
-            let _ = backdrop_window.set_cursor_hittest(false);
-            let backdrop_hwnd = backdrop_window
-                .window_handle()
-                .ok()
-                .and_then(|handle| match handle.as_raw() {
-                    RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as _),
-                    _ => None,
-                })
-                .expect("WinIsland backdrop requires a Win32 window");
-            let attrs = Window::default_attributes()
-                .with_title(WINDOW_TITLE)
-                .with_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h))
-                .with_transparent(true)
-                .with_no_redirection_bitmap(true)
-                .with_visible(false)
-                .with_decorations(false)
-                .with_resizable(true)
-                .with_enabled_buttons(WindowButtons::empty())
-                .with_window_level(WindowLevel::AlwaysOnTop)
-                .with_skip_taskbar(true)
-                .with_owner_window(backdrop_hwnd)
-                .with_window_icon(get_app_icon());
-            let window = Arc::new(event_loop.create_window(attrs).unwrap());
-
-            self.window = Some(window.clone());
-            self.backdrop_window = Some(backdrop_window.clone());
+            let id = match window().create_overlay(OverlaySpec {
+                title: WINDOW_TITLE,
+                size: window_size,
+            }) {
+                Ok(id) => id,
+                Err(error) => {
+                    log::error!("Window creation failed: {error}");
+                    window().exit();
+                    return;
+                }
+            };
+            let window_ref = WindowRef(id);
+            self.window = Some(window_ref);
             log::info!(
                 "Window created: {}x{} (base {}x{})",
                 self.geom.os_w,
@@ -70,7 +39,8 @@ impl App {
 
             let mut monitor_opt = None;
             for _ in 0..10 {
-                if let Some(monitor) = Self::get_target_monitor(&window, self.config.monitor_index)
+                if let Some(monitor) =
+                    Self::get_target_monitor(&window_ref, self.config.monitor_index)
                 {
                     let size = monitor.size();
                     if size.width > 0 && size.height > 0 {
@@ -89,7 +59,7 @@ impl App {
                 self.geom.monitor_pos = (mon_pos.x, mon_pos.y);
                 self.migrate_legacy_dock_position(mon_pos, mon_size);
                 let (position_x, position_y) = self.compute_window_position(mon_pos, mon_size);
-                self.set_configured_window_position(&window, position_x, position_y);
+                self.set_configured_window_position(&window_ref, position_x, position_y);
                 log::info!(
                     "Monitor: {}x{} @ ({}, {}); window @ ({}, {})",
                     mon_size.width,
@@ -100,13 +70,16 @@ impl App {
                     self.geom.win_y
                 );
             }
-            let renderer = match crate::window::native_surface(&window).and_then(|surface| {
-                winisland_render::Renderer::new(
-                    surface,
-                    winisland_render::RendererOptions::new(self.geom.os_w, self.geom.os_h),
-                )
-                .map_err(|error| error.to_string())
-            }) {
+            let renderer = match window()
+                .native_surface(id)
+                .ok_or_else(|| "Window handle unavailable".to_string())
+                .and_then(|surface| {
+                    winisland_render::Renderer::new(
+                        surface,
+                        winisland_render::RendererOptions::new(self.geom.os_w, self.geom.os_h),
+                    )
+                    .map_err(|error| error.to_string())
+                }) {
                 Ok(renderer) => renderer,
                 Err(error) => {
                     log::error!("Renderer initialization failed: {error}");
@@ -114,13 +87,13 @@ impl App {
                         &tr("renderer_init_failed_title"),
                         &format!("{}\n\n{error}", tr("renderer_init_failed_desc")),
                     );
-                    event_loop.exit();
+                    window().exit();
                     return;
                 }
             };
             self.renderer = Some(renderer);
-            self.create_host_backdrop(&window, &backdrop_window);
-            let is_light = window.theme() == Some(winit::window::Theme::Light);
+            self.create_host_backdrop(&window_ref);
+            let is_light = window().theme(id) == Some(Theme::Light);
             self.is_light_theme = is_light;
             crate::plugin::manager::update_host_state(crate::plugin::types::HostState {
                 theme: if is_light {
@@ -150,12 +123,12 @@ impl App {
                         &tr("tray_unavailable_title"),
                         &tr("tray_unavailable_desc"),
                     );
-                    self.open_settings(event_loop);
+                    self.open_settings();
                 }
             }
-            Self::enforce_overlay_window(&window);
-            window.set_visible(true);
-            window.request_redraw();
+            Self::enforce_overlay_window(&window_ref);
+            window_ref.set_visible(true);
+            window_ref.request_redraw();
         }
     }
 }

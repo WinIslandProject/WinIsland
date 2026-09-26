@@ -1,8 +1,9 @@
 //! Windows implementations of the platform capability contracts.
 //!
-//! The application owns scheduling and rendering; this crate owns operating system calls.
+//! This crate owns the event loop, windows, and operating system calls; rendering stays in the application.
 
 mod audio;
+mod backdrop;
 mod com;
 mod display;
 mod input;
@@ -10,6 +11,7 @@ mod media;
 mod metrics;
 mod notify;
 mod shell;
+pub mod window;
 
 pub use audio::WindowsAudio;
 pub use display::WindowsDisplay;

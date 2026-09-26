@@ -1,35 +1,31 @@
 use std::time::{Duration, Instant};
 
-use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
-use winit::window::WindowId;
+use winisland_platform::{
+    AppHandler, HostBackdropParams, InputState, MouseButton, PlatformEvent, Theme, TouchPhase,
+    WindowId, WindowPosition,
+};
 
+use crate::platform::window;
 use crate::ui::island::draw_island;
 use crate::utils::blur::calculate_blur_sigmas;
 use crate::utils::mouse::get_global_cursor_pos;
-use crate::window::backdrop::HostBackdropParams;
 
 use super::App;
 use super::input::InputSource;
 
 impl App {
-    pub(super) fn on_window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        id: WindowId,
-        event: WindowEvent,
-    ) {
+    pub(super) fn on_window_event(&mut self, id: WindowId, event: PlatformEvent) {
         if let Some(win) = &self.window
             && win.id() == id
         {
             match event {
-                WindowEvent::CloseRequested => {
+                PlatformEvent::CloseRequested { .. } => {
                     log::info!("Main window close requested, exiting application");
                     self.close_settings();
-                    event_loop.exit();
+                    window().exit();
                 }
-                WindowEvent::ThemeChanged(theme) => {
-                    let is_light = theme == winit::window::Theme::Light;
+                PlatformEvent::ThemeChanged { theme, .. } => {
+                    let is_light = theme == Theme::Light;
                     self.is_light_theme = is_light;
                     crate::plugin::manager::update_host_theme(is_light);
                     win.request_redraw();
@@ -41,10 +37,10 @@ impl App {
                         );
                     }
                 }
-                WindowEvent::Resized(_) if win.is_maximized() => {
+                PlatformEvent::Resized { .. } if win.is_maximized() => {
                     win.set_maximized(false);
                 }
-                WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
+                PlatformEvent::Resized { size, .. } if size.width > 0 && size.height > 0 => {
                     let expected = self.required_window_size();
                     if size != expected {
                         let _ = win.request_inner_size(expected);
@@ -60,7 +56,7 @@ impl App {
                     }
                     win.request_redraw();
                 }
-                WindowEvent::ScaleFactorChanged { .. } => {
+                PlatformEvent::ScaleFactorChanged { .. } => {
                     let expected = self.required_window_size();
                     let _ = win.request_inner_size(expected);
                     if let Some(monitor) = Self::get_target_monitor(win, self.config.monitor_index)
@@ -71,10 +67,10 @@ impl App {
                         self.geom.configured_y = y;
                         self.geom.win_x = x;
                         self.geom.win_y = y;
-                        win.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+                        win.set_outer_position(WindowPosition::new(x, y));
                     }
                 }
-                WindowEvent::Moved(position) => {
+                PlatformEvent::Moved { position, .. } => {
                     self.geom.win_x = position.x;
                     self.geom.win_y = position.y;
                     if !self.is_dragging
@@ -86,13 +82,13 @@ impl App {
                     {
                         self.geom.win_x = self.geom.configured_x;
                         self.geom.win_y = self.geom.configured_y;
-                        win.set_outer_position(winit::dpi::PhysicalPosition::new(
+                        win.set_outer_position(WindowPosition::new(
                             self.geom.configured_x,
                             self.geom.configured_y,
                         ));
                     }
                 }
-                WindowEvent::DroppedFile(path)
+                PlatformEvent::DroppedFile { path, .. }
                     if path
                         .extension()
                         .is_some_and(|e| e.eq_ignore_ascii_case("zip")) =>
@@ -100,7 +96,7 @@ impl App {
                     log::info!("File dropped: {}", path.display());
                     self.install_zip_drop(&path);
                 }
-                WindowEvent::MouseInput { state, button, .. } => {
+                PlatformEvent::MouseInput { state, button, .. } => {
                     if self.touch_id.is_some()
                         || self
                             .last_touch_at
@@ -110,47 +106,40 @@ impl App {
                     }
                     let (px, py) = get_global_cursor_pos();
                     if button == MouseButton::Left {
-                        self.handle_input(event_loop, state, px, py, InputSource::Mouse);
+                        self.handle_input(state, px, py, InputSource::Mouse);
                     } else if button == MouseButton::Right {
                         self.handle_right_input(state, px, py);
                     }
                 }
-                WindowEvent::Touch(touch) => {
+                PlatformEvent::Touch {
+                    touch_id,
+                    phase,
+                    position,
+                    ..
+                } => {
                     self.last_touch_at = Some(Instant::now());
                     let (px, py) = (
-                        (touch.location.x + self.geom.win_x as f64) as i32,
-                        (touch.location.y + self.geom.win_y as f64) as i32,
+                        (position.x + self.geom.win_x as f64) as i32,
+                        (position.y + self.geom.win_y as f64) as i32,
                     );
-                    match touch.phase {
+                    match phase {
                         TouchPhase::Started if self.touch_id.is_none() => {
-                            self.touch_pos = touch.location;
-                            self.touch_id = Some(touch.id);
+                            self.touch_pos = position;
+                            self.touch_id = Some(touch_id);
                             win.request_redraw();
-                            self.handle_input(
-                                event_loop,
-                                ElementState::Pressed,
-                                px,
-                                py,
-                                InputSource::Touch,
-                            );
+                            self.handle_input(InputState::Pressed, px, py, InputSource::Touch);
                         }
-                        TouchPhase::Moved if self.touch_id == Some(touch.id) => {
-                            self.touch_pos = touch.location;
+                        TouchPhase::Moved if self.touch_id == Some(touch_id) => {
+                            self.touch_pos = position;
                             win.request_redraw();
                         }
-                        TouchPhase::Ended if self.touch_id == Some(touch.id) => {
-                            self.touch_pos = touch.location;
+                        TouchPhase::Ended if self.touch_id == Some(touch_id) => {
+                            self.touch_pos = position;
                             win.request_redraw();
-                            self.handle_input(
-                                event_loop,
-                                ElementState::Released,
-                                px,
-                                py,
-                                InputSource::Touch,
-                            );
+                            self.handle_input(InputState::Released, px, py, InputSource::Touch);
                             self.touch_id = None;
                         }
-                        TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
+                        TouchPhase::Cancelled if self.touch_id == Some(touch_id) => {
                             self.touch_id = None;
                             self.expanded_press_started_inside = false;
                             self.expanded_header_press = None;
@@ -165,7 +154,7 @@ impl App {
                         _ => {}
                     }
                 }
-                WindowEvent::RedrawRequested => {
+                PlatformEvent::RedrawRequested { .. } => {
                     let island_layout = self.compute_island_layout();
                     let is_hidden = self.is_hidden();
                     if let Some(mut renderer) = self.renderer.take() {
@@ -329,6 +318,7 @@ impl App {
 
                         let host_backdrop = super::system::update_host_backdrop(
                             &mut self.host_backdrop,
+                            win.id(),
                             HostBackdropParams {
                                 enabled: !compact_components_hidden
                                     && matches!(
@@ -437,5 +427,114 @@ impl App {
                 _ => (),
             }
         }
+    }
+}
+
+impl AppHandler for App {
+    fn on_event(&mut self, event: PlatformEvent) {
+        match event {
+            PlatformEvent::Resumed => {
+                self.on_resumed();
+                return;
+            }
+            PlatformEvent::CompositionChanged => {
+                self.invalidate_renderer("DWM composition changed", Instant::now());
+                return;
+            }
+            PlatformEvent::Wake => {
+                self.next_frame_deadline = Instant::now();
+                if let Some(window_ref) = self.window {
+                    window_ref.request_redraw();
+                }
+                return;
+            }
+            PlatformEvent::Exiting => return,
+            _ => {}
+        }
+
+        let Some(id) = event_window_id(&event) else {
+            return;
+        };
+        if self
+            .settings
+            .as_ref()
+            .and_then(super::super::settings::SettingsApp::window_id)
+            == Some(id)
+        {
+            if matches!(
+                event,
+                PlatformEvent::CloseRequested { .. } | PlatformEvent::Destroyed { .. }
+            ) {
+                self.close_settings();
+                return;
+            }
+            if let (Some(settings), Some(renderer)) =
+                (self.settings.as_mut(), self.renderer.as_mut())
+            {
+                settings.handle_window_event(event, renderer);
+            }
+            if let Some(error) = self
+                .renderer
+                .as_mut()
+                .and_then(winisland_render::Renderer::take_failure)
+            {
+                self.invalidate_renderer(&error, Instant::now());
+            }
+            self.handle_plugin_settings_request();
+            if self
+                .settings
+                .as_ref()
+                .is_some_and(super::super::settings::SettingsApp::close_requested)
+            {
+                self.close_settings();
+            }
+            return;
+        }
+        self.on_window_event(id, event);
+    }
+
+    fn on_about_to_wait(&mut self) -> Option<Instant> {
+        self.on_about_to_wait();
+        let mut deadline = self.next_frame_deadline;
+        if let Some(settings_deadline) = self
+            .settings
+            .as_mut()
+            .and_then(super::super::settings::SettingsApp::update)
+        {
+            deadline = deadline.min(settings_deadline);
+        }
+        self.handle_plugin_settings_request();
+        self.window.map(|_| deadline)
+    }
+
+    fn on_exit(&mut self) {
+        self.close_settings();
+        if let Some(window_ref) = self.window.take() {
+            window().release_host_backdrop(window_ref.id());
+            self.host_backdrop = false;
+            drop(self.renderer.take());
+            window().destroy_window(window_ref.id());
+        }
+    }
+}
+
+fn event_window_id(event: &PlatformEvent) -> Option<WindowId> {
+    match event {
+        PlatformEvent::CloseRequested { id }
+        | PlatformEvent::Destroyed { id }
+        | PlatformEvent::Resized { id, .. }
+        | PlatformEvent::Moved { id, .. }
+        | PlatformEvent::ScaleFactorChanged { id, .. }
+        | PlatformEvent::ThemeChanged { id, .. }
+        | PlatformEvent::RedrawRequested { id }
+        | PlatformEvent::Focused { id, .. }
+        | PlatformEvent::CursorMoved { id, .. }
+        | PlatformEvent::CursorLeft { id }
+        | PlatformEvent::MouseInput { id, .. }
+        | PlatformEvent::MouseWheel { id, .. }
+        | PlatformEvent::KeyInput { id, .. }
+        | PlatformEvent::Touch { id, .. }
+        | PlatformEvent::DroppedFile { id, .. } => Some(*id),
+        _ => None,
     }
 }

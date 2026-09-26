@@ -1,8 +1,5 @@
 use std::time::Instant;
 
-use winit::event::ElementState;
-use winit::event_loop::ActiveEventLoop;
-
 use crate::ui::expanded::music_view::{
     get_cover_rect, get_next_btn_rect, get_pause_btn_rect, get_prev_btn_rect,
     get_progress_bar_rect, trigger_cover_flip, trigger_next_click, trigger_pause_click,
@@ -13,6 +10,7 @@ use crate::utils::mouse::{
     double_click_interval, is_point_in_continuous_rounded_rect, is_point_in_rect,
 };
 use winisland_core::config::{MIN_HIDDEN_WIDTH, WidgetKind};
+use winisland_platform::InputState;
 
 use super::{App, DragAxis, IslandLayout, should_show_widget_view};
 
@@ -25,8 +23,7 @@ pub(super) enum InputSource {
 impl App {
     pub(super) fn handle_input(
         &mut self,
-        event_loop: &ActiveEventLoop,
-        state: ElementState,
+        state: InputState,
         px: i32,
         py: i32,
         source: InputSource,
@@ -41,16 +38,16 @@ impl App {
         let rel_y = py - self.geom.win_y;
         let layout = self.compute_island_layout();
 
-        if state == ElementState::Pressed {
-            self.handle_press(event_loop, rel_x, rel_y, &layout);
-        } else if state == ElementState::Released {
+        if state == InputState::Pressed {
+            self.handle_press(rel_x, rel_y, &layout);
+        } else if state == InputState::Released {
             self.update_volume_drag_position(rel_x, &layout);
             self.update_brightness_drag_position(rel_x, &layout);
             self.handle_release(px, py);
         }
     }
 
-    pub(super) fn handle_right_input(&mut self, state: ElementState, px: i32, py: i32) {
+    pub(super) fn handle_right_input(&mut self, state: InputState, px: i32, py: i32) {
         if !self.config.right_click_drag
             || self.expanded
             || self.is_cursor_suppressed
@@ -59,7 +56,7 @@ impl App {
             return;
         }
         match state {
-            ElementState::Pressed => {
+            InputState::Pressed => {
                 let rel_x = px - self.geom.win_x;
                 let rel_y = py - self.geom.win_y;
                 let layout = self.compute_island_layout();
@@ -80,7 +77,7 @@ impl App {
                     ));
                 }
             }
-            ElementState::Released => {
+            InputState::Released => {
                 if self.is_right_dragging {
                     self.is_right_dragging = false;
                     crate::core::persistence::save_config(&self.config);
@@ -96,13 +93,7 @@ impl App {
         }
     }
 
-    pub(super) fn handle_press(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        rel_x: i32,
-        rel_y: i32,
-        layout: &IslandLayout,
-    ) {
+    pub(super) fn handle_press(&mut self, rel_x: i32, rel_y: i32, layout: &IslandLayout) {
         let island_y = layout.island_y;
         let offset_x = layout.offset_x;
         let current_island_x = layout.current_island_x;
@@ -340,7 +331,7 @@ impl App {
                         )
                     });
                 if settings_hit {
-                    self.open_settings(event_loop);
+                    self.open_settings();
                     return;
                 }
 

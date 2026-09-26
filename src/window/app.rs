@@ -1,14 +1,13 @@
 use crate::core::audio::AudioProcessor;
 use crate::core::persistence::{get_config_path, load_config};
 use crate::core::smtc::{MediaInfo, SmtcListener};
+use crate::platform::WindowRef;
 use crate::plugin::PluginManager;
 use crate::plugin::marketplace::MarketplaceCatalog;
 use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
-use crate::window::backdrop::HostBackdrop;
 use crate::window::settings::SettingsApp;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winisland_core::config::{AppConfig, LyricTransitionAnimation, LyricTransitionMode};
@@ -16,15 +15,13 @@ use winisland_core::context::ContextManager;
 use winisland_core::lyrics::LyricHighlight;
 use winisland_core::physics::Spring;
 use winisland_core::widgets::WidgetManager;
+use winisland_platform::WindowPoint;
 use winisland_render::Renderer;
-use winit::dpi::PhysicalPosition;
-use winit::window::Window;
 
 mod events;
 mod frame;
 mod input;
 mod layout;
-mod lifecycle;
 mod startup;
 mod system;
 
@@ -53,10 +50,9 @@ struct PluginMediaSource {
 }
 
 pub struct App {
-    window: Option<Arc<Window>>,
-    host_backdrop: Option<HostBackdrop>,
+    window: Option<WindowRef>,
+    host_backdrop: bool,
     renderer: Option<Renderer>,
-    backdrop_window: Option<Arc<Window>>,
     settings: Option<SettingsApp>,
     tray_installed: bool,
     smtc: SmtcListener,
@@ -107,7 +103,7 @@ pub struct App {
     hidden_reveal_click: HiddenRevealClick,
     cover_click: DoubleClick,
     touch_id: Option<u64>,
-    touch_pos: PhysicalPosition<f64>,
+    touch_pos: WindowPoint,
     last_touch_at: Option<Instant>,
     ctx_mgr: ContextManager,
     widget_mgr: WidgetManager,
@@ -151,9 +147,8 @@ impl Default for App {
             .set_custom_font_path(config.custom_font_path.as_deref());
         Self {
             window: None,
-            host_backdrop: None,
+            host_backdrop: false,
             renderer: None,
-            backdrop_window: None,
             settings: None,
             tray_installed: false,
             config: config.clone(),
@@ -214,7 +209,7 @@ impl Default for App {
             hidden_reveal_click: HiddenRevealClick::default(),
             cover_click: DoubleClick::default(),
             touch_id: None,
-            touch_pos: PhysicalPosition::new(0.0, 0.0),
+            touch_pos: WindowPoint::new(0.0, 0.0),
             last_touch_at: None,
             ctx_mgr: ContextManager::new(),
             widget_mgr: WidgetManager::new(),

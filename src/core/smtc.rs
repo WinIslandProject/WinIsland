@@ -21,7 +21,7 @@ pub(crate) fn detect_active_apps_async() -> std::sync::mpsc::Receiver<Vec<String
         .spawn(move || {
             let apps = crate::platform::media().detect_active_apps();
             let _ = tx.send(apps);
-            crate::utils::event_loop::wake();
+            crate::platform::wake();
         });
     if let Err(error) = spawn_result {
         log::warn!("Failed to start settings media app scan: {error}");

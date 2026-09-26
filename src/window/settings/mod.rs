@@ -1,29 +1,23 @@
 use crate::core::plugin_settings::PluginSettingsPage;
+use crate::platform::{MonitorRef, WindowRef, window};
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::{MarketplaceCatalog, MarketplacePlugin};
 use crate::utils::color::{SettingsTheme, dark_settings_theme, light_settings_theme};
-use crate::utils::icon::get_app_icon;
 use crate::utils::settings_ui::items::{POPUP_MENU_R, SIDEBAR_PAD, SettingsItem};
 use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use winisland_core::anim::AnimPool;
 use winisland_core::config::AppConfig;
 use winisland_core::widgets::PluginWidget;
+use winisland_platform::{
+    CursorKind, InputState, Key, LogicalWindowSize, MouseButton, MouseWheelDelta, PlatformEvent,
+    SettingsSpec, Theme, TouchPhase, WindowId, WindowPoint, WindowPosition, WindowSize,
+};
 use winisland_render::{Renderer, RendererTargetId};
-use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
-use winit::event_loop::ActiveEventLoop;
-use winit::keyboard::{Key, NamedKey};
-use winit::monitor::MonitorHandle;
-use winit::platform::windows::WindowAttributesExtWindows;
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use winit::window::{Window, WindowButtons, WindowId};
 
 pub mod input;
 pub mod items;
@@ -91,10 +85,10 @@ pub(crate) fn window_controls_hovered(x: f32, y: f32) -> bool {
     (10.0..=70.0).contains(&x) && (10.0..=30.0).contains(&y)
 }
 
-fn scroll_delta(delta: MouseScrollDelta) -> f32 {
+fn scroll_delta(delta: MouseWheelDelta) -> f32 {
     match delta {
-        MouseScrollDelta::LineDelta(_, lines) => lines * MOUSE_WHEEL_LINE_HEIGHT,
-        MouseScrollDelta::PixelDelta(position) => position.y as f32,
+        MouseWheelDelta::Lines { y, .. } => y * MOUSE_WHEEL_LINE_HEIGHT,
+        MouseWheelDelta::Pixels { y, .. } => y as f32,
     }
 }
 
@@ -185,7 +179,7 @@ pub(crate) enum MarketplaceViewState {
 }
 
 pub struct SettingsApp {
-    pub(crate) window: Option<Arc<Window>>,
+    pub(crate) window: Option<WindowRef>,
     pub(crate) renderer_target: Option<RendererTargetId>,
     pub(crate) config: AppConfig,
     pub(crate) active_page: usize,
@@ -197,8 +191,8 @@ pub struct SettingsApp {
     pub(crate) logical_mouse_pos: (f32, f32),
     pub(crate) last_hover_mouse_pos: (f32, f32),
     touch_id: Option<u64>,
-    touch_start: PhysicalPosition<f64>,
-    touch_last: PhysicalPosition<f64>,
+    touch_start: WindowPoint,
+    touch_last: WindowPoint,
     touch_scrolling: bool,
     touch_pressed: bool,
     last_touch_at: Option<Instant>,
@@ -221,8 +215,8 @@ pub struct SettingsApp {
     pub(crate) win_h: f32,
     logical_win_w: f64,
     logical_win_h: f64,
-    pending_dpi_size: Option<PhysicalSize<u32>>,
-    target_monitor: Option<MonitorHandle>,
+    pending_dpi_size: Option<WindowSize>,
+    target_monitor: Option<MonitorRef>,
     pub(crate) focused: bool,
     pub(crate) dots_hovered: bool,
     pub(crate) music_notice_pressed: bool,
@@ -328,8 +322,8 @@ impl SettingsApp {
             logical_mouse_pos: (0.0, 0.0),
             last_hover_mouse_pos: (-1.0, -1.0),
             touch_id: None,
-            touch_start: PhysicalPosition::new(0.0, 0.0),
-            touch_last: PhysicalPosition::new(0.0, 0.0),
+            touch_start: WindowPoint::new(0.0, 0.0),
+            touch_last: WindowPoint::new(0.0, 0.0),
             touch_scrolling: false,
             touch_pressed: false,
             last_touch_at: None,
@@ -404,33 +398,20 @@ impl SettingsApp {
             "dark" => false,
             _ => {
                 if let Some(win) = &self.window {
-                    win.theme() == Some(winit::window::Theme::Light)
+                    window().theme(win.id()) == Some(Theme::Light)
                 } else {
                     false
                 }
             }
         };
         if let Some(win) = &self.window {
-            Self::apply_titlebar_theme(win, self.is_light);
+            Self::apply_titlebar_theme(*win, self.is_light);
             win.request_redraw();
         }
     }
 
-    pub(crate) fn apply_titlebar_theme(window: &Window, is_light: bool) {
-        if let Ok(handle) = window.window_handle()
-            && let RawWindowHandle::Win32(raw) = handle.as_raw()
-        {
-            let hwnd = HWND(raw.hwnd.get() as _);
-            let use_dark: i32 = if is_light { 0 } else { 1 };
-            unsafe {
-                let _ = DwmSetWindowAttribute(
-                    hwnd,
-                    DWMWINDOWATTRIBUTE(20),
-                    &use_dark as *const _ as *const _,
-                    std::mem::size_of::<i32>() as u32,
-                );
-            }
-        }
+    pub(crate) fn apply_titlebar_theme(window_ref: WindowRef, is_light: bool) {
+        window().set_titlebar_theme(window_ref.id(), is_light);
     }
 
     pub(crate) fn get_monitor_list() -> Vec<String> {
@@ -540,43 +521,29 @@ impl SettingsApp {
 impl SettingsApp {
     pub(crate) fn create_window(
         &mut self,
-        event_loop: &ActiveEventLoop,
         renderer: &mut Renderer,
-        target_monitor: Option<MonitorHandle>,
+        target_monitor: Option<MonitorRef>,
     ) {
         self.target_monitor = target_monitor;
-        let attrs = Window::default_attributes()
-            .with_title("WinIsland Settings")
-            .with_inner_size(LogicalSize::new(WIN_W as f64, WIN_H as f64))
-            .with_resizable(true)
-            .with_enabled_buttons(WindowButtons::CLOSE | WindowButtons::MINIMIZE)
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_no_redirection_bitmap(true)
-            .with_window_icon(get_app_icon());
-        let attrs = if let Some(monitor) = self.target_monitor.as_ref() {
-            let origin = monitor.position();
-            let resolution = monitor.size();
-            let size = LogicalSize::new(WIN_W as f64, WIN_H as f64)
-                .to_physical::<u32>(monitor.scale_factor());
-            attrs.with_position(PhysicalPosition::new(
-                origin.x + (resolution.width as i32 - size.width as i32) / 2,
-                origin.y + (resolution.height as i32 - size.height as i32) / 2,
-            ))
-        } else {
-            attrs
-        };
-        let window = Arc::new(event_loop.create_window(attrs).unwrap());
-        self.window = Some(window.clone());
+        let id = window()
+            .create_settings(SettingsSpec {
+                title: "WinIsland Settings",
+                logical_size: LogicalWindowSize::new(WIN_W as f64, WIN_H as f64),
+                monitor: self.target_monitor.as_ref().map(MonitorRef::id),
+            })
+            .expect("Settings window creation failed");
+        let window_ref = WindowRef(id);
+        self.window = Some(window_ref);
         self.keep_window_on_island_monitor(true);
-        let size = window.inner_size();
+        let size = window_ref.inner_size();
         self.win_w = size.width as f32;
         self.win_h = size.height as f32;
-        let scale = window.scale_factor();
+        let scale = window_ref.scale_factor();
         self.logical_win_w = size.width as f64 / scale;
         self.logical_win_h = size.height as f64 / scale;
-        self.renderer_target = match crate::window::native_surface(&window)
-            .map_err(|error| error.to_string())
+        self.renderer_target = match window()
+            .native_surface(id)
+            .ok_or_else(|| "Settings window has no native surface".to_string())
             .and_then(|surface| {
                 renderer
                     .create_target(surface, size.width, size.height)
@@ -609,7 +576,9 @@ impl SettingsApp {
             return Ok(());
         };
         let size = window.inner_size();
-        let surface = crate::window::native_surface(window)?;
+        let surface = crate::platform::window()
+            .native_surface(window.id())
+            .ok_or_else(|| "Settings window has no native surface".to_string())?;
         self.renderer_target = Some(
             renderer
                 .create_target(surface, size.width, size.height)
@@ -619,14 +588,16 @@ impl SettingsApp {
         Ok(())
     }
 
-    pub(crate) fn handle_window_event(&mut self, event: WindowEvent, renderer: &mut Renderer) {
+    pub(crate) fn handle_window_event(&mut self, event: PlatformEvent, renderer: &mut Renderer) {
         match event {
-            WindowEvent::CloseRequested | WindowEvent::Destroyed => self.close_requested = true,
-            WindowEvent::Focused(focused) => self.handle_focus_changed(focused),
-            WindowEvent::ThemeChanged(theme) if self.config.settings_theme == "system" => {
+            PlatformEvent::CloseRequested { .. } | PlatformEvent::Destroyed { .. } => {
+                self.close_requested = true;
+            }
+            PlatformEvent::Focused { focused, .. } => self.handle_focus_changed(focused),
+            PlatformEvent::ThemeChanged { theme, .. } if self.config.settings_theme == "system" => {
                 self.handle_system_theme_changed(theme);
             }
-            WindowEvent::Resized(_)
+            PlatformEvent::Resized { .. }
                 if self
                     .window
                     .as_ref()
@@ -636,18 +607,19 @@ impl SettingsApp {
                     window.set_maximized(false);
                 }
             }
-            WindowEvent::Resized(new_size) => self.handle_resized(renderer, new_size),
-            WindowEvent::ScaleFactorChanged {
-                mut inner_size_writer,
-                scale_factor,
-            } => self.handle_scale_changed(scale_factor, &mut inner_size_writer),
-            WindowEvent::Moved(_) => self.keep_window_on_island_monitor(false),
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                self.handle_pressed_key(&event.logical_key);
+            PlatformEvent::Resized { size, .. } => self.handle_resized(renderer, size),
+            PlatformEvent::ScaleFactorChanged { scale, .. } => self.handle_scale_changed(scale),
+            PlatformEvent::Moved { .. } => self.keep_window_on_island_monitor(false),
+            PlatformEvent::KeyInput {
+                key,
+                state: InputState::Pressed,
+                ..
+            } => {
+                self.handle_pressed_key(&key);
             }
-            WindowEvent::CursorMoved { position, .. } => self.handle_cursor_moved(position),
-            WindowEvent::CursorLeft { .. } => self.handle_cursor_left(),
-            WindowEvent::DroppedFile(path)
+            PlatformEvent::CursorMoved { position, .. } => self.handle_cursor_moved(position),
+            PlatformEvent::CursorLeft { .. } => self.handle_cursor_left(),
+            PlatformEvent::DroppedFile { path, .. }
                 if self.active_page == PLUGINS_PAGE_INDEX
                     && path
                         .extension()
@@ -655,21 +627,26 @@ impl SettingsApp {
             {
                 self.handle_plugin_file_drop(path);
             }
-            WindowEvent::MouseWheel { delta, .. } if !self.suppress_synthetic_mouse() => {
+            PlatformEvent::MouseWheel { delta, .. } if !self.suppress_synthetic_mouse() => {
                 self.handle_mouse_wheel(delta);
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
+            PlatformEvent::MouseInput {
+                state: InputState::Pressed,
                 button: MouseButton::Left,
                 ..
             } if !self.suppress_synthetic_mouse() => self.handle_left_mouse_pressed(),
-            WindowEvent::MouseInput {
-                state: ElementState::Released,
+            PlatformEvent::MouseInput {
+                state: InputState::Released,
                 button: MouseButton::Left,
                 ..
             } if !self.suppress_synthetic_mouse() => self.handle_left_mouse_released(),
-            WindowEvent::Touch(touch) => self.handle_touch(touch),
-            WindowEvent::RedrawRequested => self.draw(renderer),
+            PlatformEvent::Touch {
+                touch_id,
+                phase,
+                position,
+                ..
+            } => self.handle_touch(touch_id, phase, position),
+            PlatformEvent::RedrawRequested { .. } => self.draw(renderer),
             _ => (),
         }
     }
@@ -684,15 +661,15 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_system_theme_changed(&mut self, theme: winit::window::Theme) {
-        self.is_light = theme == winit::window::Theme::Light;
+    fn handle_system_theme_changed(&mut self, theme: Theme) {
+        self.is_light = theme == Theme::Light;
         if let Some(window) = &self.window {
-            Self::apply_titlebar_theme(window, self.is_light);
+            Self::apply_titlebar_theme(*window, self.is_light);
         }
         self.request_redraw();
     }
 
-    fn handle_resized(&mut self, renderer: &mut Renderer, size: PhysicalSize<u32>) {
+    fn handle_resized(&mut self, renderer: &mut Renderer, size: WindowSize) {
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -719,19 +696,20 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_scale_changed(
-        &mut self,
-        scale_factor: f64,
-        inner_size_writer: &mut winit::event::InnerSizeWriter,
-    ) {
-        let size = LogicalSize::new(self.logical_win_w, self.logical_win_h)
-            .to_physical::<u32>(scale_factor);
-        if inner_size_writer.request_inner_size(size).is_ok() {
+    fn handle_scale_changed(&mut self, scale_factor: f64) {
+        let size = WindowSize::new(
+            (self.logical_win_w * scale_factor).round() as u32,
+            (self.logical_win_h * scale_factor).round() as u32,
+        );
+        if self
+            .window
+            .is_some_and(|window_ref| window_ref.request_inner_size(size))
+        {
             self.pending_dpi_size = Some(size);
         }
     }
 
-    pub(crate) fn set_target_monitor(&mut self, monitor: MonitorHandle) {
+    pub(crate) fn set_target_monitor(&mut self, monitor: MonitorRef) {
         let changed = self.target_monitor.as_ref().is_none_or(|current| {
             current.position() != monitor.position() || current.size() != monitor.size()
         });
@@ -742,10 +720,6 @@ impl SettingsApp {
     }
 
     fn keep_window_on_island_monitor(&self, center_if_outside: bool) {
-        use windows::Win32::Graphics::Gdi::{
-            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
-        };
-
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -755,27 +729,13 @@ impl SettingsApp {
         let Some(target) = self.target_monitor.as_ref() else {
             return;
         };
-        let Ok(position) = window.outer_position() else {
+        let Some(position) = window.outer_position() else {
             return;
         };
-        let size = window.outer_size();
-        let origin = target.position();
-        let bounds = target.size();
-        let center = windows::Win32::Foundation::POINT {
-            x: origin.x + bounds.width as i32 / 2,
-            y: origin.y + bounds.height as i32 / 2,
-        };
-        let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        // SAFETY: The point is within the selected island monitor.
-        let monitor = unsafe { MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST) };
-        // SAFETY: The monitor handle is valid and info has the required size.
-        if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+        let Some(size) = window.outer_size() else {
             return;
-        }
-        let work = info.rcWork;
+        };
+        let work = target.0.work_area;
         let max_x = (work.right - size.width as i32).max(work.left);
         let max_y = (work.bottom - size.height as i32).max(work.top);
         let outside = position.x < work.left
@@ -791,11 +751,11 @@ impl SettingsApp {
             )
         };
         if position.x != x || position.y != y {
-            window.set_outer_position(PhysicalPosition::new(x, y));
+            window.set_outer_position(WindowPosition::new(x, y));
         }
     }
 
-    fn resize_renderer_target(&mut self, renderer: &mut Renderer, size: PhysicalSize<u32>) {
+    fn resize_renderer_target(&mut self, renderer: &mut Renderer, size: WindowSize) {
         let Some(target) = self.renderer_target else {
             return;
         };
@@ -806,7 +766,7 @@ impl SettingsApp {
 
     fn handle_pressed_key(&mut self, key: &Key) {
         if self.resource_editor_open {
-            if matches!(key, Key::Named(NamedKey::Escape)) {
+            if matches!(key, Key::Escape) {
                 if self.popup.take().is_some() {
                     self.anim.set_with_speed(POPUP_OPACITY_KEY, 0.0, 0.3);
                 } else {
@@ -820,17 +780,17 @@ impl SettingsApp {
             return;
         }
         match key {
-            Key::Named(NamedKey::ArrowLeft) => {
+            Key::ArrowLeft => {
                 self.navigate_page_history(PageNavigation::Back);
             }
-            Key::Named(NamedKey::ArrowRight) => {
+            Key::ArrowRight => {
                 self.navigate_page_history(PageNavigation::Forward);
             }
             _ => {}
         }
     }
 
-    fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
+    fn handle_cursor_moved(&mut self, position: WindowPoint) {
         let scale = self.window_scale();
         let new_position = (position.x as f32 / scale, position.y as f32 / scale);
         let mouse_moved = (new_position.0 - self.last_hover_mouse_pos.0).abs()
@@ -860,25 +820,25 @@ impl SettingsApp {
         }
 
         let cursor = if self.get_hover_state() {
-            winit::window::CursorIcon::Pointer
+            CursorKind::Pointer
         } else {
-            winit::window::CursorIcon::Default
+            CursorKind::Default
         };
         if let Some(window) = &self.window {
-            window.set_cursor(cursor);
+            crate::platform::window().set_cursor(window.id(), cursor);
         }
     }
 
-    fn handle_touch(&mut self, touch: Touch) {
+    fn handle_touch(&mut self, touch_id: u64, phase: TouchPhase, location: WindowPoint) {
         self.last_touch_at = Some(Instant::now());
-        match touch.phase {
+        match phase {
             TouchPhase::Started if self.touch_id.is_none() => {
-                self.touch_id = Some(touch.id);
-                self.touch_start = touch.location;
-                self.touch_last = touch.location;
+                self.touch_id = Some(touch_id);
+                self.touch_start = location;
+                self.touch_last = location;
                 self.touch_scrolling = false;
                 self.touch_pressed = false;
-                self.handle_cursor_moved(touch.location);
+                self.handle_cursor_moved(location);
                 let (x, y) = self.logical_mouse_pos;
                 if self.begin_scroll_drag(x, y) {
                     self.touch_pressed = true;
@@ -900,12 +860,12 @@ impl SettingsApp {
                     self.handle_left_mouse_pressed();
                 }
             }
-            TouchPhase::Moved if self.touch_id == Some(touch.id) => {
-                self.handle_cursor_moved(touch.location);
+            TouchPhase::Moved if self.touch_id == Some(touch_id) => {
+                self.handle_cursor_moved(location);
                 if !self.touch_pressed {
                     let scale = self.window_scale() as f64;
-                    let dx = touch.location.x - self.touch_start.x;
-                    let dy = touch.location.y - self.touch_start.y;
+                    let dx = location.x - self.touch_start.x;
+                    let dy = location.y - self.touch_start.y;
                     if dx.hypot(dy) > 8.0 * scale {
                         self.touch_scrolling = true;
                     }
@@ -915,8 +875,7 @@ impl SettingsApp {
                         && self.logical_mouse_pos.0 >= SIDEBAR_W
                         && self.logical_mouse_pos.1 >= SETTINGS_HEADER_H
                     {
-                        let delta =
-                            (touch.location.y - self.touch_last.y) as f32 / self.window_scale();
+                        let delta = (location.y - self.touch_last.y) as f32 / self.window_scale();
                         if self.active_page == PLUGINS_PAGE_INDEX
                             && self.plugin_detail_contains(self.logical_mouse_pos.0)
                         {
@@ -931,16 +890,16 @@ impl SettingsApp {
                         self.request_redraw();
                     }
                 }
-                self.touch_last = touch.location;
+                self.touch_last = location;
             }
-            TouchPhase::Ended if self.touch_id == Some(touch.id) => {
-                self.handle_cursor_moved(touch.location);
+            TouchPhase::Ended if self.touch_id == Some(touch_id) => {
+                self.handle_cursor_moved(location);
                 if self.touch_pressed {
                     self.handle_left_mouse_released();
                 } else {
                     let scale = self.window_scale() as f64;
-                    let dx = touch.location.x - self.touch_start.x;
-                    let dy = touch.location.y - self.touch_start.y;
+                    let dx = location.x - self.touch_start.x;
+                    let dy = location.y - self.touch_start.y;
                     if !self.touch_scrolling && dx.hypot(dy) <= 8.0 * scale {
                         self.handle_left_mouse_pressed();
                         self.handle_left_mouse_released();
@@ -950,7 +909,7 @@ impl SettingsApp {
                 self.touch_scrolling = false;
                 self.touch_id = None;
             }
-            TouchPhase::Cancelled if self.touch_id == Some(touch.id) => {
+            TouchPhase::Cancelled if self.touch_id == Some(touch_id) => {
                 self.music_notice_pressed = false;
                 self.scroll_dragging = false;
                 self.widget_dragging = None;
@@ -1067,7 +1026,7 @@ impl SettingsApp {
         self.request_redraw();
     }
 
-    fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+    fn handle_mouse_wheel(&mut self, delta: MouseWheelDelta) {
         if self.resource_editor_open {
             return;
         }
@@ -1113,7 +1072,7 @@ impl SettingsApp {
             Some(_) => {}
             None if self.is_window_drag_region(mouse_x, mouse_y) && self.popup.is_none() => {
                 if let Some(window) = &self.window {
-                    let _ = window.drag_window();
+                    crate::platform::window().begin_drag(window.id());
                 }
             }
             None if self.handle_widget_drag_press() => {
@@ -1353,7 +1312,9 @@ impl SettingsApp {
         sidebar::clear_plugin_settings_icon_cache();
         pages::plugins::clear_plugin_icon_cache();
         let renderer_target = self.renderer_target.take();
-        self.window = None;
+        if let Some(window_ref) = self.window.take() {
+            window().destroy_window(window_ref.id());
+        }
         renderer_target
     }
 

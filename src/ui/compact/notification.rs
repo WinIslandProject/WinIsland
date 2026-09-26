@@ -31,8 +31,7 @@ pub(super) struct NotificationMonitor {
 impl NotificationMonitor {
     pub(super) fn update(&mut self, enabled: bool) -> Option<NotificationMonitorUpdate> {
         if self.feed.is_none() {
-            self.feed =
-                Some(crate::platform::notify().open_feed(Arc::new(crate::utils::event_loop::wake)));
+            self.feed = Some(crate::platform::notify().open_feed(Arc::new(crate::platform::wake)));
         }
         let feed = self.feed.as_mut()?;
         let update = feed.update(enabled);

@@ -1,38 +1,39 @@
 use std::path::Path;
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use winit::dpi::PhysicalSize;
-use winit::event_loop::ActiveEventLoop;
-use winit::window::Window;
+use winisland_platform::{HostBackdropParams, TrayAction, WindowSize};
 
 use crate::core::persistence::{get_config_path, load_config};
+use crate::platform::{WindowRef, window};
 use crate::plugin::marketplace::{self, MarketplacePlugin};
 use crate::plugin::zip_loader;
-use crate::window::backdrop::{HostBackdrop, HostBackdropParams};
-use winisland_platform::TrayAction;
 use winisland_render::RendererOptions;
 
 use super::App;
 
 pub(super) fn update_host_backdrop(
-    host_backdrop: &mut Option<HostBackdrop>,
+    host_backdrop: &mut bool,
+    id: winisland_platform::WindowId,
     params: HostBackdropParams,
 ) -> bool {
-    let Some(backdrop) = host_backdrop.as_ref() else {
-        return false;
-    };
-    if let Err(error) = backdrop.update(params) {
-        log::warn!("Host backdrop update failed: {error}");
-        *host_backdrop = None;
-        crate::platform::update_capabilities(|caps| caps.host_backdrop = false);
+    if !*host_backdrop {
         return false;
     }
-    true
+    match window().update_host_backdrop(id, params) {
+        Ok(available) => available,
+        Err(error) => {
+            log::warn!("Host backdrop update failed: {error}");
+            window().release_host_backdrop(id);
+            *host_backdrop = false;
+            crate::platform::update_capabilities(|caps| caps.host_backdrop = false);
+            false
+        }
+    }
 }
 
 impl App {
-    pub(super) fn handle_plugin_settings_request(&mut self, event_loop: &ActiveEventLoop) {
+    pub(super) fn handle_plugin_settings_request(&mut self) {
         let request = self
             .settings
             .as_mut()
@@ -47,7 +48,7 @@ impl App {
             }
             Some(crate::window::settings::PluginSettingsRequest::Exit) => {
                 self.close_settings();
-                event_loop.exit();
+                window().exit();
             }
             Some(crate::window::settings::PluginSettingsRequest::Install(path)) => {
                 self.install_zip_drop(&path);
@@ -113,7 +114,7 @@ impl App {
                 if let Ok(exe) = std::env::current_exe() {
                     let _ = std::process::Command::new(exe).arg("--restart").spawn();
                 }
-                event_loop.exit();
+                window().exit();
             }
             None => {}
         }
@@ -129,38 +130,39 @@ impl App {
         }
         crate::utils::backdrop::clear_blurred_cover_cache();
         crate::ui::expanded::music_view::clear_cover_cache();
-        self.host_backdrop = None;
+        if let Some(window_ref) = self.window {
+            window().release_host_backdrop(window_ref.id());
+        }
+        self.host_backdrop = false;
         drop(renderer);
         self.renderer_retry_at = Some(now);
         self.next_frame_deadline = now;
     }
 
-    pub(super) fn create_host_backdrop(
-        &mut self,
-        window: &Arc<Window>,
-        backdrop_window: &Arc<Window>,
-    ) {
-        self.host_backdrop = match HostBackdrop::new(window, backdrop_window) {
-            Ok(backdrop) => Some(backdrop),
+    pub(super) fn create_host_backdrop(&mut self, window_ref: &WindowRef) {
+        self.host_backdrop = match window().start_host_backdrop(window_ref.id()) {
+            Ok(()) => true,
             Err(error) => {
                 log::warn!("Host backdrop is unavailable: {error}");
-                None
+                false
             }
         };
-        if self.host_backdrop.is_none() {
+        if !self.host_backdrop {
             crate::platform::update_capabilities(|caps| caps.host_backdrop = false);
         }
     }
 
     pub(super) fn hide_host_backdrop(&self) {
-        if let Some(host_backdrop) = self.host_backdrop.as_ref() {
-            host_backdrop.hide();
+        if self.host_backdrop
+            && let Some(window_ref) = self.window
+        {
+            window().hide_host_backdrop(window_ref.id());
         }
     }
 
     pub(super) fn recover_renderer(
         &mut self,
-        window: &Arc<Window>,
+        window_ref: &WindowRef,
         now: Instant,
         retry_interval: Duration,
     ) {
@@ -172,16 +174,11 @@ impl App {
             return;
         }
 
-        let Some(backdrop_window) = self.backdrop_window.clone() else {
-            self.renderer_retry_at = Some(now + retry_interval);
-            self.next_frame_deadline = now + retry_interval;
-            return;
-        };
         match winisland_render::Renderer::new(
-            match crate::window::native_surface(window) {
-                Ok(surface) => surface,
-                Err(error) => {
-                    log::warn!("Renderer recovery failed: {error}");
+            match window().native_surface(window_ref.id()) {
+                Some(surface) => surface,
+                None => {
+                    log::warn!("Renderer recovery failed: window surface unavailable");
                     self.renderer_retry_at = Some(now + retry_interval);
                     self.next_frame_deadline = now + retry_interval;
                     return;
@@ -199,10 +196,10 @@ impl App {
                     return;
                 }
                 self.renderer = Some(renderer);
-                self.create_host_backdrop(window, &backdrop_window);
+                self.create_host_backdrop(window_ref);
                 self.renderer_retry_at = None;
                 self.last_render_time = now;
-                window.request_redraw();
+                window_ref.request_redraw();
                 log::info!("Renderer recovered");
             }
             Err(error) => {
@@ -260,7 +257,7 @@ impl App {
         tokio::spawn(async move {
             let result = marketplace::load_catalog().await;
             let _ = tx.send(result);
-            crate::utils::event_loop::wake();
+            crate::platform::wake();
         });
         self.pending_marketplace_catalog = Some(rx);
     }
@@ -299,12 +296,12 @@ impl App {
         tokio::spawn(async move {
             let result = marketplace::download_plugin(&plugin).await;
             let _ = tx.send(result);
-            crate::utils::event_loop::wake();
+            crate::platform::wake();
         });
         self.pending_marketplace_download = Some(rx);
     }
 
-    pub(super) fn open_settings(&mut self, event_loop: &ActiveEventLoop) {
+    pub(super) fn open_settings(&mut self) {
         if let Some(settings) = &self.settings {
             settings.bring_to_front();
             return;
@@ -335,7 +332,7 @@ impl App {
             log::error!("Cannot open settings without the shared D3D12 renderer");
             return;
         };
-        settings.create_window(event_loop, renderer, target_monitor);
+        settings.create_window(renderer, target_monitor);
         settings.set_plugin_inventory_receiver(self.plugin_mgr.installed_plugins_async());
         if let Some(catalog) = self.marketplace_catalog.clone() {
             settings.set_marketplace_catalog(catalog);
@@ -369,7 +366,7 @@ impl App {
         }
     }
 
-    pub(super) fn handle_tray_events(&mut self, window: &Window, event_loop: &ActiveEventLoop) {
+    pub(super) fn handle_tray_events(&mut self, window_ref: &WindowRef) {
         if self.tray_installed
             && let Some(action) = crate::platform::shell()
                 .poll_tray_events()
@@ -379,11 +376,11 @@ impl App {
             match action {
                 TrayAction::ToggleVisibility => {
                     self.visible = !self.visible;
-                    window.set_visible(self.visible);
+                    window_ref.set_visible(self.visible);
                     if !self.visible {
                         self.hide_host_backdrop();
                     } else {
-                        window.request_redraw();
+                        window_ref.request_redraw();
                     }
                     let _ = crate::platform::shell().tray_update(
                         crate::platform::tray_theme(self.is_light_theme),
@@ -393,24 +390,24 @@ impl App {
                 }
                 TrayAction::OpenSettings => {
                     log::info!("Tray: opening settings");
-                    self.open_settings(event_loop);
+                    self.open_settings();
                 }
                 TrayAction::Restart => {
                     log::info!("Tray: restarting application");
                     self.close_settings();
                     let _ = crate::platform::shell().restart(&["--restart".to_string()]);
-                    event_loop.exit();
+                    window().exit();
                 }
                 TrayAction::Exit => {
                     log::info!("Tray: exiting application");
                     self.close_settings();
-                    event_loop.exit();
+                    window().exit();
                 }
             }
         }
     }
 
-    pub(super) fn reload_config_if_changed(&mut self, window: &Window) {
+    pub(super) fn reload_config_if_changed(&mut self, window_ref: &WindowRef) {
         let now = Instant::now();
         if now.duration_since(self.last_config_check) >= Duration::from_millis(500) {
             self.last_config_check = now;
@@ -449,7 +446,7 @@ impl App {
                         self.config.resource_widget_rows,
                     );
                     if let Some(monitor) =
-                        Self::get_target_monitor(window, self.config.monitor_index)
+                        Self::get_target_monitor(window_ref, self.config.monitor_index)
                     {
                         self.migrate_legacy_dock_position(monitor.position(), monitor.size());
                     }
@@ -507,8 +504,8 @@ impl App {
                     if surface_size_changed {
                         self.geom.os_w = window_size.width;
                         self.geom.os_h = window_size.height;
-                        let _ = window
-                            .request_inner_size(PhysicalSize::new(self.geom.os_w, self.geom.os_h));
+                        let _ = window_ref
+                            .request_inner_size(WindowSize::new(self.geom.os_w, self.geom.os_h));
                         if let Some(renderer) = self.renderer.as_mut() {
                             let target = renderer.main_target();
                             if let Err(error) =
@@ -521,7 +518,7 @@ impl App {
 
                     if (layout_size_changed || surface_size_changed || position_changed)
                         && let Some(monitor) =
-                            Self::get_target_monitor(window, self.config.monitor_index)
+                            Self::get_target_monitor(window_ref, self.config.monitor_index)
                     {
                         if let Some(settings) = self.settings.as_mut() {
                             settings.set_target_monitor(monitor.clone());
@@ -534,7 +531,7 @@ impl App {
                             self.geom.monitor_pos = (mon_pos.x, mon_pos.y);
                             let (position_x, position_y) =
                                 self.compute_window_position(mon_pos, mon_size);
-                            self.set_configured_window_position(window, position_x, position_y);
+                            self.set_configured_window_position(window_ref, position_x, position_y);
                             self.geom.position_restore_after = None;
                         }
                     }
@@ -546,7 +543,7 @@ impl App {
             return;
         }
         self.last_monitor_check = now;
-        if let Some(monitor) = Self::get_target_monitor(window, self.config.monitor_index) {
+        if let Some(monitor) = Self::get_target_monitor(window_ref, self.config.monitor_index) {
             if let Some(settings) = self.settings.as_mut() {
                 settings.set_target_monitor(monitor.clone());
             }
@@ -562,7 +559,7 @@ impl App {
                 self.geom.monitor_size = cur_mon_size;
                 self.geom.monitor_pos = cur_mon_pos;
                 let (position_x, position_y) = self.compute_window_position(mon_pos, mon_size);
-                self.set_configured_window_position(window, position_x, position_y);
+                self.set_configured_window_position(window_ref, position_x, position_y);
                 self.geom.position_restore_after = Some(now + Duration::from_millis(750));
             }
         }

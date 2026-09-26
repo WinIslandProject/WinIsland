@@ -1,7 +1,7 @@
 use crate::utils::settings_ui::hover_test;
 use crate::utils::settings_ui::items::SIDEBAR_PAD;
+use winisland_platform::Key;
 use winisland_render::{Point, Rect};
-use winit::keyboard::{Key, NamedKey};
 
 use super::pages::PageInput;
 use super::{
@@ -279,14 +279,14 @@ impl SettingsApp {
         };
 
         match key {
-            Key::Named(NamedKey::Backspace) => {
+            Key::Backspace => {
                 input.text.pop();
             }
-            Key::Named(NamedKey::Enter) => {
+            Key::Enter => {
                 self.commit_number_input();
                 return true;
             }
-            Key::Named(NamedKey::Escape) => {
+            Key::Escape => {
                 self.number_input = None;
                 self.pending_plugin_setting = None;
             }

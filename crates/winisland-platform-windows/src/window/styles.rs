@@ -2,12 +2,14 @@ use std::ffi::c_void;
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_USE_HOSTBACKDROPBRUSH, DWMWINDOWATTRIBUTE, DwmSetWindowAttribute,
+};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_THICKFRAME,
+    GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos,
+    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_THICKFRAME,
 };
 use windows::core::{BOOL, s, w};
 
@@ -45,7 +47,7 @@ fn set_window_composition_attribute() -> Option<SetWindowCompositionAttribute> {
     })
 }
 
-pub fn enable_host_backdrop(hwnd: HWND) -> bool {
+pub(crate) fn enable_host_backdrop(hwnd: HWND) -> bool {
     let enabled: i32 = 1;
     // SAFETY: hwnd belongs to the live backdrop window and enabled points to an initialized BOOL-
     // compatible value for the duration of the synchronous DWM call.
@@ -84,7 +86,7 @@ pub fn enable_host_backdrop(hwnd: HWND) -> bool {
 // SAFETY: GetWindowLongPtrW reads and SetWindowLongPtrW writes the extended
 // window style of a validated HWND. SetWindowPos refreshes the non-client
 // frame after the update without changing size, position, z-order, or focus.
-pub fn modify_window_ex_style(hwnd: HWND, add_flags: isize, remove_flags: isize) {
+fn modify_window_ex_style(hwnd: HWND, add_flags: isize, remove_flags: isize) {
     unsafe {
         let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         let new_style = (current | add_flags) & !remove_flags;
@@ -107,7 +109,7 @@ pub fn modify_window_ex_style(hwnd: HWND, add_flags: isize, remove_flags: isize)
 // SAFETY: GetWindowLongPtrW reads and SetWindowLongPtrW writes the window
 // style of a validated HWND. Bitwise operations on the style flags are safe
 // and the updated style takes effect immediately.
-pub fn modify_window_style(hwnd: HWND, add_flags: isize, remove_flags: isize) {
+fn modify_window_style(hwnd: HWND, add_flags: isize, remove_flags: isize) {
     unsafe {
         let current = GetWindowLongPtrW(hwnd, GWL_STYLE);
         let new_style = (current | add_flags) & !remove_flags;
@@ -117,7 +119,7 @@ pub fn modify_window_style(hwnd: HWND, add_flags: isize, remove_flags: isize) {
     }
 }
 
-pub fn enforce_overlay_window_styles(hwnd: HWND) {
+pub(crate) fn enforce_overlay_window_styles(hwnd: HWND, topmost: bool) {
     modify_window_ex_style(
         hwnd,
         WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize,
@@ -128,22 +130,40 @@ pub fn enforce_overlay_window_styles(hwnd: HWND) {
         0,
         WS_MAXIMIZEBOX.0 as isize | WS_THICKFRAME.0 as isize,
     );
-    set_window_topmost(hwnd);
+    set_window_topmost(hwnd, topmost);
 }
 
 // SAFETY: SetWindowPos is called on a validated HWND with flags that preserve
 // its size and position. The HWND_TOPMOST flag updates only the window's z-order
 // without stealing focus.
-pub fn set_window_topmost(hwnd: HWND) {
+pub(crate) fn set_window_topmost(hwnd: HWND, topmost: bool) {
     unsafe {
         let _ = SetWindowPos(
             hwnd,
-            Some(HWND_TOPMOST),
+            Some(if topmost {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            }),
             0,
             0,
             0,
             0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        );
+    }
+}
+
+pub(crate) fn set_titlebar_theme(hwnd: HWND, light: bool) {
+    let use_dark: i32 = if light { 0 } else { 1 };
+    // SAFETY: hwnd belongs to a live settings window and use_dark is an initialized BOOL-
+    // compatible value for the duration of the synchronous DWM call.
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(20),
+            &use_dark as *const _ as *const _,
+            size_of::<i32>() as u32,
         );
     }
 }

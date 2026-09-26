@@ -1,20 +1,16 @@
 use std::time::Duration;
 
-use windows::Win32::Foundation::HWND;
-use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::platform::windows::WindowExtWindows;
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use winit::window::Window;
-
+use crate::platform::{MonitorRef, WindowRef, window};
 use winisland_core::config::{
     DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, PADDING, TOP_OFFSET,
 };
+use winisland_platform::{OverlayStyles, WindowPosition, WindowSize};
 use winisland_render::text::FontManager;
 
 use super::{App, DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ, IslandLayout};
 
 impl App {
-    pub(super) fn required_window_size(&self) -> PhysicalSize<u32> {
+    pub(super) fn required_window_size(&self) -> WindowSize {
         let compact_scale = self.config.compact_scale;
         let expanded_scale = self.config.expanded_scale;
         let compact_width = crate::ui::widget::compact::target_width(
@@ -38,102 +34,13 @@ impl App {
         let height = compact_lyric_height
             .max(compact_overlay.height)
             .max(self.config.expanded_height * expanded_scale);
-        PhysicalSize::new((width + PADDING) as u32, (height + PADDING) as u32)
+        WindowSize::new((width + PADDING) as u32, (height + PADDING) as u32)
     }
 
-    pub(super) fn get_target_monitor(
-        window: &Window,
-        monitor_index: i32,
-    ) -> Option<winit::monitor::MonitorHandle> {
-        if monitor_index < 0 {
-            return window
-                .primary_monitor()
-                .or_else(|| window.current_monitor());
-        }
-        use windows::Win32::Foundation::{LPARAM, RECT};
-        use windows::Win32::Graphics::Gdi::{
-            DISPLAY_DEVICE_ACTIVE, DISPLAY_DEVICE_STATE_FLAGS, DISPLAY_DEVICEW,
-            EnumDisplayDevicesW, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
-            MONITORINFOEXW,
-        };
-        use windows::core::BOOL;
-        let mut win32_names: Vec<String> = Vec::new();
-        // SAFETY: EnumDisplayDevicesW reads display device info. We provide a zeroed
-        // DISPLAY_DEVICEW with correct cb size. idx increments safely. No mutable global state.
-        unsafe {
-            let mut idx = 0u32;
-            loop {
-                let mut dd: DISPLAY_DEVICEW = std::mem::zeroed();
-                dd.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
-                if EnumDisplayDevicesW(None, idx, &mut dd, 0).as_bool() {
-                    if (dd.StateFlags & DISPLAY_DEVICE_ACTIVE) != DISPLAY_DEVICE_STATE_FLAGS(0) {
-                        let name = String::from_utf16_lossy(&dd.DeviceName)
-                            .trim_end_matches('\0')
-                            .to_string();
-                        win32_names.push(name);
-                    }
-                    idx += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-        let target_name = win32_names.get(monitor_index as usize)?;
-        unsafe extern "system" fn collect_monitor(
-            monitor: HMONITOR,
-            _dc: HDC,
-            _rect: *mut RECT,
-            data: LPARAM,
-        ) -> BOOL {
-            // SAFETY: EnumDisplayMonitors invokes this synchronously while the Vec is alive.
-            let found = unsafe { &mut *(data.0 as *mut Vec<(String, RECT)>) };
-            let mut info = MONITORINFOEXW::default();
-            info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
-            // SAFETY: MONITORINFOEXW begins with MONITORINFO and cbSize includes the full struct.
-            if unsafe { GetMonitorInfoW(monitor, &mut info as *mut _ as *mut MONITORINFO) }
-                .as_bool()
-            {
-                found.push((
-                    String::from_utf16_lossy(&info.szDevice)
-                        .trim_end_matches('\0')
-                        .to_string(),
-                    info.monitorInfo.rcMonitor,
-                ));
-            }
-            BOOL(1)
-        }
-        let mut native_monitors = Vec::<(String, RECT)>::new();
-        // SAFETY: The callback is synchronous and receives a valid pointer to native_monitors.
-        unsafe {
-            let _ = EnumDisplayMonitors(
-                None,
-                None,
-                Some(collect_monitor),
-                LPARAM((&mut native_monitors as *mut Vec<(String, RECT)>) as isize),
-            );
-        }
-        let monitors: Vec<_> = window.available_monitors().collect();
-        if let Some((_, rect)) = native_monitors.iter().find(|(name, _)| name == target_name)
-            && let Some(mon) = monitors.iter().find(|mon| {
-                let pos = mon.position();
-                let size = mon.size();
-                pos.x == rect.left
-                    && pos.y == rect.top
-                    && size.width == (rect.right - rect.left) as u32
-                    && size.height == (rect.bottom - rect.top) as u32
-            })
-        {
-            return Some(mon.clone());
-        }
-        window
-            .primary_monitor()
-            .or_else(|| window.current_monitor())
+    pub(super) fn get_target_monitor(window: &WindowRef, monitor_index: i32) -> Option<MonitorRef> {
+        window.target_monitor(monitor_index)
     }
-
-    pub(super) fn update_animation_frame_interval(
-        &mut self,
-        monitor: &winit::monitor::MonitorHandle,
-    ) {
+    pub(super) fn update_animation_frame_interval(&mut self, monitor: &MonitorRef) {
         let refresh_rate_millihertz = monitor
             .refresh_rate_millihertz()
             .filter(|refresh_rate| *refresh_rate > 0)
@@ -149,19 +56,19 @@ impl App {
             Duration::from_nanos(1_000_000_000_000u64 / u64::from(rate));
     }
 
-    pub(super) fn enforce_overlay_window(window: &Window) {
-        if let Ok(handle) = window.window_handle()
-            && let RawWindowHandle::Win32(raw) = handle.as_raw()
-        {
-            let hwnd = HWND(raw.hwnd.get() as *mut core::ffi::c_void);
-            crate::utils::win32::enforce_overlay_window_styles(hwnd);
-            window.set_skip_taskbar(true);
-        }
+    pub(super) fn enforce_overlay_window(window_ref: &WindowRef) {
+        window().apply_overlay_styles(
+            window_ref.id(),
+            OverlayStyles {
+                skip_taskbar: true,
+                topmost: true,
+            },
+        );
     }
 
     pub(super) fn set_configured_window_position(
         &mut self,
-        window: &Window,
+        window: &WindowRef,
         position_x: i32,
         position_y: i32,
     ) {
@@ -169,13 +76,13 @@ impl App {
         self.geom.configured_y = position_y;
         self.geom.win_x = position_x;
         self.geom.win_y = position_y;
-        window.set_outer_position(PhysicalPosition::new(position_x, position_y));
+        window.set_outer_position(WindowPosition::new(position_x, position_y));
     }
 
     pub(super) fn compute_window_position(
         &self,
-        mon_pos: PhysicalPosition<i32>,
-        mon_size: PhysicalSize<u32>,
+        mon_pos: WindowPosition,
+        mon_size: WindowSize,
     ) -> (i32, i32) {
         let window_size = self.required_window_size();
         let dock_position = self.automatic_dock_position(mon_pos, mon_size);
@@ -210,11 +117,7 @@ impl App {
         )
     }
 
-    fn collapsed_island_center(
-        &self,
-        mon_pos: PhysicalPosition<i32>,
-        mon_size: PhysicalSize<u32>,
-    ) -> (f64, f64) {
+    fn collapsed_island_center(&self, mon_pos: WindowPosition, mon_size: WindowSize) -> (f64, f64) {
         let scale = self.config.compact_scale as f64;
         (
             mon_pos.x as f64 + mon_size.width as f64 / 2.0 + self.config.position_x_offset as f64,
@@ -227,8 +130,8 @@ impl App {
 
     fn automatic_dock_position(
         &self,
-        mon_pos: PhysicalPosition<i32>,
-        mon_size: PhysicalSize<u32>,
+        mon_pos: WindowPosition,
+        mon_size: WindowSize,
     ) -> DockPosition {
         let (center_x, center_y) = self.collapsed_island_center(mon_pos, mon_size);
         let compact_scale = self.config.compact_scale as f64;
@@ -258,8 +161,8 @@ impl App {
 
     pub(super) fn migrate_legacy_dock_position(
         &mut self,
-        mon_pos: PhysicalPosition<i32>,
-        mon_size: PhysicalSize<u32>,
+        mon_pos: WindowPosition,
+        mon_size: WindowSize,
     ) -> bool {
         let Some(dock_position) = self.config.legacy_dock_position.take() else {
             return false;
@@ -299,24 +202,24 @@ impl App {
         true
     }
 
-    pub(super) fn snap_to_top_edge(&mut self, window: &Window) {
+    pub(super) fn snap_to_top_edge(&mut self, window: &WindowRef) {
         let Some(monitor) = Self::get_target_monitor(window, self.config.monitor_index) else {
             return;
         };
         let layout = self.compute_island_layout();
         let mon_pos = monitor.position();
         self.geom.win_y = mon_pos.y + TOP_OFFSET - layout.island_y.round() as i32;
-        window.set_outer_position(PhysicalPosition::new(self.geom.win_x, self.geom.win_y));
+        window.set_outer_position(WindowPosition::new(self.geom.win_x, self.geom.win_y));
     }
 
-    pub(super) fn restore_hide_origin(&mut self, window: &Window) {
+    pub(super) fn restore_hide_origin(&mut self, window: &WindowRef) {
         if self.springs.hide.value > 0.001 {
             return;
         }
         if let Some((win_x, win_y)) = self.hide.origin.take() {
             self.geom.win_x = win_x;
             self.geom.win_y = win_y;
-            window.set_outer_position(PhysicalPosition::new(win_x, win_y));
+            window.set_outer_position(WindowPosition::new(win_x, win_y));
         }
     }
 
@@ -347,7 +250,7 @@ impl App {
         edge_size - self.hidden_visible_height() > f64::EPSILON
     }
 
-    pub(super) fn prepare_hide(&mut self, window: &Window) -> bool {
+    pub(super) fn prepare_hide(&mut self, window: &WindowRef) -> bool {
         if !self.can_hide() {
             return false;
         }
@@ -361,8 +264,8 @@ impl App {
     pub(super) fn compute_island_layout(&self) -> IslandLayout {
         let dock_position = if self.geom.monitor_size.0 > 0 && self.geom.monitor_size.1 > 0 {
             self.automatic_dock_position(
-                PhysicalPosition::new(self.geom.monitor_pos.0, self.geom.monitor_pos.1),
-                PhysicalSize::new(self.geom.monitor_size.0, self.geom.monitor_size.1),
+                WindowPosition::new(self.geom.monitor_pos.0, self.geom.monitor_pos.1),
+                WindowSize::new(self.geom.monitor_size.0, self.geom.monitor_size.1),
             )
         } else {
             DockPosition::TopCenter
@@ -488,7 +391,7 @@ impl App {
 
     pub(super) fn compute_lyric_target_width(
         &mut self,
-        window: &Window,
+        window: &WindowRef,
         music_active: bool,
         is_paused: bool,
         dt: f32,

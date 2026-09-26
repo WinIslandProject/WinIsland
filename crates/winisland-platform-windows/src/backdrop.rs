@@ -22,10 +22,13 @@ use windows::{
     core::Interface,
 };
 use windows_numerics::{Vector2, Vector3};
+use winisland_platform::HostBackdropParams;
 use winit::{
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::Window,
 };
+
+use crate::window::styles::enable_host_backdrop;
 
 const HOST_BACKDROP_INSET: f32 = 1.0;
 
@@ -57,15 +60,6 @@ struct BackdropGeometry {
     radius: f32,
 }
 
-pub(crate) struct HostBackdropParams {
-    pub(crate) enabled: bool,
-    pub(crate) screen_x: f32,
-    pub(crate) screen_y: f32,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) radius: f32,
-}
-
 thread_local! {
     static BACKDROP_COMPOSITION: OnceCell<Option<BackdropCompositionContext>> = const { OnceCell::new() };
 }
@@ -76,7 +70,7 @@ impl HostBackdrop {
             .ok_or_else(|| "Windows host backdrop compositor is unavailable".to_string())?;
         let main_hwnd = window_hwnd(main_window)?;
         let backdrop_hwnd = window_hwnd(backdrop_window)?;
-        if !crate::utils::win32::enable_host_backdrop(backdrop_hwnd) {
+        if !enable_host_backdrop(backdrop_hwnd) {
             return Err("DWM host backdrop support could not be enabled".to_string());
         }
         let interop: ICompositorDesktopInterop = compositor
