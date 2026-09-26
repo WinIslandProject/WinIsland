@@ -237,21 +237,24 @@ impl PageInput {
         hit_test(page.items(), self.x, self.y, self.start_y, self.width)
     }
 
+    fn row_top<A>(&self, page: &SettingsPage<A>, item_index: usize, scroll_y: f32) -> f32 {
+        let above: f32 = page
+            .items()
+            .iter()
+            .take(item_index)
+            .map(SettingsItem::height)
+            .sum();
+        self.start_y + above - scroll_y
+    }
+
     pub(crate) fn popup_button_rect<A>(
         &self,
         page: &SettingsPage<A>,
         item_index: usize,
         scroll_y: f32,
     ) -> Rect {
-        let item_y = self.start_y
-            + page
-                .items()
-                .iter()
-                .take(item_index)
-                .map(SettingsItem::height)
-                .sum::<f32>();
         let button_x = SIDEBAR_W + CONTENT_PADDING + self.width - GROUP_INNER_PAD - POPUP_BTN_W;
-        let button_y = item_y + (ROW_HEIGHT - POPUP_BTN_H) / 2.0 - scroll_y;
+        let button_y = self.row_top(page, item_index, scroll_y) + (ROW_HEIGHT - POPUP_BTN_H) / 2.0;
         Rect::from_xywh(button_x, button_y, POPUP_BTN_W, POPUP_BTN_H)
     }
 
@@ -261,17 +264,11 @@ impl PageInput {
         item_index: usize,
         scroll_y: f32,
     ) -> Rect {
-        let item_y = self.start_y
-            + page
-                .items()
-                .iter()
-                .take(item_index)
-                .map(SettingsItem::height)
-                .sum::<f32>();
         let content_w = self.width - CONTENT_PADDING * 2.0;
         let button_x = CONTENT_PADDING + content_w - GROUP_INNER_PAD - STEPPER_BTN_SIZE;
         let value_x = button_x - STEPPER_GAP - STEPPER_VALUE_W;
-        let value_y = item_y + (ROW_HEIGHT - STEPPER_BTN_SIZE) / 2.0 - scroll_y;
+        let value_y =
+            self.row_top(page, item_index, scroll_y) + (ROW_HEIGHT - STEPPER_BTN_SIZE) / 2.0;
         Rect::from_xywh(
             SIDEBAR_W + value_x,
             value_y,
