@@ -1,6 +1,6 @@
-use crate::core::plugin_settings::PluginSettingsItem;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use crate::window::settings::{PendingPluginSetting, PopupState, SettingsApp};
+use winisland_core::plugin_settings::PluginSettingsItem;
 
 use super::{PageInput, SettingsPage};
 
@@ -223,7 +223,15 @@ impl SettingsApp {
     }
 
     fn dispatch_plugin_setting(&mut self, resource_id: u64, key: &str, value: &str) {
-        match crate::plugin::manager::dispatch_settings_change(resource_id, key, value) {
+        let result = self
+            .plugin_host
+            .as_ref()
+            .ok_or_else(|| "ABI v2 plugin host is unavailable".to_string())
+            .and_then(|host| {
+                host.dispatch_settings_change(resource_id, key, value)
+                    .map_err(|error| error.to_string())
+            });
+        match result {
             Ok(()) => {
                 self.plugin_settings_error = None;
                 self.apply_plugin_setting_value(resource_id, key, value);

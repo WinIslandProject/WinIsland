@@ -10,6 +10,9 @@ use skia_safe::{Font, FontMgr, FontStyle as SkFontStyle, Paint, Path, Typeface, 
 use crate::painter::Painter;
 use crate::types::{BlurSpec, FontStyle, Rgba, Slant};
 
+mod plugin;
+pub use plugin::{PluginTextMetrics, PluginTextParams, PluginTextRun};
+
 static GLOBAL_FONT_MANAGER: OnceLock<FontManager> = OnceLock::new();
 
 type TextGroup = (String, Typeface, bool, f32);
@@ -360,18 +363,6 @@ impl FontManager {
         let font = self.get_font(size, bold);
         let paint = text_paint(color, None);
         painter.canvas().draw_str(text, (at.x, at.y), &font, &paint);
-    }
-
-    pub fn draw_plugin_str_v1(
-        &self,
-        canvas: &skia_safe::Canvas,
-        text: &str,
-        at: crate::types::Point,
-        size: f32,
-        bold: bool,
-        color: Rgba,
-    ) {
-        self.draw_str(Painter { canvas }, text, at, size, bold, color);
     }
 
     pub fn draw_text_in_rect(&self, params: DrawTextInRectParams<'_>) {

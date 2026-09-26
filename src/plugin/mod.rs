@@ -1,7 +1,3 @@
-pub mod loader;
-pub mod manager;
-pub mod marketplace;
-pub mod types;
-pub mod zip_loader;
+pub mod inventory;
 
-pub use manager::PluginManager;
+pub use inventory::PluginManager;

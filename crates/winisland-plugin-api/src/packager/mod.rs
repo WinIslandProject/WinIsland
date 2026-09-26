@@ -1,6 +1,6 @@
-pub mod manifest;
-pub mod packaging;
-pub mod signing;
+pub use winisland_plugin_package::manifest;
+pub use winisland_plugin_package::packaging;
+pub use winisland_plugin_package::signing;
 
 use ed25519_dalek::SigningKey;
 use libloading::Library;
@@ -8,8 +8,9 @@ use manifest::PluginManifest;
 use signing::{hash_file, load_signing_key, load_signing_key_from_env, sign_payload};
 use std::path::{Path, PathBuf};
 
-use crate::{
-    ABI_VERSION_1, KNOWN_CAPABILITIES, PLUGIN_ENTRY_SYMBOL_V1, PluginDescriptorV1, PluginEntryFnV1,
+use crate::abi::{
+    ABI_VERSION_2, KNOWN_CAPABILITIES_V2, PLUGIN_ENTRY_SYMBOL_V2, PluginDescriptorV2,
+    PluginEntryFnV2,
 };
 
 /// A build-time tool that compiles, packages, and optionally signs
@@ -354,7 +355,7 @@ impl PluginPackager {
             version: self.version.clone(),
             description: self.description.clone(),
             github_link: self.github_link.clone(),
-            abi_version: crate::ABI_VERSION_1,
+            abi_version: ABI_VERSION_2,
             entry: dll_dest_name.to_string(),
             icon: self.icon.clone(),
             readme: self.readme.clone(),
@@ -374,7 +375,7 @@ impl PluginPackager {
 
         // 9. Validate and write plugin.yml
         manifest
-            .validate()
+            .validate(ABI_VERSION_2)
             .map_err(|e| format!("Invalid manifest: {e}"))?;
         validate_dll_descriptor(&dll_path, &manifest)?;
         manifest
@@ -430,9 +431,9 @@ fn validate_dll_descriptor(dll_path: &Path, manifest: &PluginManifest) -> Result
     // entry point. It does not create a plugin instance or invoke plugin-controlled callbacks.
     let library = unsafe { Library::new(dll_path) }
         .map_err(|error| format!("Cannot validate plugin DLL: {error}"))?;
-    // SAFETY: The symbol type is the public WinIsland ABI v1 entry-point signature.
-    let entry = unsafe { library.get::<PluginEntryFnV1>(PLUGIN_ENTRY_SYMBOL_V1) }
-        .map_err(|error| format!("Plugin DLL has no ABI v1 entry point: {error}"))?;
+    // SAFETY: The symbol type is the public WinIsland ABI v2 entry-point signature.
+    let entry = unsafe { library.get::<PluginEntryFnV2>(PLUGIN_ENTRY_SYMBOL_V2) }
+        .map_err(|error| format!("Plugin DLL has no ABI v2 entry point: {error}"))?;
     // SAFETY: The entry point is called synchronously while the DLL remains loaded.
     let pointer = unsafe { entry() };
     if pointer.is_null() {
@@ -440,18 +441,18 @@ fn validate_dll_descriptor(dll_path: &Path, manifest: &PluginManifest) -> Result
     }
     // SAFETY: Every ABI descriptor starts with a readable struct_size field.
     let struct_size = unsafe { std::ptr::read_unaligned(pointer.cast::<u32>()) };
-    if struct_size < std::mem::size_of::<PluginDescriptorV1>() as u32 {
-        return Err("Plugin DLL returned a truncated ABI v1 descriptor".into());
+    if struct_size < std::mem::size_of::<PluginDescriptorV2>() as u32 {
+        return Err("Plugin DLL returned a truncated ABI v2 descriptor".into());
     }
-    // SAFETY: The size check proves the complete copyable ABI v1 prefix is available.
+    // SAFETY: The size check proves the complete copyable ABI v2 prefix is available.
     let descriptor = unsafe { std::ptr::read_unaligned(pointer) };
-    if descriptor.abi_version != ABI_VERSION_1
-        || descriptor.capabilities & !KNOWN_CAPABILITIES != 0
+    if descriptor.abi_version != ABI_VERSION_2
+        || descriptor.capabilities & !KNOWN_CAPABILITIES_V2 != 0
         || descriptor.create.is_none()
         || descriptor.shutdown.is_none()
         || descriptor.destroy.is_none()
     {
-        return Err("Plugin DLL contains an invalid ABI v1 descriptor".into());
+        return Err("Plugin DLL contains an invalid ABI v2 descriptor".into());
     }
 
     let metadata = &descriptor.metadata;

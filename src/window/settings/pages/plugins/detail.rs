@@ -1,11 +1,11 @@
 use winisland_render::{Painter, Point, Radius, Rect, Rgba, Vec2};
 
-use crate::plugin::manager::InstalledPlugin;
-use crate::plugin::marketplace::MarketplacePlugin;
+use crate::plugin::inventory::InstalledPlugin;
 use crate::utils::color::SettingsTheme;
 use crate::utils::color::settings_color;
 use crate::utils::settings_ui::{SettingsPainter, ellipsize_text};
 use winisland_core::i18n::tr;
+use winisland_plugin_package::marketplace::MarketplacePlugin;
 use winisland_render::text::FontManager;
 
 use super::super::super::{

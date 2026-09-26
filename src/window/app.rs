@@ -3,11 +3,12 @@ use crate::core::persistence::{get_config_path, load_config};
 use crate::core::smtc::{MediaInfo, SmtcListener};
 use crate::platform::WindowRef;
 use crate::plugin::PluginManager;
-use crate::plugin::marketplace::MarketplaceCatalog;
-use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
 use crate::window::settings::SettingsApp;
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winisland_core::config::{AppConfig, LyricTransitionAnimation, LyricTransitionMode};
@@ -16,6 +17,10 @@ use winisland_core::lyrics::LyricHighlight;
 use winisland_core::physics::Spring;
 use winisland_core::widgets::WidgetManager;
 use winisland_platform::WindowPoint;
+use winisland_plugin_host::draw::replay::PreparedFrame;
+use winisland_plugin_host::host::PluginHost;
+use winisland_plugin_package::manifest::PluginManifest;
+use winisland_plugin_package::marketplace::MarketplaceCatalog;
 use winisland_render::Renderer;
 
 mod events;
@@ -24,6 +29,7 @@ mod input;
 mod layout;
 mod startup;
 mod system;
+mod v2;
 
 type InstallResult = Result<(PluginManifest, PathBuf), String>;
 type MarketplaceCatalogResult = Result<MarketplaceCatalog, String>;
@@ -108,6 +114,14 @@ pub struct App {
     ctx_mgr: ContextManager,
     widget_mgr: WidgetManager,
     plugin_mgr: PluginManager,
+    plugin_host: Option<Rc<PluginHost>>,
+    plugin_frames: HashMap<u64, PreparedFrame>,
+    v2_widget_ids: HashSet<u64>,
+    v2_context_ids: HashSet<u64>,
+    v2_context_revision: u64,
+    v2_media_revision: u64,
+    v2_album_art_hash: Cell<Option<u64>>,
+    v2_settings_revision: u64,
     plugin_media_source: Option<PluginMediaSource>,
     is_light_theme: bool,
     pending_install: Option<mpsc::Receiver<InstallResult>>,
@@ -145,6 +159,14 @@ impl Default for App {
             .ok();
         winisland_render::text::FontManager::global()
             .set_custom_font_path(config.custom_font_path.as_deref());
+        let plugin_mgr = PluginManager::default();
+        let plugin_host = match PluginHost::new(plugin_mgr.plugin_dir.clone(), 1) {
+            Ok(host) => Some(Rc::new(host)),
+            Err(error) => {
+                log::error!("Cannot initialize ABI v2 plugin host: {error}");
+                None
+            }
+        };
         Self {
             window: None,
             host_backdrop: false,
@@ -168,6 +190,7 @@ impl Default for App {
                 config.lyrics_local_dir.clone(),
                 config.smtc_apps.clone(),
                 config.smtc_known_apps.clone(),
+                plugin_host.as_ref().map(|host| host.lyrics_bridge()),
             ),
             audio: AudioProcessor::new(),
             compact_overlay: CompactOverlay::new(
@@ -213,7 +236,15 @@ impl Default for App {
             last_touch_at: None,
             ctx_mgr: ContextManager::new(),
             widget_mgr: WidgetManager::new(),
-            plugin_mgr: PluginManager::default(),
+            plugin_mgr,
+            plugin_host,
+            plugin_frames: HashMap::new(),
+            v2_widget_ids: HashSet::new(),
+            v2_context_ids: HashSet::new(),
+            v2_context_revision: 0,
+            v2_media_revision: 0,
+            v2_album_art_hash: Cell::new(None),
+            v2_settings_revision: 0,
             plugin_media_source: None,
             is_light_theme: false,
             pending_install: None,
@@ -299,7 +330,7 @@ struct SeekDrag {
     bar_right: f32,
     duration_ms: u64,
     preview_ms: u64,
-    media_resource_id: Option<crate::plugin::types::ResourceId>,
+    media_resource_id: Option<u64>,
 }
 
 impl SeekDrag {
@@ -309,7 +340,7 @@ impl SeekDrag {
         bar_right: f32,
         duration_ms: u64,
         preview_ms: u64,
-        media_resource_id: Option<crate::plugin::types::ResourceId>,
+        media_resource_id: Option<u64>,
     ) {
         self.active = true;
         self.bar_left = bar_left;
@@ -519,20 +550,32 @@ impl App {
 
     fn dispatch_media_command(&self, command: u32, position_ms: u64) {
         if let Some(source) = &self.plugin_media_source {
-            if let Err(error) = crate::plugin::manager::dispatch_media_command(
-                source.resource_id,
-                command,
-                position_ms,
-            ) {
+            let result = self
+                .plugin_host
+                .as_ref()
+                .ok_or("ABI v2 host unavailable".to_string())
+                .and_then(|host| {
+                    host.dispatch_media_command(source.resource_id, command, position_ms)
+                        .map_err(|error| error.to_string())
+                });
+            if let Err(error) = result {
                 log::warn!("Plugin media command failed: {error}");
             }
             return;
         }
         match command {
-            crate::plugin::types::MEDIA_COMMAND_TOGGLE_PLAY => self.smtc.request_toggle_play(),
-            crate::plugin::types::MEDIA_COMMAND_PREVIOUS => self.smtc.request_prev(),
-            crate::plugin::types::MEDIA_COMMAND_NEXT => self.smtc.request_next(),
-            crate::plugin::types::MEDIA_COMMAND_SEEK => self.smtc.request_seek(position_ms),
+            winisland_plugin_api::types::v2::context::MEDIA_COMMAND_TOGGLE_PLAY => {
+                self.smtc.request_toggle_play()
+            }
+            winisland_plugin_api::types::v2::context::MEDIA_COMMAND_PREVIOUS => {
+                self.smtc.request_prev()
+            }
+            winisland_plugin_api::types::v2::context::MEDIA_COMMAND_NEXT => {
+                self.smtc.request_next()
+            }
+            winisland_plugin_api::types::v2::context::MEDIA_COMMAND_SEEK => {
+                self.smtc.request_seek(position_ms)
+            }
             _ => (),
         }
     }
@@ -540,11 +583,19 @@ impl App {
     fn dispatch_seek_command(&mut self) {
         let position_ms = self.seek.preview_ms.min(self.seek.duration_ms);
         if let Some(resource_id) = self.seek.media_resource_id {
-            if let Err(error) = crate::plugin::manager::dispatch_media_command(
-                resource_id,
-                crate::plugin::types::MEDIA_COMMAND_SEEK,
-                position_ms,
-            ) {
+            let result = self
+                .plugin_host
+                .as_ref()
+                .ok_or("ABI v2 host unavailable".to_string())
+                .and_then(|host| {
+                    host.dispatch_media_command(
+                        resource_id,
+                        winisland_plugin_api::types::v2::context::MEDIA_COMMAND_SEEK,
+                        position_ms,
+                    )
+                    .map_err(|error| error.to_string())
+                });
+            if let Err(error) = result {
                 log::warn!("Plugin media seek failed: {error}");
             } else if let Some(source) = self
                 .plugin_media_source

@@ -8,7 +8,9 @@ use winisland_core::lyrics::LyricsMode;
 
 use super::properties::{ThumbnailFetcher, TimelineCache, fetch_properties};
 use super::session::{auto_allow_new_apps, get_target_session};
-use super::{LyricsFetchRequest, MediaInfo, PlaybackCommand, spawn_lyrics_fetch};
+use super::{
+    LyricsFetchConfig, LyricsFetchRequest, MediaInfo, PlaybackCommand, spawn_lyrics_fetch,
+};
 
 pub(super) struct WorkerChannels {
     pub(super) info_tx: watch::Sender<MediaInfo>,
@@ -21,6 +23,7 @@ pub(super) struct WorkerChannels {
     pub(super) allowed_apps_rx: mpsc::UnboundedReceiver<Vec<String>>,
     pub(super) wake_rx: std::sync::mpsc::Receiver<()>,
     pub(super) known_apps: Vec<String>,
+    pub(super) lyrics_bridge: Option<winisland_plugin_host::lifecycle::LyricsBridge>,
 }
 
 pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken) {
@@ -35,6 +38,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         mut allowed_apps_rx,
         wake_rx,
         known_apps,
+        lyrics_bridge,
     } = channels;
     let manager = match crate::platform::media().open_context() {
         Ok(manager) => manager,
@@ -81,9 +85,12 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             media_state.update(
                 manager.as_ref(),
                 &info_tx,
-                current_lyrics_mode,
-                &current_lyrics_source,
-                current_lyrics_local_dir.as_deref(),
+                LyricsFetchConfig {
+                    mode: current_lyrics_mode,
+                    source: &current_lyrics_source,
+                    local_dir: current_lyrics_local_dir.as_deref(),
+                    bridge: lyrics_bridge.as_ref(),
+                },
                 true,
             );
             let info = info_tx.borrow();
@@ -134,6 +141,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
                 current_lyrics_mode,
                 &current_lyrics_source,
                 current_lyrics_local_dir.as_deref(),
+                lyrics_bridge.as_ref(),
             );
         }
         while let Ok(apps) = allowed_apps_rx.try_recv() {
@@ -199,9 +207,12 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             media_state.update(
                 manager.as_ref(),
                 &info_tx,
-                current_lyrics_mode,
-                &current_lyrics_source,
-                current_lyrics_local_dir.as_deref(),
+                LyricsFetchConfig {
+                    mode: current_lyrics_mode,
+                    source: &current_lyrics_source,
+                    local_dir: current_lyrics_local_dir.as_deref(),
+                    bridge: lyrics_bridge.as_ref(),
+                },
                 true,
             );
             last_regular_update = Instant::now();
@@ -213,9 +224,12 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             media_state.update(
                 manager.as_ref(),
                 &info_tx,
-                current_lyrics_mode,
-                &current_lyrics_source,
-                current_lyrics_local_dir.as_deref(),
+                LyricsFetchConfig {
+                    mode: current_lyrics_mode,
+                    source: &current_lyrics_source,
+                    local_dir: current_lyrics_local_dir.as_deref(),
+                    bridge: lyrics_bridge.as_ref(),
+                },
                 do_auto_allow,
             );
             last_regular_update = Instant::now();
@@ -274,9 +288,7 @@ impl MediaUpdateState {
         &mut self,
         manager: &dyn MediaContext,
         info_tx: &watch::Sender<MediaInfo>,
-        lyrics_mode: LyricsMode,
-        lyrics_source: &str,
-        local_dir: Option<&str>,
+        lyrics: LyricsFetchConfig<'_>,
         auto_allow: bool,
     ) {
         if auto_allow {
@@ -288,9 +300,7 @@ impl MediaUpdateState {
             match fetch_properties(
                 &session,
                 info_tx,
-                lyrics_mode,
-                lyrics_source,
-                local_dir,
+                lyrics,
                 self.thumbnail_fetcher.as_ref(),
                 &mut self.timeline_cache,
             ) {
@@ -338,6 +348,7 @@ fn refresh_current_lyrics(
     lyrics_mode: LyricsMode,
     lyrics_source: &str,
     local_dir: Option<&str>,
+    lyrics_bridge: Option<&winisland_plugin_host::lifecycle::LyricsBridge>,
 ) {
     let mut request = None;
     info_tx.send_if_modified(|info| {
@@ -368,5 +379,6 @@ fn refresh_current_lyrics(
             local_dir: local_dir.map(str::to_string),
             request_id,
         },
+        lyrics_bridge.cloned(),
     );
 }

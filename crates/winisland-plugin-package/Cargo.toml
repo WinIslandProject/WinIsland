@@ -1,0 +1,25 @@
+[package]
+name = "winisland-plugin-package"
+version.workspace = true
+edition = "2024"
+
+[features]
+default = []
+marketplace = ["dep:base64", "dep:dirs", "dep:image", "dep:log", "dep:reqwest", "dep:tokio", "dep:winisland-core"]
+
+[dependencies]
+base64 = { version = "0.23.1", optional = true }
+dirs = { version = "6.0", optional = true }
+ed25519-dalek = { version = "2", features = ["pem", "pkcs8"] }
+hex = "0.4"
+image = { version = "0.25", optional = true }
+log = { version = "0.4", optional = true }
+reqwest = { version = "0.13.4", features = ["json"], optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.149"
+serde_yaml = "0.9"
+sha2 = "0.11.0"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"], optional = true }
+winisland-core = { path = "../winisland-core", optional = true }
+zip = "8.6.0"

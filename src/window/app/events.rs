@@ -15,7 +15,7 @@ use super::input::InputSource;
 
 impl App {
     pub(super) fn on_window_event(&mut self, id: WindowId, event: PlatformEvent) {
-        if let Some(win) = &self.window
+        if let Some(win) = self.window
             && win.id() == id
         {
             match event {
@@ -27,7 +27,6 @@ impl App {
                 PlatformEvent::ThemeChanged { theme, .. } => {
                     let is_light = theme == Theme::Light;
                     self.is_light_theme = is_light;
-                    crate::plugin::manager::update_host_theme(is_light);
                     win.request_redraw();
                     log::info!("Window theme changed to {theme:?}");
                     if self.tray_installed {
@@ -59,7 +58,7 @@ impl App {
                 PlatformEvent::ScaleFactorChanged { .. } => {
                     let expected = self.required_window_size();
                     let _ = win.request_inner_size(expected);
-                    if let Some(monitor) = Self::get_target_monitor(win, self.config.monitor_index)
+                    if let Some(monitor) = Self::get_target_monitor(&win, self.config.monitor_index)
                     {
                         let (x, y) =
                             self.compute_window_position(monitor.position(), monitor.size());
@@ -179,18 +178,15 @@ impl App {
                             .max(1.0);
                         let dist_h = (self.springs.h.value - compact_target_h).abs();
                         let progress = (dist_h / total_h).clamp(0.0, 1.0);
-                        if let Some(event) = crate::plugin::manager::drain_media_source_event() {
+                        if let Some(event) = self.next_v2_media_event() {
                             match event {
-                                crate::plugin::manager::MediaSourceEvent::Set(source) => {
-                                    let (cover, hash) = if !source.cover_data.is_empty() {
+                                Some(source) => {
+                                    let (cover, hash) = if !source.cover.is_empty() {
                                         use std::collections::hash_map::DefaultHasher;
                                         use std::hash::{Hash, Hasher};
                                         let mut hasher = DefaultHasher::new();
-                                        source.cover_data.hash(&mut hasher);
-                                        (
-                                            Some(std::sync::Arc::from(source.cover_data)),
-                                            hasher.finish(),
-                                        )
+                                        source.cover.hash(&mut hasher);
+                                        (Some(std::sync::Arc::from(source.cover)), hasher.finish())
                                     } else {
                                         (None, 0)
                                     };
@@ -212,7 +208,7 @@ impl App {
                                         },
                                     });
                                 }
-                                crate::plugin::manager::MediaSourceEvent::Clear => {
+                                None => {
                                     self.plugin_media_source = None;
                                 }
                             }
@@ -228,19 +224,23 @@ impl App {
                         let spectrum = self.audio.get_spectrum();
                         let default_media_info = crate::core::smtc::MediaInfo::default();
                         let plugin_media_active = self.plugin_media_source.is_some();
-                        let available_controls =
-                            if let Some(source) = self.plugin_media_source.as_mut() {
-                                source.info.spectrum = spectrum;
-                                source.available_controls
-                            } else if self.config.smtc_enabled {
-                                self.smtc_media_info.spectrum = spectrum;
-                                crate::plugin::types::MEDIA_CONTROL_TOGGLE_PLAY
-                                    | crate::plugin::types::MEDIA_CONTROL_PREVIOUS
-                                    | crate::plugin::types::MEDIA_CONTROL_NEXT
-                                    | crate::plugin::types::MEDIA_CONTROL_SEEK
-                            } else {
-                                0
-                            };
+                        let available_controls = if let Some(source) =
+                            self.plugin_media_source.as_mut()
+                        {
+                            source.info.spectrum = spectrum;
+                            source.available_controls
+                        } else if self.config.smtc_enabled {
+                            self.smtc_media_info.spectrum = spectrum;
+                            winisland_plugin_api::types::v2::context::MEDIA_CONTROL_TOGGLE_PLAY
+                                | winisland_plugin_api::types::v2::context::MEDIA_CONTROL_PREVIOUS
+                                | winisland_plugin_api::types::v2::context::MEDIA_CONTROL_NEXT
+                                | winisland_plugin_api::types::v2::context::MEDIA_CONTROL_SEEK
+                        } else {
+                            0
+                        };
+                        let v2_widgets_changed = self.refresh_v2_widgets();
+                        self.prepare_v2_frames();
+                        self.refresh_v2_contexts();
                         let media_info = if let Some(source) = self.plugin_media_source.as_ref() {
                             &source.info
                         } else if self.config.smtc_enabled {
@@ -257,18 +257,21 @@ impl App {
                             None
                         };
                         let media_info = seeking_media_info.as_ref().unwrap_or(media_info);
+                        self.update_v2_album_art(
+                            media_info.thumbnail.as_deref(),
+                            media_info.thumbnail_hash,
+                        );
                         let music_active = !media_info.title.is_empty()
                             && (plugin_media_active || self.config.smtc_enabled);
-                        crate::plugin::manager::update_host_media(
+                        self.update_v2_host_state(
                             &media_info.title,
                             &media_info.artist,
                             media_info.is_playing,
                         );
                         self.audio.set_gate_override(music_active && !is_hidden);
                         self.ctx_mgr.set_smtc_active(music_active);
-                        crate::plugin::manager::drain_pending_contexts(&mut self.ctx_mgr);
                         let _ = self.ctx_mgr.tick();
-                        if crate::plugin::manager::drain_widget_events(&mut self.widget_mgr) {
+                        if v2_widgets_changed {
                             let widgets = self.widget_mgr.configurable_widgets();
                             let mut layout_config = crate::core::persistence::load_config();
                             if winisland_core::config::normalize_active_plugin_widget_layout(
@@ -406,6 +409,8 @@ impl App {
                                                 &self.config.plugin_widget_layout
                                             },
                                             plugin_widgets: &self.widget_mgr,
+                                            plugin_frames: &self.plugin_frames,
+                                            plugin_host: self.plugin_host.as_deref(),
                                             compact_widget_layout: if compact_components_hidden {
                                                 &[]
                                             } else {

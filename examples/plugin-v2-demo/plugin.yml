@@ -1,0 +1,8 @@
+id: winisland-v2-demo
+name: WinIsland V2 Demo
+author: WinIsland
+version: 0.1.0
+description: Demonstrates the ABI v2 widget draw stream
+github-link: https://github.com/WinIsland/WinIsland
+abi-version: 2
+entry: winisland_plugin_v2_demo.dll
