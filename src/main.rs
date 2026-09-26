@@ -22,6 +22,10 @@ const RESTART_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 const INSTANCE_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 const TERMINATION_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
+#[used]
+#[unsafe(export_name = "RTSSHooksCompatibility")]
+pub static RTSS_HOOKS_COMPATIBILITY: u32 = 0;
+
 fn main() {
     let _ = logger::init();
     log::info!("WinIsland v{} starting", env!("CARGO_PKG_VERSION"));
