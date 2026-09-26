@@ -1,7 +1,6 @@
 pub mod app;
 mod backdrop;
 pub mod settings;
-pub mod tray;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

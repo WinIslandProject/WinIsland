@@ -35,6 +35,7 @@ impl SettingsApp {
     }
 
     fn build_music_page(&self) -> SettingsPage<MusicAction> {
+        let media_available = crate::platform::capabilities().media_session;
         let show_lyrics = self.config.show_lyrics;
         let mut page = SettingsPage::new();
         if self.show_music_notice() {
@@ -47,12 +48,15 @@ impl SettingsApp {
         page.row_switch(
             tr("smtc_control"),
             self.config.smtc_enabled,
-            true,
+            media_available,
             MusicAction::SmtcEnabled,
         );
+        if !media_available {
+            page.row_label(tr("platform_unavailable"));
+        }
         page.group_end();
 
-        if self.config.smtc_enabled {
+        if self.config.smtc_enabled && media_available {
             page.section(tr("section_lyrics"));
             page.group_start();
             page.row_source(

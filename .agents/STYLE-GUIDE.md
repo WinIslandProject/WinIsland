@@ -30,7 +30,8 @@ Each module has a single responsibility:
 - `src/ui/island.rs` — island composition through `winisland_render::Painter`
 - `crates/winisland-render/` — Skia backend, drawing primitives, images, text, and frame lifecycle
 - `src/window/app.rs` — event loop, state, input handling
-- `src/utils/glass.rs` — frosted glass effect (and nothing else)
+- `crates/winisland-platform/src/` — OS-neutral capability traits and value types
+- `crates/winisland-platform-windows/src/` — Windows API implementations for capability domains
 
 **Do not** add unrelated logic to an existing module. Create a new module if the functionality is distinct.
 
@@ -78,6 +79,9 @@ Group imports in this order, separated by blank lines:
 
 ## Windows API conventions
 
+- Put new Windows API calls in `winisland-platform-windows`; window ownership and winit integration remain in `src/window/` until Phase 4.
+- Keep `winisland-platform` free of platform dependencies, `unsafe`, `cfg`, Skia, and winit types. Cross a capability seam with owned value types or RAII resource traits.
+- Initialize COM or WinRT inside the platform resource or method that uses it. Keep STA app activation on its own thread.
 - Use the `windows` crate, not `winapi` or raw FFI
 - Always check handle validity with `.is_invalid()` after `GetDC`, `CreateCompatibleDC`, etc.
 - Release resources in reverse acquisition order

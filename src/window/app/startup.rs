@@ -9,7 +9,6 @@ use winit::window::{Window, WindowButtons, WindowLevel};
 
 use crate::utils::icon::get_app_icon;
 use crate::utils::logger;
-use crate::window::tray::TrayManager;
 use winisland_core::config::WINDOW_TITLE;
 use winisland_core::i18n::tr;
 
@@ -133,11 +132,27 @@ impl App {
             });
             self.plugin_mgr.load_all();
             log::info!("{} plugin(s) loaded", self.plugin_mgr.len());
-            self.tray = Some(TrayManager::new(is_light));
-            log::info!(
-                "Tray icon created (theme={})",
-                if is_light { "light" } else { "dark" }
-            );
+            match crate::platform::shell().tray_install(
+                crate::platform::tray_theme(is_light),
+                crate::platform::tray_labels(true),
+            ) {
+                Ok(()) => {
+                    self.tray_installed = true;
+                    log::info!(
+                        "Tray icon created (theme={})",
+                        if is_light { "light" } else { "dark" }
+                    );
+                }
+                Err(error) => {
+                    crate::platform::update_capabilities(|caps| caps.tray = false);
+                    log::warn!("Tray icon unavailable: {error}");
+                    crate::platform::shell().information_dialog(
+                        &tr("tray_unavailable_title"),
+                        &tr("tray_unavailable_desc"),
+                    );
+                    self.open_settings(event_loop);
+                }
+            }
             Self::enforce_overlay_window(&window);
             window.set_visible(true);
             window.request_redraw();

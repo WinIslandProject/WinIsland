@@ -7,7 +7,6 @@ use crate::plugin::zip_loader::PluginManifest;
 use crate::ui::compact::CompactOverlay;
 use crate::window::backdrop::HostBackdrop;
 use crate::window::settings::SettingsApp;
-use crate::window::tray::TrayManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -59,7 +58,7 @@ pub struct App {
     renderer: Option<Renderer>,
     backdrop_window: Option<Arc<Window>>,
     settings: Option<SettingsApp>,
-    tray: Option<TrayManager>,
+    tray_installed: bool,
     smtc: SmtcListener,
     audio: AudioProcessor,
     compact_overlay: CompactOverlay,
@@ -156,7 +155,7 @@ impl Default for App {
             renderer: None,
             backdrop_window: None,
             settings: None,
-            tray: None,
+            tray_installed: false,
             config: config.clone(),
             expanded: false,
             expanded_press_started_inside: false,
@@ -168,7 +167,7 @@ impl Default for App {
             springs: IslandSprings::new(&config),
             geom: WindowGeometry::default(),
             smtc: SmtcListener::new(
-                config.smtc_enabled,
+                config.smtc_enabled && crate::platform::capabilities().media_session,
                 config.lyrics_mode.clone(),
                 config.lyrics_source.clone(),
                 config.lyrics_local_dir.clone(),

@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod core;
 mod icons;
+mod platform;
 mod plugin;
 mod ui;
 mod utils;
@@ -9,11 +10,9 @@ use crate::utils::logger;
 use crate::window::app::App;
 use std::env;
 use std::time::{Duration, Instant};
-use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
-use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::{MSG, WM_DWMCOMPOSITIONCHANGED};
-use windows::core::w;
 use winisland_core::i18n::{init_i18n, set_system_locale_provider};
+use winisland_platform::InstanceLock;
 use winit::event_loop::EventLoop;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
@@ -31,10 +30,13 @@ fn main() {
     log::info!("WinIsland v{} starting", env!("CARGO_PKG_VERSION"));
 
     let config = core::persistence::load_config();
-    let _ = utils::autostart::set_autostart(config.auto_start);
+    if let Err(error) = platform::shell().set_autostart(config.auto_start) {
+        platform::update_capabilities(|caps| caps.autostart = false);
+        log::warn!("Autostart is unavailable: {error}");
+    }
     logger::check_crash_flag();
-    set_system_locale_provider(utils::locale::system_locale);
-    winisland_core::lyrics::set_simplify_hook(utils::cjk::to_simplified);
+    set_system_locale_provider(platform::system_locale);
+    winisland_core::lyrics::set_simplify_hook(platform::to_simplified);
     init_i18n(&config.language);
 
     let args: Vec<String> = env::args().collect();
@@ -59,6 +61,23 @@ fn main() {
         .unwrap();
     let _guard = runtime.enter();
 
+    let capability_probe = std::thread::Builder::new()
+        .name("winisland-capability-probe".to_string())
+        .spawn(|| {
+            let probed = winisland_platform_windows::WindowsPlatform::probe_capabilities();
+            platform::update_capabilities(|capabilities| {
+                capabilities.toast_events &= probed.toast_events;
+                capabilities.media_session &= probed.media_session;
+                capabilities.audio_loopback &= probed.audio_loopback;
+                capabilities.volume_control &= probed.volume_control;
+                capabilities.brightness_control &= probed.brightness_control;
+                capabilities.autostart &= probed.autostart;
+            });
+            log::info!("Platform capabilities: {:?}", platform::capabilities());
+            utils::event_loop::wake();
+        })
+        .ok();
+
     utils::updater::start_update_checker();
 
     let mut event_loop_builder = EventLoop::builder();
@@ -77,15 +96,18 @@ fn main() {
     utils::event_loop::set_proxy(event_loop.create_proxy());
     let mut app = App::default();
     event_loop.run_app(&mut app).unwrap();
+    if let Some(probe) = capability_probe {
+        let _ = probe.join();
+    }
     log::info!("Application event loop exited, shutting down");
     logger::flush();
 }
 
-fn acquire_instance_mutex(restart_requested: bool) -> Option<HANDLE> {
+fn acquire_instance_mutex(restart_requested: bool) -> Option<Box<dyn InstanceLock>> {
     let started = Instant::now();
     let mut terminated_stale_instance = false;
     loop {
-        match try_create_instance_mutex() {
+        match platform::shell().acquire_single_instance("Local\\WinIsland_SingleInstance_Mutex") {
             Ok(Some(handle)) => return Some(handle),
             Ok(None) => {}
             Err(error) => {
@@ -105,20 +127,6 @@ fn acquire_instance_mutex(restart_requested: bool) -> Option<HANDLE> {
         }
         terminated_stale_instance = true;
         std::thread::sleep(TERMINATION_GRACE_PERIOD);
-    }
-}
-
-fn try_create_instance_mutex() -> windows::core::Result<Option<HANDLE>> {
-    // SAFETY: The mutex name is a static string. A handle returned for an existing mutex is
-    // closed immediately; a newly created handle remains open for the process lifetime.
-    unsafe {
-        let handle = CreateMutexW(None, true, w!("Local\\WinIsland_SingleInstance_Mutex"))?;
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            let _ = CloseHandle(handle);
-            Ok(None)
-        } else {
-            Ok(Some(handle))
-        }
     }
 }
 

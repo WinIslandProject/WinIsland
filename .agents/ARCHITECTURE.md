@@ -27,14 +27,16 @@ crates/
 │   ├── persistence.rs Config parse/migrate/atomic write (the config path is injected)
 │   └── widgets.rs     Plugin widget model (PluginWidget, WidgetManager)
 ├── winisland-plugin-api/  Plugin C ABI types + optional packager
-└── winisland-render/      Rendering values, Painter, images, text, D3D12 targets, and frame lifecycle
+├── winisland-render/      Rendering values, Painter, images, text, D3D12 targets, and frame lifecycle
+├── winisland-platform/    OS-neutral capability traits and value types; no dependencies or unsafe
+└── winisland-platform-windows/  Windows shell, metrics, display, audio, media, notification, and input implementations
 
 src/                 Application crate "WinIsland"; it depends on winisland-core, never the reverse
-├── core/              Application-side logic that still owns platform calls
-│   ├── audio.rs       Audio loopback capture + FFT spectrum
+├── core/              Application-side scheduling and state
+│   ├── audio.rs       FFT spectrum and capture scheduling through AudioProvider
 │   ├── persistence.rs Config path adapter — resolves ~/.winisland/config.toml, forwards to winisland-core
 │   ├── plugin_settings.rs Plugin settings page model
-│   └── smtc.rs        SMTC session manager — polls media info, handles commands
+│   └── smtc.rs        Media state, lyrics, selection, and polling through MediaProvider
 ├── icons/             Custom vector path icons (arrows, controls, music, settings)
 ├── plugin/            Native plugin system
 │   ├── loader.rs      NativePlugin — wraps DLL via libloading, C ABI vtable
@@ -47,14 +49,11 @@ src/                 Application crate "WinIsland"; it depends on winisland-core
 │   └── widget_view.rs Widget/page view for additional content
 ├── utils/             Utilities
 │   ├── animations.rs  Animation curve helpers
-│   ├── autostart.rs   Registry-based auto-start
 │   ├── backdrop.rs    Dynamic color background effects
 │   ├── blur.rs        Motion blur sigma calculation
-│   ├── cjk.rs         Traditional to simplified Chinese conversion (LCMapStringEx)
-│   ├── color.rs       Adaptive island border color from screen pixels
-│   ├── glass.rs       Frosted glass effect (GDI capture + blur + dark overlay)
-│   ├── locale.rs      System locale lookup (GetUserDefaultLocaleName)
-│   ├── mouse.rs       Global cursor position, hit-test, fullscreen detection
+│   ├── color.rs       Theme color helpers
+│   ├── cover.rs       Cover image decode through winisland-render
+│   ├── mouse.rs       Geometry helpers using DisplayProvider
 │   ├── scroll.rs      Scroll container helpers
 │   ├── settings_ui/   Settings UI components drawn through Painter
 │   ├── updater.rs     Nightly release check + download
@@ -62,7 +61,7 @@ src/                 Application crate "WinIsland"; it depends on winisland-core
 └── window/
     ├── app.rs         Main App struct — event loop, state, input, orchestration
     ├── backdrop.rs    Shared Windows Composition host-backdrop window
-    ├── tray.rs        System tray icon + context menu
+    ├── app/system.rs  Tray polling and shell notifications through platform traits
     └── settings/      Separate settings window
 ```
 
@@ -175,21 +174,17 @@ bounded staging extraction and backup/rollback directory activation.
 
 ## Windows API usage
 
-| Area | APIs |
-|------|------|
-| SMTC | `GlobalSystemMediaTransportControlsSessionManager` |
-| COM | `CoInitializeEx`, `CoUninitialize` |
-| Audio | `IMMDeviceEnumerator`, `IAudioMeterInformation` |
-| Window | `SetWindowPos` (topmost), extended styles (WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT) |
-| Rendering | D3D12 + Skia Ganesh; DXGI + DirectComposition presentation |
-| GDI | `GetDC`, `CreateCompatibleDC`, `BitBlt`, `GetDIBits`, `StretchBlt` |
-| DWM | `DwmEnableBlurBehindWindow` (deprecated), `DwmSetWindowAttribute` |
-| IME | `ImmGetContext`, `ImmSetCompositionWindow` |
-| Registry | Auto-start registration |
-| Locale | `GetUserDefaultLocaleName` for language auto-detect |
-| Shell | `SetCurrentProcessExplicitAppUserModelID` |
+| Area | Owner |
+|------|-------|
+| SMTC sessions, timeline, commands, thumbnails | `crates/winisland-platform-windows/src/media/` |
+| WASAPI process capture, CoreAudio volume and meter | `crates/winisland-platform-windows/src/audio/` |
+| WNF, Event Log, WinRT toast listener | `crates/winisland-platform-windows/src/notify/` |
+| Registry, locale, app activation, tray, process lock | `crates/winisland-platform-windows/src/shell/` |
+| System metrics, WMI brightness, monitor and cursor queries, input hooks | `crates/winisland-platform-windows/src/{metrics,display,input}.rs` |
+| Window ownership, styles, backdrop and event loop | `src/utils/win32.rs`, `src/window/backdrop.rs`, `src/window/app/` until Phase 4 |
+| D3D12, DXGI presentation and Skia | `crates/winisland-render/` |
 
-All calls are in `unsafe` blocks with detailed `// SAFETY:` comments.
+`winisland-platform` carries only traits and value types. The application adapter in `src/platform.rs` selects the Windows implementation. COM and WinRT initialization are owned by platform resources, which release their handles on drop. Every unsafe block needs a `// SAFETY:` explanation.
 
 ---
 

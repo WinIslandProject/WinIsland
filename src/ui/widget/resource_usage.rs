@@ -1,18 +1,7 @@
 use std::cell::RefCell;
-use std::ffi::c_void;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::FILETIME;
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
-    IDXGIAdapter3, IDXGIFactory1,
-};
-use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
-use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
-use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
-use windows::Win32::System::Threading::GetSystemTimes;
-use windows::core::{Interface, PCWSTR};
+use winisland_platform::{MetricSelection, SystemSample};
 
 use winisland_core::config::{
     ResourceMetricConfig, ResourceMetricKind, default_resource_metrics, normalize_resource_metrics,
@@ -22,7 +11,6 @@ use winisland_render::Rgba;
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const TRANSITION_DURATION: Duration = Duration::from_millis(400);
 const METRIC_COUNT: usize = ResourceMetricKind::ALL.len();
-const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
 
 #[derive(Default)]
 struct AnimatedUsage {
@@ -79,7 +67,6 @@ struct ResourceUsageCache {
     sampled_at: Option<Instant>,
     previous_cpu: Option<CpuTimes>,
     previous_network: Option<NetworkSample>,
-    gpu_adapters: Option<Vec<IDXGIAdapter3>>,
     values: [Option<f32>; METRIC_COUNT],
     animated: [AnimatedUsage; METRIC_COUNT],
     texts: [String; METRIC_COUNT],
@@ -91,7 +78,6 @@ impl Default for ResourceUsageCache {
             sampled_at: None,
             previous_cpu: None,
             previous_network: None,
-            gpu_adapters: None,
             values: [None; METRIC_COUNT],
             animated: std::array::from_fn(|_| AnimatedUsage::default()),
             texts: std::array::from_fn(|_| String::new()),
@@ -119,9 +105,24 @@ impl ResourceUsageCache {
                 .iter()
                 .any(|metric| metric.enabled && metric.kind == kind)
         };
+        let selection = MetricSelection {
+            cpu: enabled(ResourceMetricKind::Cpu),
+            memory: enabled(ResourceMetricKind::Ram),
+            network: enabled(ResourceMetricKind::Network),
+            disk: enabled(ResourceMetricKind::Disk),
+            gpu: enabled(ResourceMetricKind::Gpu),
+        };
+        let sample = match crate::platform::metrics().sample(selection) {
+            Ok(sample) => sample,
+            Err(error) => {
+                log::warn!("Resource usage sample failed: {error}");
+                SystemSample::default()
+            }
+        };
         if enabled(ResourceMetricKind::Cpu)
-            && let Some(current) = read_cpu_times()
+            && let (Some(idle), Some(total)) = (sample.cpu_idle_ticks, sample.cpu_total_ticks)
         {
+            let current = CpuTimes { idle, total };
             if let Some(previous) = self.previous_cpu {
                 let total = current.total.saturating_sub(previous.total);
                 let idle = current.idle.saturating_sub(previous.idle);
@@ -133,18 +134,33 @@ impl ResourceUsageCache {
             self.previous_cpu = Some(current);
         }
         if enabled(ResourceMetricKind::Ram) {
-            self.values[ResourceMetricKind::Ram.index()] = read_ram_usage();
+            self.values[ResourceMetricKind::Ram.index()] = sample
+                .memory_load_percent
+                .map(|load| (load as f32 / 100.0).clamp(0.0, 1.0));
         }
         if enabled(ResourceMetricKind::Gpu) {
-            self.values[ResourceMetricKind::Gpu.index()] = read_gpu_usage(&mut self.gpu_adapters);
+            self.values[ResourceMetricKind::Gpu.index()] = sample
+                .gpu_memory_used_bytes
+                .zip(sample.gpu_memory_budget_bytes)
+                .filter(|(_, budget)| *budget > 0)
+                .map(|(used, budget)| (used as f32 / budget as f32).clamp(0.0, 1.0));
         }
         if enabled(ResourceMetricKind::Disk) {
-            self.values[ResourceMetricKind::Disk.index()] = read_disk_usage();
+            self.values[ResourceMetricKind::Disk.index()] = sample
+                .disk_free_bytes
+                .zip(sample.disk_total_bytes)
+                .filter(|(_, total)| *total > 0)
+                .map(|(free, total)| (1.0 - free as f32 / total as f32).clamp(0.0, 1.0));
         }
 
         if enabled(ResourceMetricKind::Network)
-            && let Some(current) = read_network_sample()
+            && let (Some(bytes), Some(link_bits_per_second)) =
+                (sample.network_bytes, sample.network_link_bits_per_second)
         {
+            let current = NetworkSample {
+                bytes,
+                link_bits_per_second,
+            };
             if let Some(previous) = self.previous_network
                 && elapsed > 0.0
             {
@@ -293,99 +309,6 @@ fn blend_color(from: Rgba, to: Rgba, amount: f32) -> Rgba {
         mix(from.g(), to.g()),
         mix(from.b(), to.b()),
     )
-}
-
-fn filetime_ticks(value: FILETIME) -> u64 {
-    (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime)
-}
-
-fn read_cpu_times() -> Option<CpuTimes> {
-    let mut idle = FILETIME::default();
-    let mut kernel = FILETIME::default();
-    let mut user = FILETIME::default();
-    unsafe { GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)) }.ok()?;
-    Some(CpuTimes {
-        idle: filetime_ticks(idle),
-        total: filetime_ticks(kernel).saturating_add(filetime_ticks(user)),
-    })
-}
-
-fn read_ram_usage() -> Option<f32> {
-    let mut status = MEMORYSTATUSEX {
-        dwLength: size_of::<MEMORYSTATUSEX>() as u32,
-        ..Default::default()
-    };
-    unsafe { GlobalMemoryStatusEx(&mut status) }.ok()?;
-    Some((status.dwMemoryLoad as f32 / 100.0).clamp(0.0, 1.0))
-}
-
-fn read_gpu_usage(adapters: &mut Option<Vec<IDXGIAdapter3>>) -> Option<f32> {
-    if adapters.is_none() {
-        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ok()?;
-        let mut available = Vec::new();
-        for index in 0..16 {
-            let Ok(adapter) = (unsafe { factory.EnumAdapters1(index) }) else {
-                break;
-            };
-            if let Ok(adapter) = adapter.cast::<IDXGIAdapter3>() {
-                available.push(adapter);
-            }
-        }
-        *adapters = Some(available);
-    }
-    let mut current_usage = 0u64;
-    let mut total_budget = 0u64;
-    for adapter in adapters.as_ref()? {
-        let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-        if unsafe { adapter.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info) }
-            .is_ok()
-            && info.Budget > 0
-        {
-            current_usage = current_usage.saturating_add(info.CurrentUsage);
-            total_budget = total_budget.saturating_add(info.Budget);
-        }
-    }
-    (total_budget > 0).then_some((current_usage as f32 / total_budget as f32).clamp(0.0, 1.0))
-}
-
-fn read_network_sample() -> Option<NetworkSample> {
-    let mut table = std::ptr::null_mut::<MIB_IF_TABLE2>();
-    if unsafe { GetIfTable2(&mut table) }.0 != 0 || table.is_null() {
-        return None;
-    }
-    let count = unsafe { (*table).NumEntries as usize };
-    let rows = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), count) };
-    let mut bytes = 0u64;
-    let mut link_bits_per_second = 0u64;
-    for row in rows {
-        if row.OperStatus == IfOperStatusUp && row.Type != IF_TYPE_SOFTWARE_LOOPBACK {
-            bytes = bytes.saturating_add(row.InOctets.saturating_add(row.OutOctets));
-            link_bits_per_second = link_bits_per_second
-                .saturating_add(row.ReceiveLinkSpeed.saturating_add(row.TransmitLinkSpeed));
-        }
-    }
-    unsafe { FreeMibTable(table.cast::<c_void>()) };
-    Some(NetworkSample {
-        bytes,
-        link_bits_per_second,
-    })
-}
-
-fn read_disk_usage() -> Option<f32> {
-    let root = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string()) + "\\";
-    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut total = 0u64;
-    let mut free = 0u64;
-    unsafe {
-        GetDiskFreeSpaceExW(
-            PCWSTR(wide.as_ptr()),
-            None,
-            Some(&mut total),
-            Some(&mut free),
-        )
-    }
-    .ok()?;
-    (total > 0).then_some((1.0 - free as f32 / total as f32).clamp(0.0, 1.0))
 }
 
 fn update_percent_text(text: &mut String, value: Option<f32>) {

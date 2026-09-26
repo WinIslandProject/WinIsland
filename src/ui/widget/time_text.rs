@@ -18,22 +18,20 @@ thread_local! {
 }
 
 pub(crate) fn with_current_time_text<T>(draw: impl FnOnce(&str) -> T) -> T {
-    // SAFETY: GetLocalTime returns a fully initialized SYSTEMTIME value.
-    let local_time = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    let local_time = crate::platform::shell().local_datetime();
     TIME_TEXT.with(|cell| {
         let mut cache = cell.borrow_mut();
-        if cache.hour != local_time.wHour || cache.minute != local_time.wMinute {
-            cache.hour = local_time.wHour;
-            cache.minute = local_time.wMinute;
-            cache.value = format!("{:02}:{:02}", local_time.wHour, local_time.wMinute);
+        if cache.hour != local_time.hour || cache.minute != local_time.minute {
+            cache.hour = local_time.hour;
+            cache.minute = local_time.minute;
+            cache.value = format!("{:02}:{:02}", local_time.hour, local_time.minute);
         }
         draw(&cache.value)
     })
 }
 
 pub(crate) fn until_next_minute() -> Duration {
-    // SAFETY: GetLocalTime returns a fully initialized SYSTEMTIME value.
-    let local_time = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
-    let elapsed_ms = u64::from(local_time.wSecond) * 1_000 + u64::from(local_time.wMilliseconds);
+    let local_time = crate::platform::shell().local_datetime();
+    let elapsed_ms = u64::from(local_time.second) * 1_000 + u64::from(local_time.millisecond);
     Duration::from_millis(60_000_u64.saturating_sub(elapsed_ms).max(1))
 }

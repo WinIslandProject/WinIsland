@@ -2,14 +2,13 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
-use windows::Foundation::TypedEventHandler;
-use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+use winisland_platform::{MediaCommand, MediaContext};
 
 use winisland_core::lyrics::LyricsMode;
 
 use super::properties::{ThumbnailFetcher, TimelineCache, fetch_properties};
 use super::session::{auto_allow_new_apps, get_target_session};
-use super::{LyricsFetchRequest, MediaInfo, PlaybackCommand, WinRtGuard, spawn_lyrics_fetch};
+use super::{LyricsFetchRequest, MediaInfo, PlaybackCommand, spawn_lyrics_fetch};
 
 pub(super) struct WorkerChannels {
     pub(super) info_tx: watch::Sender<MediaInfo>,
@@ -37,35 +36,15 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         wake_rx,
         known_apps,
     } = channels;
-    let _winrt_guard = match WinRtGuard::new() {
-        Ok(guard) => guard,
+    let manager = match crate::platform::media().open_context() {
+        Ok(manager) => manager,
         Err(error) => {
-            log::error!("SMTC: failed to initialize WinRT: {error}");
-            return;
-        }
-    };
-
-    let manager = match GlobalSystemMediaTransportControlsSessionManager::RequestAsync() {
-        Ok(op) => match op.join() {
-            Ok(m) => m,
-            Err(error) => {
-                log::error!("SMTC: failed to get session manager: {error}");
-                return;
-            }
-        },
-        Err(error) => {
-            log::error!("SMTC: RequestAsync failed: {error}");
+            crate::platform::update_capabilities(|caps| caps.media_session = false);
+            log::error!("SMTC: failed to get session manager: {error}");
             return;
         }
     };
     log::info!("SMTC: session manager created");
-
-    let (event_tx, event_rx) = std::sync::mpsc::sync_channel::<()>(1);
-    let handler = TypedEventHandler::new(move |_m, _| {
-        let _ = event_tx.try_send(());
-        Ok(())
-    });
-    let sessions_changed_token = manager.SessionsChanged(&handler).ok();
     let mut enabled = *enabled_rx.borrow_and_update();
 
     let mut current_lyrics_mode = LyricsMode::Online;
@@ -100,7 +79,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
     if enabled {
         for attempt in 0..10 {
             media_state.update(
-                &manager,
+                manager.as_ref(),
                 &info_tx,
                 current_lyrics_mode,
                 &current_lyrics_source,
@@ -182,7 +161,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         if !enabled {
             while seek_rx.try_recv().is_ok() {}
             while playback_rx.try_recv().is_ok() {}
-            while event_rx.try_recv().is_ok() {}
+            while manager.poll_events() {}
             let _ = wake_rx.recv_timeout(Duration::from_millis(300));
             continue;
         }
@@ -193,40 +172,32 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
         }
         if let Some(seek_pos) = seek_pos {
             let seek_pos = seek_pos.min(i64::MAX as u64 / 10_000);
-            if !apply_seek_request(&manager, &media_state.allowed_apps, &info_tx, seek_pos) {
+            if !apply_seek_request(
+                manager.as_ref(),
+                &media_state.allowed_apps,
+                &info_tx,
+                seek_pos,
+            ) {
                 info_tx.send_if_modified(|info| info.reject_seek(seek_pos));
             }
         }
 
         while let Ok(cmd) = playback_rx.try_recv() {
             log::info!("SMTC: playback command {cmd:?}");
-            if let Some(session) = get_target_session(&manager, &media_state.allowed_apps) {
-                match cmd {
-                    PlaybackCommand::Toggle => {
-                        if let Ok(pb_info) = session.GetPlaybackInfo()
-                            && let Ok(status) = pb_info.PlaybackStatus()
-                        {
-                            if status == windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing {
-                                    let _ = session.TryPauseAsync();
-                                } else {
-                                    let _ = session.TryPlayAsync();
-                                }
-                        }
-                    }
-                    PlaybackCommand::Next => {
-                        let _ = session.TrySkipNextAsync();
-                    }
-                    PlaybackCommand::Prev => {
-                        let _ = session.TrySkipPreviousAsync();
-                    }
-                }
+            if let Some(session) = get_target_session(manager.as_ref(), &media_state.allowed_apps) {
+                let command = match cmd {
+                    PlaybackCommand::Toggle => MediaCommand::Toggle,
+                    PlaybackCommand::Next => MediaCommand::Next,
+                    PlaybackCommand::Prev => MediaCommand::Previous,
+                };
+                let _ = session.send(command);
             }
         }
 
-        if event_rx.try_recv().is_ok() {
+        if manager.poll_events() {
             log::debug!("SMTC: session change event received, updating immediately");
             media_state.update(
-                &manager,
+                manager.as_ref(),
                 &info_tx,
                 current_lyrics_mode,
                 &current_lyrics_source,
@@ -240,7 +211,7 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
             regular_poll_count += 1;
             let do_auto_allow = regular_poll_count.is_multiple_of(10);
             media_state.update(
-                &manager,
+                manager.as_ref(),
                 &info_tx,
                 current_lyrics_mode,
                 &current_lyrics_source,
@@ -252,16 +223,10 @@ pub(super) fn smtc_poll_loop(channels: WorkerChannels, cancel: CancellationToken
 
         let _ = wake_rx.recv_timeout(Duration::from_millis(300));
     }
-
-    if let Some(token) = sessions_changed_token
-        && let Err(error) = manager.RemoveSessionsChanged(token)
-    {
-        log::warn!("SMTC: failed to remove session change handler: {error}");
-    }
 }
 
 fn apply_seek_request(
-    manager: &GlobalSystemMediaTransportControlsSessionManager,
+    manager: &dyn MediaContext,
     allowed_apps: &[String],
     info_tx: &watch::Sender<MediaInfo>,
     position_ms: u64,
@@ -270,20 +235,9 @@ fn apply_seek_request(
         log::debug!("SMTC: ignored seek without an active session");
         return false;
     };
-    let source_app_id = session
-        .SourceAppUserModelId()
-        .map(|id| id.to_string())
-        .unwrap_or_default();
+    let source_app_id = session.source_app_id().unwrap_or_default();
     log::info!("SMTC: seek to {position_ms}ms");
-    let ticks = position_ms as i64 * 10_000;
-    let operation = match session.TryChangePlaybackPositionAsync(ticks) {
-        Ok(operation) => operation,
-        Err(error) => {
-            log::warn!("SMTC: failed to start seek: {error}");
-            return false;
-        }
-    };
-    match operation.join() {
+    match session.send(MediaCommand::Seek(Duration::from_millis(position_ms))) {
         Ok(true) => {}
         Ok(false) => {
             log::warn!("SMTC: media session rejected seek to {position_ms}ms");
@@ -318,7 +272,7 @@ struct MediaUpdateState {
 impl MediaUpdateState {
     fn update(
         &mut self,
-        manager: &GlobalSystemMediaTransportControlsSessionManager,
+        manager: &dyn MediaContext,
         info_tx: &watch::Sender<MediaInfo>,
         lyrics_mode: LyricsMode,
         lyrics_source: &str,

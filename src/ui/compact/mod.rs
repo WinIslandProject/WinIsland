@@ -1,6 +1,5 @@
 mod brightness;
 mod notification;
-mod notification_event;
 mod volume;
 
 use winisland_render::{Painter, Rect};
@@ -94,20 +93,33 @@ impl CompactOverlay {
         notification_state: CompactOverlayState,
         notification_display: bool,
     ) -> CompactOverlayUpdate {
-        self.volume_monitor
-            .set_key_handling_enabled(!matches!(volume_state, CompactOverlayState::Discard));
+        let brightness = self.brightness_monitor.snapshot();
+        let mut caps = crate::platform::capabilities();
+        if brightness.available && !caps.brightness_control {
+            crate::platform::update_capabilities(|caps| caps.brightness_control = true);
+            caps.brightness_control = true;
+        }
+        let volume_state = if caps.volume_control {
+            volume_state
+        } else {
+            CompactOverlayState::Discard
+        };
+        let notification_display = notification_display && caps.toast_events;
+        self.volume_monitor.set_key_handling_enabled(
+            caps.input_hooks && !matches!(volume_state, CompactOverlayState::Discard),
+        );
         let volume_changed = self
             .volume_indicator
             .update(self.volume_monitor.snapshot(), volume_state);
-        let brightness = self.brightness_monitor.snapshot();
         let brightness_changed = self.brightness_overlay_enabled
+            && caps.brightness_control
             && brightness.available
             && self.brightness_indicator.update_brightness(
                 brightness.level,
                 brightness.revision,
                 volume_state,
             );
-        if !self.brightness_overlay_enabled {
+        if !self.brightness_overlay_enabled || !caps.brightness_control {
             self.brightness_indicator.update_brightness(
                 brightness.level,
                 brightness.revision,

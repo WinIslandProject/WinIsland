@@ -1,0 +1,16 @@
+[package]
+name = "winisland-platform-windows"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+winisland-platform = { path = "../winisland-platform" }
+windows-core = "0.62.2"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Wmi", "Win32_System_Variant", "Win32_Globalization", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_LibraryLoader", "Win32_System_EventLog", "Win32_System_WinRT", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_Storage_Packaging_Appx", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Storage_FileSystem", "ApplicationModel", "Foundation", "Foundation_Collections", "Storage_Streams", "UI_Notifications", "UI_Notifications_Management", "Media_Control", "Graphics_Imaging", "Data_Xml_Dom"] }
+dirs = "6.0"
+log = { version = "0.4", features = ["std"] }
+tray-icon = "0.24.1"
+image = "0.25"
+wasapi = "0.24.0"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+libloading = "0.9"

@@ -4,19 +4,9 @@ use std::io::{BufWriter, Write};
 use std::panic::{self, PanicHookInfo};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use windows::Win32::Foundation::SYSTEMTIME;
-use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::UI::WindowsAndMessaging::{
-    MB_ICONERROR, MB_SETFOREGROUND, MB_TOPMOST, MESSAGEBOX_STYLE, MessageBoxW,
-};
-use windows::core::PCWSTR;
 
-const LOG_DIR: &str = ".winisland/logs";
 const LOG_FILE: &str = "winisland.log";
-const CRASH_FLAG: &str = ".winisland/.crash_flag";
 const MAX_LOG_SIZE: u64 = 1_024_000; // 1MB
-const ERROR_MESSAGE_BOX_STYLE: MESSAGEBOX_STYLE =
-    MESSAGEBOX_STYLE(MB_ICONERROR.0 | MB_SETFOREGROUND.0 | MB_TOPMOST.0);
 
 struct FileLogger {
     state: Mutex<LogFile>,
@@ -115,33 +105,23 @@ impl Log for FileLogger {
 }
 
 fn timestamp() -> String {
-    let time = local_time();
+    let time = crate::platform::shell().local_datetime();
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond
+        time.year, time.month, time.day, time.hour, time.minute, time.second
     )
 }
 
 fn file_timestamp() -> String {
-    let time = local_time();
+    let time = crate::platform::shell().local_datetime();
     format!(
         "{:04}{:02}{:02}-{:02}{:02}{:02}",
-        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond
+        time.year, time.month, time.day, time.hour, time.minute, time.second
     )
 }
 
-fn local_time() -> SYSTEMTIME {
-    // SAFETY: GetLocalTime returns a fully initialized SYSTEMTIME value without input pointers.
-    unsafe { GetLocalTime() }
-}
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
-}
-
 fn log_dir() -> PathBuf {
-    let mut path = home_dir();
-    path.push(LOG_DIR);
+    let path = crate::platform::shell().log_dir();
     let _ = fs::create_dir_all(&path);
     path
 }
@@ -187,9 +167,7 @@ fn next_archive_path(path: &Path) -> PathBuf {
 }
 
 fn crash_flag_path() -> PathBuf {
-    let mut path = home_dir();
-    path.push(CRASH_FLAG);
-    path
+    crate::platform::shell().config_dir().join(".crash_flag")
 }
 
 pub fn check_crash_flag() {
@@ -270,17 +248,7 @@ See ~/.winisland/logs/winisland.log for recent activity.
 }
 
 pub(crate) fn show_error_message(title: &str, text: &str) {
-    let title_w: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
-    let text_w: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-    // SAFETY: both UTF-16 buffers are NUL-terminated and remain valid for the synchronous call.
-    unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(text_w.as_ptr()),
-            PCWSTR(title_w.as_ptr()),
-            ERROR_MESSAGE_BOX_STYLE,
-        );
-    }
+    crate::platform::shell().fatal_dialog(title, text);
 }
 
 fn write_report_to(path: &std::path::Path, report: &str) -> std::io::Result<()> {

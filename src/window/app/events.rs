@@ -34,8 +34,11 @@ impl App {
                     crate::plugin::manager::update_host_theme(is_light);
                     win.request_redraw();
                     log::info!("Window theme changed to {theme:?}");
-                    if let Some(tray) = self.tray.as_mut() {
-                        tray.update_theme(is_light);
+                    if self.tray_installed {
+                        let _ = crate::platform::shell().tray_update(
+                            crate::platform::tray_theme(is_light),
+                            crate::platform::tray_labels(self.visible),
+                        );
                     }
                 }
                 WindowEvent::Resized(_) if win.is_maximized() => {

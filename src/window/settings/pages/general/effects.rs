@@ -61,16 +61,21 @@ impl SettingsApp {
         );
         page.group_end();
         page.group_start();
-        page.row_source(
-            tr("island_style"),
-            vec![
-                (tr("style_default"), self.config.island_style == "default"),
-                (tr("style_glass"), self.config.island_style == "glass"),
-                (tr("style_dynamic"), self.config.island_style == "dynamic"),
-            ],
-            true,
-            EffectsAction::IslandStyle,
-        );
+        let host_backdrop = crate::platform::capabilities().host_backdrop;
+        let style = if !host_backdrop && self.config.island_style == "glass" {
+            "dynamic"
+        } else {
+            self.config.island_style.as_str()
+        };
+        let mut styles = vec![(tr("style_default"), style == "default")];
+        if host_backdrop {
+            styles.push((tr("style_glass"), style == "glass"));
+        }
+        styles.push((tr("style_dynamic"), style == "dynamic"));
+        page.row_source(tr("island_style"), styles, true, EffectsAction::IslandStyle);
+        if !host_backdrop {
+            page.row_label(tr("platform_unavailable"));
+        }
         page.row_font(
             tr("custom_font"),
             tr("font_select"),
@@ -142,23 +147,30 @@ impl SettingsApp {
                 win_w,
                 win_h,
             ),
-            EffectsAction::IslandStyle => PopupState::new(
-                select_island_style,
-                button_rect,
-                vec![tr("style_default"), tr("style_glass"), tr("style_dynamic")],
-                vec![
-                    "default".to_string(),
-                    "glass".to_string(),
-                    "dynamic".to_string(),
-                ],
-                match self.config.island_style.as_str() {
-                    "glass" => 1,
-                    "dynamic" => 2,
-                    _ => 0,
-                },
-                win_w,
-                win_h,
-            ),
+            EffectsAction::IslandStyle => {
+                let host_backdrop = crate::platform::capabilities().host_backdrop;
+                let mut labels = vec![tr("style_default")];
+                let mut values = vec!["default".to_string()];
+                if host_backdrop {
+                    labels.push(tr("style_glass"));
+                    values.push("glass".to_string());
+                }
+                labels.push(tr("style_dynamic"));
+                values.push("dynamic".to_string());
+                let selected = values
+                    .iter()
+                    .position(|value| value == &self.config.island_style)
+                    .unwrap_or(values.len() - 1);
+                PopupState::new(
+                    select_island_style,
+                    button_rect,
+                    labels,
+                    values,
+                    selected,
+                    win_w,
+                    win_h,
+                )
+            }
             EffectsAction::AnimationFps => PopupState::new(
                 select_animation_fps,
                 button_rect,
@@ -201,7 +213,12 @@ fn select_theme(app: &mut SettingsApp, value: &str) {
 }
 
 fn select_island_style(app: &mut SettingsApp, value: &str) {
-    app.config.island_style = value.to_string();
+    app.config.island_style = if value == "glass" && !crate::platform::capabilities().host_backdrop
+    {
+        "dynamic".to_string()
+    } else {
+        value.to_string()
+    };
 }
 
 fn select_animation_fps(app: &mut SettingsApp, value: &str) {

@@ -1,4 +1,3 @@
-use crate::utils::autostart::set_autostart;
 use crate::utils::settings_ui::{ClickResult, StepDirection};
 use crate::window::settings::{NumberInputHandler, PopupState};
 use winisland_core::config::{AppConfig, MAX_HIDDEN_WIDTH, MIN_HIDDEN_WIDTH};
@@ -25,17 +24,20 @@ pub(super) enum BehaviorAction {
     UpdateInterval,
     CheckUpdatesNow,
     ResetDefaults,
+    HideIsland,
+    Exit,
 }
 
 impl SettingsApp {
     pub(super) fn build_behavior_page(&self) -> SettingsPage<BehaviorAction> {
+        let caps = crate::platform::capabilities();
         let mut page = SettingsPage::new();
         page.section(tr("section_behavior"));
         page.group_start();
         page.row_switch(
             tr("start_boot"),
             self.config.auto_start,
-            true,
+            caps.autostart,
             BehaviorAction::AutoStart,
         );
         page.row_switch(
@@ -77,21 +79,33 @@ impl SettingsApp {
         page.row_switch(
             tr("notification_display"),
             self.config.notification_display,
-            true,
+            caps.toast_events,
             BehaviorAction::NotificationDisplay,
         );
         page.row_switch(
             tr("replace_native_volume_flyout"),
             self.config.replace_native_volume_flyout,
-            true,
+            caps.input_hooks && caps.volume_control,
             BehaviorAction::ReplaceNativeVolumeFlyout,
         );
         page.row_switch(
             tr("brightness_overlay"),
             self.config.brightness_overlay_enabled,
-            true,
+            caps.brightness_control,
             BehaviorAction::BrightnessOverlay,
         );
+        if !caps.autostart || !caps.toast_events || !caps.input_hooks || !caps.brightness_control {
+            page.row_label(tr("platform_unavailable"));
+        }
+        if !caps.tray {
+            page.row_button(
+                tr("tray_hide"),
+                tr("tray_hide"),
+                true,
+                BehaviorAction::HideIsland,
+            );
+            page.row_button(tr("tray_exit"), tr("tray_exit"), true, BehaviorAction::Exit);
+        }
 
         let language = current_lang();
         page.row_source(
@@ -177,9 +191,27 @@ impl SettingsApp {
 
         let changed = match (action, &result) {
             (BehaviorAction::AutoStart, ClickResult::Switch(_)) => {
-                self.config.auto_start = !self.config.auto_start;
-                let _ = set_autostart(self.config.auto_start);
-                true
+                let enabled = !self.config.auto_start;
+                match crate::platform::shell().set_autostart(enabled) {
+                    Ok(()) => {
+                        self.config.auto_start = enabled;
+                        true
+                    }
+                    Err(error) => {
+                        crate::platform::update_capabilities(|caps| caps.autostart = false);
+                        log::warn!("Autostart is unavailable: {error}");
+                        false
+                    }
+                }
+            }
+            (BehaviorAction::HideIsland, ClickResult::RowButton(_)) => {
+                self.plugin_request =
+                    Some(crate::window::settings::PluginSettingsRequest::HideIsland);
+                false
+            }
+            (BehaviorAction::Exit, ClickResult::RowButton(_)) => {
+                self.plugin_request = Some(crate::window::settings::PluginSettingsRequest::Exit);
+                false
             }
             (BehaviorAction::AutoHide, ClickResult::Switch(_)) => {
                 self.config.auto_hide = !self.config.auto_hide;
