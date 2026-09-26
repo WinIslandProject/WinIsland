@@ -5,6 +5,7 @@ mod widget_layout;
 mod widgets;
 
 use serde::{Deserialize, Serialize};
+use settings_schema::Settings;
 
 pub use lyrics::*;
 pub use migrate::*;
@@ -17,23 +18,39 @@ pub const APP_AUTHOR: &str = "Eatgrapes";
 pub const APP_HOMEPAGE: &str = "https://github.com/WinIslandProject/WinIsland";
 pub const WINDOW_TITLE: &str = "WinIsland";
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Settings)]
 pub struct AppConfig {
     #[serde(alias = "global_scale")]
+    #[setting(number(min = 0.5, max = 5.0, step = 0.05, precision = 2))]
     pub compact_scale: f32,
     #[serde(default = "default_expanded_scale")]
+    #[setting(number(min = 0.5, max = 5.0, step = 0.05, precision = 2))]
     pub expanded_scale: f32,
+    #[setting(number(min = 40.0, max = 400.0, step = 5.0))]
     pub base_width: f32,
+    #[setting(number(min = 15.0, max = 200.0, step = 2.0))]
     pub base_height: f32,
+    #[setting(number(min = 200.0, max = 2000.0, step = 10.0))]
     pub expanded_width: f32,
+    #[setting(number(min = 100.0, max = 1000.0, step = 10.0))]
     pub expanded_height: f32,
+    #[setting(toggle)]
     pub motion_blur: bool,
     #[serde(default = "default_animation_fps")]
+    #[setting(choice(
+        30 => "30 FPS",
+        60 => "60 FPS",
+        90 => "90 FPS",
+        120 => "120 FPS",
+        0 => "frame_rate_native",
+    ))]
     pub animation_fps: u32,
     #[serde(default = "default_expanded_idle_fps")]
+    #[setting(choice(30 => "30 FPS", 45 => "45 FPS", 60 => "60 FPS", 90 => "90 FPS"))]
     pub expanded_idle_fps: u32,
     #[serde(default = "default_island_style")]
     pub island_style: String,
+    #[setting(toggle, label = "smtc_control")]
     pub smtc_enabled: bool,
     #[serde(default)]
     pub music_notice_acknowledged: bool,
@@ -41,10 +58,13 @@ pub struct AppConfig {
     #[serde(default)]
     pub smtc_known_apps: Vec<String>,
     #[serde(default = "default_show_lyrics")]
+    #[setting(toggle)]
     pub show_lyrics: bool,
     #[serde(default)]
+    #[setting(toggle)]
     pub show_secondary_lyrics: bool,
     #[serde(default = "default_lyrics_mode")]
+    #[setting(choice("online" => "lyrics_mode_online", "lrc" => "lyrics_mode_lrc"))]
     pub lyrics_mode: String,
     #[serde(default)]
     pub lyrics_local_dir: Option<String>,
@@ -53,34 +73,59 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_start: bool,
     #[serde(default)]
+    #[setting(toggle)]
     pub auto_hide: bool,
     #[serde(default)]
+    #[setting(toggle)]
     pub fullscreen_auto_hide: bool,
     #[serde(default = "default_auto_hide_delay")]
+    #[setting(number(min = 1.0, max = 60.0, step = 1.0), label = "hide_delay")]
     pub auto_hide_delay: f32,
     #[serde(default = "default_hidden_width")]
+    #[setting(number(min = MIN_HIDDEN_WIDTH, max = MAX_HIDDEN_WIDTH, step = 1.0))]
     pub hidden_width: f32,
     #[serde(default = "default_check_for_updates")]
+    #[setting(toggle, label = "check_updates")]
     pub check_for_updates: bool,
     #[serde(default = "default_update_check_interval")]
+    #[setting(number(min = 1.0, max = 24.0, step = 1.0), label = "update_interval")]
     pub update_check_interval: f32,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default = "default_lyrics_source")]
+    #[setting(choice(
+        "163" => "lyrics_source_163",
+        "qq" => "lyrics_source_qq",
+        "kugou" => "lyrics_source_kugou",
+        "lrclib" => "lyrics_source_lrclib",
+        "amll" => "AMLL",
+    ))]
     pub lyrics_source: String,
     #[serde(default)]
+    #[setting(number(min = -10.0, max = 10.0, step = 0.1, precision = 1))]
     pub lyrics_delay: f64,
     #[serde(default)]
+    #[setting(toggle)]
     pub lyrics_scroll: bool,
     #[serde(default = "default_lyrics_scroll_max_width")]
+    #[setting(number(min = 100.0, max = 500.0, step = 10.0))]
     pub lyrics_scroll_max_width: f32,
     #[serde(default = "default_lyrics_side_gap")]
+    #[setting(number(min = 0.0, max = 32.0, step = 1.0))]
     pub lyrics_side_gap: f32,
     #[serde(default)]
+    #[setting(choice(
+        "random" => "lyrics_transition_random",
+        "blur" => "lyrics_transition_blur",
+        "slide" => "lyrics_transition_slide",
+        "fade" => "lyrics_transition_fade",
+    ))]
     pub lyrics_transition_animation: LyricTransitionMode,
     #[serde(default)]
+    #[setting(number(step = 5.0))]
     pub position_x_offset: i32,
     #[serde(default)]
+    #[setting(number(step = 5.0))]
     pub position_y_offset: i32,
     #[serde(
         rename = "dock_position",
@@ -91,8 +136,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub monitor_index: i32,
     #[serde(default)]
+    #[setting(number(min = 0.0, max = 30.0, step = 1.0))]
     pub font_size: f32,
     #[serde(default = "default_settings_theme")]
+    #[setting(choice("system" => "theme_system", "light" => "theme_light", "dark" => "theme_dark"))]
     pub settings_theme: String,
     #[serde(default = "default_mini_cover_shape")]
     pub mini_cover_shape: String,
@@ -101,14 +148,19 @@ pub struct AppConfig {
     #[serde(default = "default_cover_rotate")]
     pub cover_rotate: bool,
     #[serde(default = "default_update_channel")]
+    #[setting(choice("stable" => "channel_stable", "beta" => "channel_beta"))]
     pub update_channel: String,
     #[serde(default)]
+    #[setting(toggle)]
     pub right_click_drag: bool,
     #[serde(default)]
+    #[setting(toggle)]
     pub notification_display: bool,
     #[serde(default = "default_replace_native_volume_flyout")]
+    #[setting(toggle)]
     pub replace_native_volume_flyout: bool,
     #[serde(default = "default_brightness_overlay_enabled")]
+    #[setting(toggle, label = "brightness_overlay")]
     pub brightness_overlay_enabled: bool,
     #[serde(default = "default_widget_layout")]
     pub widget_layout: Vec<WidgetSlot>,

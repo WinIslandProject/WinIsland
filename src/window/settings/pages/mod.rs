@@ -1,3 +1,4 @@
+use winisland_core::config::AppConfigField;
 use winisland_render::{Image, Rect, Rgba};
 
 use crate::utils::settings_ui::items::{
@@ -13,11 +14,17 @@ pub mod general;
 pub mod music;
 pub mod plugin_settings;
 pub mod plugins;
+mod schema;
 pub mod widgets;
 
 pub(crate) struct SettingsPage<A> {
     items: Vec<SettingsItem>,
-    actions: Vec<Option<A>>,
+    actions: Vec<Option<RowAction<A>>>,
+}
+
+enum RowAction<A> {
+    Page(A),
+    Setting(AppConfigField),
 }
 
 impl<A> SettingsPage<A> {
@@ -35,7 +42,12 @@ impl<A> SettingsPage<A> {
 
     pub(crate) fn push_action(&mut self, item: SettingsItem, action: A) {
         self.items.push(item);
-        self.actions.push(Some(action));
+        self.actions.push(Some(RowAction::Page(action)));
+    }
+
+    pub(crate) fn push_setting(&mut self, item: SettingsItem, field: AppConfigField) {
+        self.items.push(item);
+        self.actions.push(Some(RowAction::Setting(field)));
     }
 
     pub(crate) fn section(&mut self, label: String) {
@@ -187,6 +199,20 @@ impl<A> SettingsPage<A> {
     }
 
     pub(crate) fn action(&self, result: &ClickResult) -> Option<&A> {
+        match self.row_action(result)? {
+            RowAction::Page(action) => Some(action),
+            RowAction::Setting(_) => None,
+        }
+    }
+
+    pub(crate) fn setting_field(&self, result: &ClickResult) -> Option<AppConfigField> {
+        match self.row_action(result)? {
+            RowAction::Setting(field) => Some(*field),
+            RowAction::Page(_) => None,
+        }
+    }
+
+    fn row_action(&self, result: &ClickResult) -> Option<&RowAction<A>> {
         result
             .item_index()
             .and_then(|index| self.actions.get(index))

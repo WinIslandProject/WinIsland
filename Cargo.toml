@@ -7,6 +7,8 @@ edition = "2024"
 members = [
     "crates/c-result",
     "crates/pollkit",
+    "crates/settings-schema",
+    "crates/settings-schema-derive",
     "crates/winisland-core",
     "crates/winisland-plugin-api",
     "crates/winisland-render",
@@ -49,6 +51,7 @@ winisland-platform = { path = "crates/winisland-platform" }
 winisland-platform-windows = { path = "crates/winisland-platform-windows" }
 pollkit = { path = "crates/pollkit" }
 c-result = { path = "crates/c-result" }
+settings-schema = { path = "crates/settings-schema" }
 zip = "8.6.0"
 serde_yaml = "0.9"
 pulldown-cmark = { version = "0.13.4", default-features = false }

@@ -11,7 +11,7 @@ use crate::utils::settings_ui::{
 use pollkit::Job;
 use std::time::{Duration, Instant};
 use winisland_core::anim::AnimPool;
-use winisland_core::config::AppConfig;
+use winisland_core::config::{AppConfig, AppConfigField};
 use winisland_core::widgets::PluginWidget;
 use winisland_platform::{
     CursorKind, InputState, Key, LogicalWindowSize, MouseButton, MouseWheelDelta, PlatformEvent,
@@ -248,6 +248,7 @@ pub struct SettingsApp {
     pub(crate) plugin_settings_pages: Vec<PluginSettingsPage>,
     pub(crate) plugin_settings_error: Option<(u64, String)>,
     pub(crate) pending_plugin_setting: Option<PendingPluginSetting>,
+    pub(crate) pending_setting: Option<AppConfigField>,
     plugin_request: Option<PluginSettingsRequest>,
     close_requested: bool,
 }
@@ -379,6 +380,7 @@ impl SettingsApp {
             plugin_settings_pages,
             plugin_settings_error: None,
             pending_plugin_setting: None,
+            pending_setting: None,
             plugin_request: None,
             close_requested: false,
         }

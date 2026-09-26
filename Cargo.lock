@@ -27,6 +27,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "settings-schema",
  "sha2 0.11.0",
  "thiserror 2.0.20",
  "tokio",
@@ -3974,6 +3975,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings-schema"
+version = "0.1.0"
+dependencies = [
+ "settings-schema-derive",
+]
+
+[[package]]
+name = "settings-schema-derive"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "sha1"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5278,6 +5296,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "settings-schema",
  "strum",
  "toml 1.1.4+spec-1.1.0",
 ]

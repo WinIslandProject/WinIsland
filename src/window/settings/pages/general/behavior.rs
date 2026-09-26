@@ -1,6 +1,7 @@
-use crate::utils::settings_ui::{ClickResult, StepDirection};
-use crate::window::settings::{NumberInputHandler, PopupState};
-use winisland_core::config::{AppConfig, MAX_HIDDEN_WIDTH, MIN_HIDDEN_WIDTH};
+use crate::utils::settings_ui::ClickResult;
+use crate::utils::settings_ui::items::SettingsItem;
+use crate::window::settings::PopupState;
+use winisland_core::config::{AppConfig, AppConfigField, MAX_HIDDEN_WIDTH};
 use winisland_core::i18n::{available_langs, current_lang, init_i18n, set_lang, tr};
 use winisland_render::text::FontManager;
 
@@ -10,18 +11,7 @@ use super::SettingsApp;
 #[derive(Clone, Copy)]
 pub(super) enum BehaviorAction {
     AutoStart,
-    AutoHide,
-    FullscreenAutoHide,
-    HiddenWidth,
-    RightClickDrag,
-    NotificationDisplay,
-    ReplaceNativeVolumeFlyout,
-    BrightnessOverlay,
-    HideDelay,
     Language,
-    CheckForUpdates,
-    UpdateChannel,
-    UpdateInterval,
     CheckUpdatesNow,
     ResetDefaults,
     HideIsland,
@@ -40,59 +30,38 @@ impl SettingsApp {
             caps.autostart,
             BehaviorAction::AutoStart,
         );
-        page.row_switch(
-            tr("auto_hide"),
-            self.config.auto_hide,
-            true,
-            BehaviorAction::AutoHide,
-        );
-        page.row_switch(
-            tr("fullscreen_auto_hide"),
-            self.config.fullscreen_auto_hide,
-            true,
-            BehaviorAction::FullscreenAutoHide,
-        );
+        page.setting(&self.config, AppConfigField::AutoHide, true);
+        page.setting(&self.config, AppConfigField::FullscreenAutoHide, true);
         if self.config.auto_hide {
-            page.row_stepper(
-                tr("hide_delay"),
-                format!("{:.0}", self.config.auto_hide_delay),
-                true,
-                BehaviorAction::HideDelay,
-            );
+            page.setting(&self.config, AppConfigField::AutoHideDelay, true);
         }
-        page.row_stepper(
-            tr("hidden_width"),
-            if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
-                tr("hidden_width_off")
-            } else {
-                format!("{:.0}", self.config.hidden_width)
+        page.push_setting(
+            SettingsItem::RowStepper {
+                label: tr("hidden_width"),
+                value: if self.config.hidden_width >= MAX_HIDDEN_WIDTH {
+                    tr("hidden_width_off")
+                } else {
+                    format!("{:.0}", self.config.hidden_width)
+                },
+                enabled: true,
             },
-            true,
-            BehaviorAction::HiddenWidth,
+            AppConfigField::HiddenWidth,
         );
-        page.row_switch(
-            tr("right_click_drag"),
-            self.config.right_click_drag,
-            true,
-            BehaviorAction::RightClickDrag,
-        );
-        page.row_switch(
-            tr("notification_display"),
-            self.config.notification_display,
+        page.setting(&self.config, AppConfigField::RightClickDrag, true);
+        page.setting(
+            &self.config,
+            AppConfigField::NotificationDisplay,
             caps.toast_events,
-            BehaviorAction::NotificationDisplay,
         );
-        page.row_switch(
-            tr("replace_native_volume_flyout"),
-            self.config.replace_native_volume_flyout,
+        page.setting(
+            &self.config,
+            AppConfigField::ReplaceNativeVolumeFlyout,
             caps.input_hooks && caps.volume_control,
-            BehaviorAction::ReplaceNativeVolumeFlyout,
         );
-        page.row_switch(
-            tr("brightness_overlay"),
-            self.config.brightness_overlay_enabled,
+        page.setting(
+            &self.config,
+            AppConfigField::BrightnessOverlayEnabled,
             caps.brightness_control,
-            BehaviorAction::BrightnessOverlay,
         );
         if !caps.autostart || !caps.toast_events || !caps.input_hooks || !caps.brightness_control {
             page.row_label(tr("platform_unavailable"));
@@ -120,28 +89,10 @@ impl SettingsApp {
         page.group_end();
         page.section(tr("section_updates"));
         page.group_start();
-        page.row_switch(
-            tr("check_updates"),
-            self.config.check_for_updates,
-            true,
-            BehaviorAction::CheckForUpdates,
-        );
+        page.setting(&self.config, AppConfigField::CheckForUpdates, true);
         if self.config.check_for_updates {
-            page.row_source(
-                tr("update_channel"),
-                vec![
-                    (tr("channel_stable"), self.config.update_channel == "stable"),
-                    (tr("channel_beta"), self.config.update_channel == "beta"),
-                ],
-                true,
-                BehaviorAction::UpdateChannel,
-            );
-            page.row_stepper(
-                tr("update_interval"),
-                format!("{:.0}", self.config.update_check_interval),
-                true,
-                BehaviorAction::UpdateInterval,
-            );
+            page.setting(&self.config, AppConfigField::UpdateChannel, true);
+            page.setting(&self.config, AppConfigField::UpdateCheckInterval, true);
         }
         page.row_button(
             tr("check_updates_manual"),
@@ -162,32 +113,12 @@ impl SettingsApp {
     pub(super) fn handle_behavior_click(&mut self, input: PageInput) {
         let page = self.build_behavior_page();
         let result = input.hit_test(&page);
+        if self.handle_setting_click(&page, &result, input) {
+            return;
+        }
         let Some(action) = page.action(&result).copied() else {
             return;
         };
-
-        if let ClickResult::StepperValue(item_index) = &result {
-            let (value, on_commit): (String, NumberInputHandler) = match action {
-                BehaviorAction::HideDelay => (
-                    format!("{:.0}", self.config.auto_hide_delay),
-                    set_hide_delay,
-                ),
-                BehaviorAction::HiddenWidth => {
-                    (format!("{:.0}", self.config.hidden_width), set_hidden_width)
-                }
-                BehaviorAction::UpdateInterval => (
-                    format!("{:.0}", self.config.update_check_interval),
-                    set_update_interval,
-                ),
-                _ => return,
-            };
-            self.begin_number_input(
-                input.stepper_value_rect(&page, *item_index, self.scroll_y),
-                value,
-                on_commit,
-            );
-            return;
-        }
 
         let changed = match (action, &result) {
             (BehaviorAction::AutoStart, ClickResult::Switch(_)) => {
@@ -212,64 +143,6 @@ impl SettingsApp {
             (BehaviorAction::Exit, ClickResult::RowButton(_)) => {
                 self.plugin_request = Some(crate::window::settings::PluginSettingsRequest::Exit);
                 false
-            }
-            (BehaviorAction::AutoHide, ClickResult::Switch(_)) => {
-                self.config.auto_hide = !self.config.auto_hide;
-                true
-            }
-            (BehaviorAction::FullscreenAutoHide, ClickResult::Switch(_)) => {
-                self.config.fullscreen_auto_hide = !self.config.fullscreen_auto_hide;
-                true
-            }
-            (BehaviorAction::RightClickDrag, ClickResult::Switch(_)) => {
-                self.config.right_click_drag = !self.config.right_click_drag;
-                true
-            }
-            (BehaviorAction::NotificationDisplay, ClickResult::Switch(_)) => {
-                self.config.notification_display = !self.config.notification_display;
-                true
-            }
-            (BehaviorAction::ReplaceNativeVolumeFlyout, ClickResult::Switch(_)) => {
-                self.config.replace_native_volume_flyout =
-                    !self.config.replace_native_volume_flyout;
-                true
-            }
-            (BehaviorAction::BrightnessOverlay, ClickResult::Switch(_)) => {
-                self.config.brightness_overlay_enabled = !self.config.brightness_overlay_enabled;
-                true
-            }
-            (BehaviorAction::CheckForUpdates, ClickResult::Switch(_)) => {
-                self.config.check_for_updates = !self.config.check_for_updates;
-                true
-            }
-            (BehaviorAction::HideDelay, _) => {
-                let Some(direction) = result.step_direction() else {
-                    return;
-                };
-                self.config.auto_hide_delay =
-                    step(self.config.auto_hide_delay, direction, 1.0, 1.0, 60.0);
-                true
-            }
-            (BehaviorAction::HiddenWidth, _) => {
-                let Some(direction) = result.step_direction() else {
-                    return;
-                };
-                self.config.hidden_width = step(
-                    self.config.hidden_width,
-                    direction,
-                    1.0,
-                    MIN_HIDDEN_WIDTH,
-                    MAX_HIDDEN_WIDTH,
-                );
-                true
-            }
-            (BehaviorAction::UpdateInterval, _) => {
-                let Some(direction) = result.step_direction() else {
-                    return;
-                };
-                self.config.update_check_interval =
-                    step(self.config.update_check_interval, direction, 1.0, 1.0, 24.0);
-                true
             }
             (BehaviorAction::ResetDefaults, ClickResult::CenterLink(_)) => {
                 self.config = AppConfig::default();
@@ -312,53 +185,14 @@ impl SettingsApp {
                     win_h,
                 )
             }
-            BehaviorAction::UpdateChannel => PopupState::new(
-                select_update_channel,
-                button_rect,
-                vec![tr("channel_stable"), tr("channel_beta")],
-                vec!["stable".to_string(), "beta".to_string()],
-                usize::from(self.config.update_channel == "beta"),
-                win_w,
-                win_h,
-            ),
             _ => return,
         };
         self.show_popup(popup);
     }
 }
 
-fn step(value: f32, direction: StepDirection, amount: f32, min: f32, max: f32) -> f32 {
-    match direction {
-        StepDirection::Decrement => value - amount,
-        StepDirection::Increment => value + amount,
-    }
-    .clamp(min, max)
-}
-
 fn select_language(app: &mut SettingsApp, value: &str) {
     app.config.language = value.to_string();
     set_lang(value);
     crate::ui::widget::expanded::calendar::clear_calendar_text_cache();
-}
-
-fn select_update_channel(app: &mut SettingsApp, value: &str) {
-    app.config.update_channel = value.to_string();
-}
-
-fn set_hide_delay(app: &mut SettingsApp, value: &str) {
-    if let Ok(value) = value.parse::<f32>() {
-        app.config.auto_hide_delay = value.clamp(1.0, 60.0);
-    }
-}
-
-fn set_hidden_width(app: &mut SettingsApp, value: &str) {
-    if let Ok(value) = value.parse::<f32>() {
-        app.config.hidden_width = value.clamp(MIN_HIDDEN_WIDTH, MAX_HIDDEN_WIDTH);
-    }
-}
-
-fn set_update_interval(app: &mut SettingsApp, value: &str) {
-    if let Ok(value) = value.parse::<f32>() {
-        app.config.update_check_interval = value.clamp(1.0, 24.0);
-    }
 }

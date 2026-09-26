@@ -14,8 +14,6 @@ pub enum LyricTransitionMode {
 }
 
 impl LyricTransitionMode {
-    pub const ALL: [Self; 4] = [Self::Random, Self::Blur, Self::Slide, Self::Fade];
-
     pub const fn animation(self, random_value: u64) -> LyricTransitionAnimation {
         match self {
             Self::Random => match random_value % 3 {
