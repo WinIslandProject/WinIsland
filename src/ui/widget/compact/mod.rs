@@ -19,7 +19,13 @@ pub(crate) fn hide_fade_complete(hide_progress: f32) -> bool {
 
 pub(crate) fn widget_width(widget: CompactWidgetKind) -> f32 {
     match widget {
-        CompactWidgetKind::Time => 48.0,
+        CompactWidgetKind::Time => {
+            if crate::ui::widget::time_text::is_12h_format() {
+                72.0
+            } else {
+                48.0
+            }
+        }
         CompactWidgetKind::ResourceUsage => crate::ui::widget::resource_usage::compact_width(),
     }
 }

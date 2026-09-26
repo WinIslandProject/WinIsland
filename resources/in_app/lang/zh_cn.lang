@@ -179,6 +179,7 @@ update_failed_desc=检查更新失败，请稍后重试。
 volume=音量
 brightness=亮度
 brightness_overlay=显示岛内亮度调节
+use_12h_format=12 小时制
 renderer_init_failed_title=渲染器初始化失败
 renderer_init_failed_desc=WinIsland 无法初始化 Direct3D 12 渲染器，应用程序即将退出。详细信息：
 resource_editor_title=占用显示

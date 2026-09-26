@@ -179,6 +179,7 @@ update_failed_desc=Failed to check for updates. Please try again later.
 volume=Volume
 brightness=Brightness
 brightness_overlay=Show Brightness on Island
+use_12h_format=12-Hour Time
 renderer_init_failed_title=Renderer Initialization Failed
 renderer_init_failed_desc=WinIsland could not initialize the Direct3D 12 renderer. The application will now exit. Details:
 resource_editor_title=Resource usage

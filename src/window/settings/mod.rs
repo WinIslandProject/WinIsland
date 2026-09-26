@@ -307,6 +307,7 @@ impl SettingsApp {
             &config.resource_metrics,
             &config.compact_resource_metrics,
         );
+        crate::ui::widget::time_text::set_12h_format(config.use_12h_format);
         crate::core::config::set_resource_widget_span(
             config.resource_widget_columns,
             config.resource_widget_rows,

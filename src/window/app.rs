@@ -129,6 +129,7 @@ impl Default for App {
             &config.resource_metrics,
             &config.compact_resource_metrics,
         );
+        crate::ui::widget::time_text::set_12h_format(config.use_12h_format);
         if config
             .widget_layout
             .iter()

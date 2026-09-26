@@ -426,6 +426,7 @@ impl App {
 
                     log::info!("Config changed, reloaded");
                     self.config = current_config;
+                    crate::ui::widget::time_text::set_12h_format(self.config.use_12h_format);
                     crate::ui::widget::resource_usage::set_configs(
                         &self.config.resource_metrics,
                         &self.config.compact_resource_metrics,

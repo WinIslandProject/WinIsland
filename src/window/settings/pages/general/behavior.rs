@@ -18,6 +18,7 @@ pub(super) enum BehaviorAction {
     NotificationDisplay,
     ReplaceNativeVolumeFlyout,
     BrightnessOverlay,
+    Use12hFormat,
     HideDelay,
     Language,
     CheckForUpdates,
@@ -91,6 +92,12 @@ impl SettingsApp {
             self.config.brightness_overlay_enabled,
             true,
             BehaviorAction::BrightnessOverlay,
+        );
+        page.row_switch(
+            tr("use_12h_format"),
+            self.config.use_12h_format,
+            true,
+            BehaviorAction::Use12hFormat,
         );
 
         let language = current_lang();
@@ -206,6 +213,11 @@ impl SettingsApp {
                 self.config.brightness_overlay_enabled = !self.config.brightness_overlay_enabled;
                 true
             }
+            (BehaviorAction::Use12hFormat, ClickResult::Switch(_)) => {
+                self.config.use_12h_format = !self.config.use_12h_format;
+                crate::ui::widget::time_text::set_12h_format(self.config.use_12h_format);
+                true
+            }
             (BehaviorAction::CheckForUpdates, ClickResult::Switch(_)) => {
                 self.config.check_for_updates = !self.config.check_for_updates;
                 true
@@ -243,6 +255,7 @@ impl SettingsApp {
                 self.config = AppConfig::default();
                 init_i18n(&self.config.language);
                 crate::ui::widget::expanded::calendar::clear_calendar_text_cache();
+                crate::ui::widget::time_text::set_12h_format(self.config.use_12h_format);
                 FontManager::global().set_custom_font_path(self.config.custom_font_path.as_deref());
                 true
             }

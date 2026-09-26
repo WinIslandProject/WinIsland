@@ -490,6 +490,8 @@ pub struct AppConfig {
     pub replace_native_volume_flyout: bool,
     #[serde(default = "default_brightness_overlay_enabled")]
     pub brightness_overlay_enabled: bool,
+    #[serde(default)]
+    pub use_12h_format: bool,
     #[serde(default = "default_widget_layout")]
     pub widget_layout: Vec<WidgetSlot>,
     #[serde(default)]
@@ -970,6 +972,7 @@ impl Default for AppConfig {
             notification_display: false,
             replace_native_volume_flyout: default_replace_native_volume_flyout(),
             brightness_overlay_enabled: default_brightness_overlay_enabled(),
+            use_12h_format: false,
             widget_layout: default_widget_layout(),
             plugin_widget_layout: Vec::new(),
             compact_widget_layout: Vec::new(),

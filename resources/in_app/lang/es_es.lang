@@ -179,6 +179,7 @@ update_failed_desc=Error al comprobar las actualizaciones. Por favor, inténtelo
 volume=Volumen
 brightness=Brillo
 brightness_overlay=Mostrar brillo en la isla
+use_12h_format=Formato de 12 horas
 renderer_init_failed_title=Error de inicialización del renderizador
 renderer_init_failed_desc=WinIsland no pudo inicializar el renderizador Direct3D 12. La aplicación se cerrará ahora. Detalles:
 resource_editor_title=Uso de recursos
