@@ -694,6 +694,9 @@ impl SettingsApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
+        if window.is_minimized() == Some(true) || size.width == 0 || size.height == 0 {
+            return;
+        }
         if let Some(expected) = self.pending_dpi_size.take() {
             if expected.width.abs_diff(size.width) > 2 || expected.height.abs_diff(size.height) > 2
             {
@@ -744,6 +747,9 @@ impl SettingsApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
+        if window.is_minimized() == Some(true) {
+            return;
+        }
         let Some(target) = self.target_monitor.as_ref() else {
             return;
         };
@@ -1189,7 +1195,10 @@ impl SettingsApp {
     }
 
     pub(crate) fn update(&mut self) -> Option<Instant> {
-        self.window.as_ref()?;
+        let window = self.window.as_ref()?;
+        if window.is_minimized() == Some(true) {
+            return None;
+        }
 
         self.frame_count += 1;
         self.poll_detected_apps();

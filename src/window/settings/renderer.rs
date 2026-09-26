@@ -99,6 +99,9 @@ impl SettingsApp {
         let Some(win) = self.window.as_ref() else {
             return;
         };
+        if win.is_minimized() == Some(true) {
+            return;
+        }
         let (p_w, p_h, scale) = {
             let size = win.inner_size();
             (
