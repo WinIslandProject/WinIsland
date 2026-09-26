@@ -136,7 +136,7 @@ impl WindowsProcessCapture {
             None,
         );
         let mut client = AudioClient::new_application_loopback_client(process_id, true)
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+            .map_err(PlatformError::backend)?;
         client
             .initialize_client(
                 &format,
@@ -146,16 +146,14 @@ impl WindowsProcessCapture {
                     buffer_duration_hns: 0,
                 },
             )
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+            .map_err(PlatformError::backend)?;
         let event = client
             .set_get_eventhandle()
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+            .map_err(PlatformError::backend)?;
         let capture = client
             .get_audiocaptureclient()
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
-        client
-            .start_stream()
-            .map_err(|error| PlatformError::Backend(error.to_string()))?;
+            .map_err(PlatformError::backend)?;
+        client.start_stream().map_err(PlatformError::backend)?;
         Ok(Self {
             client,
             capture,
@@ -174,19 +172,19 @@ impl ProcessCapture for WindowsProcessCapture {
         while let Some(frame_count) = self
             .capture
             .get_next_packet_size()
-            .map_err(|error| PlatformError::Backend(error.to_string()))?
+            .map_err(PlatformError::backend)?
             .filter(|count| *count > 0)
         {
             self.bytes.resize(frame_count as usize * BYTES_PER_FRAME, 0);
             let (frames_read, _) = self
                 .capture
                 .read_from_device(&mut self.bytes)
-                .map_err(|error| PlatformError::Backend(error.to_string()))?;
+                .map_err(PlatformError::backend)?;
             captured = true;
             let pending = self
                 .capture
                 .get_next_packet_size()
-                .map_err(|error| PlatformError::Backend(error.to_string()))?
+                .map_err(PlatformError::backend)?
                 .is_some_and(|count| count > 0);
             if !pending {
                 samples.clear();

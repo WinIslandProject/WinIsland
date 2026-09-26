@@ -13,7 +13,7 @@ pub(super) fn acquire(key: &str) -> Result<Option<Box<dyn InstanceLock>>, Platfo
     let key = HSTRING::from(key);
     // SAFETY: The key outlives the call, and the new mutex handle is owned by the guard.
     let mutex = unsafe { CreateMutexW(None, true, &key).map(|mutex| Owned::new(mutex)) }
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
+        .map_err(PlatformError::backend)?;
     // SAFETY: GetLastError is read on the same thread immediately after CreateMutexW.
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         Ok(None)

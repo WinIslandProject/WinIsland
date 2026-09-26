@@ -71,13 +71,11 @@ impl ShellIntegration for WindowsShell {
         instance::acquire(key)
     }
     fn restart(&self, args: &[String]) -> Result<(), PlatformError> {
-        std::process::Command::new(
-            std::env::current_exe().map_err(|error| PlatformError::Backend(error.to_string()))?,
-        )
-        .args(args)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| PlatformError::Backend(error.to_string()))
+        std::process::Command::new(std::env::current_exe().map_err(PlatformError::backend)?)
+            .args(args)
+            .spawn()
+            .map(|_| ())
+            .map_err(PlatformError::backend)
     }
     fn fatal_dialog(&self, title: &str, body: &str) {
         show_dialog(title, body, MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);

@@ -22,5 +22,5 @@ pub(super) fn install(package: &Path) -> Result<(), PlatformError> {
         .args(["-WindowStyle", "Hidden", "-Command", &script])
         .spawn()
         .map(|_| ())
-        .map_err(|error| PlatformError::Backend(error.to_string()))
+        .map_err(PlatformError::backend)
 }

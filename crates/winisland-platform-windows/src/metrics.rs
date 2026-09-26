@@ -64,7 +64,7 @@ impl SystemMetrics for WindowsMetrics {
     fn trim_working_set(&self) -> Result<(), PlatformError> {
         // SAFETY: GetCurrentProcess returns a valid pseudo-handle; maximum limits request a trim.
         unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) }
-            .map_err(|error| PlatformError::Backend(error.to_string()))
+            .map_err(PlatformError::backend)
     }
 }
 

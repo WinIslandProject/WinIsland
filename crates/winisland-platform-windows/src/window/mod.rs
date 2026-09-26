@@ -190,7 +190,7 @@ impl WindowSystem for WindowsWindowSystem {
             let backdrop = Arc::new(
                 event_loop
                     .create_window(attrs::backdrop_attributes())
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?,
+                    .map_err(PlatformError::backend)?,
             );
             let _ = backdrop.set_cursor_hittest(false);
             let owner = window_hwnd(&backdrop)
@@ -199,7 +199,7 @@ impl WindowSystem for WindowsWindowSystem {
             let window = Arc::new(
                 event_loop
                     .create_window(attrs::overlay_attributes(spec, owner))
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?,
+                    .map_err(PlatformError::backend)?,
             );
             let id = WindowId(u64::from(window.id()));
             WINDOWS.with(|windows| {
@@ -227,7 +227,7 @@ impl WindowSystem for WindowsWindowSystem {
             let window = Arc::new(
                 event_loop
                     .create_window(attrs::settings_attributes(spec, monitor.as_ref()))
-                    .map_err(|error| PlatformError::Backend(error.to_string()))?,
+                    .map_err(PlatformError::backend)?,
             );
             let id = WindowId(u64::from(window.id()));
             WINDOWS.with(|windows| {
@@ -495,7 +495,7 @@ impl WindowSystem for WindowsWindowSystem {
         };
         if let Err(error) = host_backdrop.update(params) {
             self.release_host_backdrop(id);
-            return Err(PlatformError::Backend(error.to_string()));
+            return Err(PlatformError::backend(error));
         }
         Ok(true)
     }

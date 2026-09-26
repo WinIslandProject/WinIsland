@@ -43,7 +43,7 @@ impl DisplayProvider for WindowsDisplay {
             )
         }
         .ok()
-        .map_err(|error| PlatformError::Backend(error.to_string()))?;
+        .map_err(PlatformError::backend)?;
         Ok(monitors)
     }
 

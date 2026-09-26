@@ -33,7 +33,7 @@ fn activate_on_sta(app_user_model_id: &str) -> Result<bool, PlatformError> {
     let result = unsafe {
         let manager: IApplicationActivationManager =
             CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
-                .map_err(|error| PlatformError::Backend(error.to_string()))?;
+                .map_err(PlatformError::backend)?;
         manager.ActivateApplication(&app_id, PCWSTR::null(), ACTIVATEOPTIONS::default())
     };
     match result {
