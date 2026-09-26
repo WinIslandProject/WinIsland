@@ -210,7 +210,13 @@ impl App {
                         .cover_click
                         .register((cx, cy), Instant::now(), double_click_interval())
                     {
-                        if crate::utils::win32::activate_media_application(&media.source_app_id) {
+                        if crate::platform::shell()
+                            .activate_media_app(&media.source_app_id)
+                            .unwrap_or_else(|error| {
+                                log::warn!("Media application activation failed: {error}");
+                                false
+                            })
+                        {
                             log::info!("Media application activated: {}", media.source_app_id);
                         } else {
                             log::warn!(

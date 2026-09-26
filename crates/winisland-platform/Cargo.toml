@@ -1,0 +1,4 @@
+[package]
+name = "winisland-platform"
+version.workspace = true
+edition = "2024"

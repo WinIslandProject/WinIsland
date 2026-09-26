@@ -4,20 +4,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
-use windows::Media::Control::{
-    GlobalSystemMediaTransportControlsSession,
-    GlobalSystemMediaTransportControlsSessionMediaProperties,
-};
-use windows::Storage::Streams::{Buffer, DataReader, InputStreamOptions};
+use winisland_platform::{MediaSessionHandle, PlatformError, ThumbnailError, TrackInfo};
 
-use crate::utils::cover::{compress_smtc_thumbnail, smtc_thumbnail_requires_compression};
 use winisland_core::lyrics::LyricsMode;
 
-use super::session::is_music_session;
-use super::{LyricsFetchRequest, MediaInfo, WinRtGuard, spawn_lyrics_fetch};
+use super::{LyricsFetchRequest, MediaInfo, spawn_lyrics_fetch};
 
-const MAX_THUMBNAIL_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_THUMBNAIL_STREAM_BYTES: u64 = 64 * 1024 * 1024;
 const TIMELINE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const THUMBNAIL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const INITIAL_THUMBNAIL_DELAY: Duration = Duration::from_millis(800);
@@ -27,58 +19,9 @@ const FAST_THUMBNAIL_RETRY_DELAY: Duration = Duration::from_millis(300);
 const THUMBNAIL_RETRY_DELAY: Duration = Duration::from_millis(500);
 const SEEK_CONFIRM_TOLERANCE_MS: u64 = 1_500;
 const TIMELINE_DRIFT_THRESHOLD_MS: u64 = 2_000;
-const WINDOWS_TICKS_PER_MILLISECOND: i64 = 10_000;
-const WINDOWS_TICKS_PER_SECOND: i64 = 10_000_000;
-const THUMBNAIL_UNAVAILABLE: windows::core::HRESULT = windows::core::HRESULT(-1);
-const THUMBNAIL_STALE: windows::core::HRESULT = windows::core::HRESULT(-2);
-const THUMBNAIL_TOO_LARGE: windows::core::HRESULT = windows::core::HRESULT(-3);
-const THUMBNAIL_COMPRESSION_FAILED: windows::core::HRESULT = windows::core::HRESULT(-4);
 static NEXT_TRACK_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-struct MediaMetadata {
-    title: String,
-    artist: String,
-    album: String,
-}
-
-impl MediaMetadata {
-    fn read(props: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Self {
-        let raw_title = read_string(props.Title());
-        let subtitle = read_string(props.Subtitle());
-        let album = read_string(props.AlbumTitle());
-        let raw_artist = read_string(props.Artist());
-        let album_artist = read_string(props.AlbumArtist());
-
-        let title = if !raw_title.is_empty() {
-            raw_title
-        } else if !album.is_empty() {
-            album.clone()
-        } else {
-            subtitle.clone()
-        };
-        let artist = if !raw_artist.is_empty() {
-            raw_artist
-        } else if !album_artist.is_empty() {
-            album_artist
-        } else if subtitle != title {
-            subtitle
-        } else {
-            String::new()
-        };
-
-        Self {
-            title,
-            artist,
-            album,
-        }
-    }
-}
-
-fn read_string(value: windows::core::Result<windows::core::HSTRING>) -> String {
-    value
-        .map(|value| value.to_string().trim().to_string())
-        .unwrap_or_default()
-}
+type MediaMetadata = TrackInfo;
 
 fn next_track_id() -> u64 {
     NEXT_TRACK_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -86,7 +29,7 @@ fn next_track_id() -> u64 {
 
 #[derive(Clone)]
 struct ThumbnailFetchRequest {
-    session: GlobalSystemMediaTransportControlsSession,
+    session: Arc<dyn MediaSessionHandle>,
     source_app_id: String,
     track_id: u64,
     title: String,
@@ -96,6 +39,7 @@ struct ThumbnailFetchRequest {
 
 pub(super) struct ThumbnailFetcher {
     state: Arc<ThumbnailWorkerState>,
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 struct ThumbnailWorkerState {
@@ -115,13 +59,6 @@ impl ThumbnailFetcher {
         let spawn_result = std::thread::Builder::new()
             .name("winisland-smtc-thumbnail".to_string())
             .spawn(move || {
-                let _winrt_guard = match WinRtGuard::new() {
-                    Ok(guard) => guard,
-                    Err(error) => {
-                        log::warn!("SMTC: failed to initialize thumbnail worker: {error}");
-                        return;
-                    }
-                };
                 loop {
                     let mut pending = worker_state
                         .request
@@ -151,7 +88,10 @@ impl ThumbnailFetcher {
                 }
             });
         match spawn_result {
-            Ok(_) => Some(Self { state }),
+            Ok(handle) => Some(Self {
+                state,
+                handle: Some(handle),
+            }),
             Err(error) => {
                 log::warn!("SMTC: failed to start thumbnail worker: {error}");
                 None
@@ -161,7 +101,7 @@ impl ThumbnailFetcher {
 
     fn request(
         &self,
-        session: &GlobalSystemMediaTransportControlsSession,
+        session: &Arc<dyn MediaSessionHandle>,
         source_app_id: String,
         track_id: u64,
         title: String,
@@ -174,7 +114,7 @@ impl ThumbnailFetcher {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *request = Some(ThumbnailFetchRequest {
-            session: session.clone(),
+            session: Arc::clone(session),
             source_app_id,
             track_id,
             title,
@@ -192,6 +132,9 @@ impl Drop for ThumbnailFetcher {
             .closed
             .store(true, std::sync::atomic::Ordering::Release);
         self.state.changed.notify_one();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -238,15 +181,15 @@ struct PendingMediaRequests {
 }
 
 pub(super) fn fetch_properties(
-    session: &GlobalSystemMediaTransportControlsSession,
+    session: &Arc<dyn MediaSessionHandle>,
     info_tx: &watch::Sender<MediaInfo>,
     lyrics_mode: LyricsMode,
     lyrics_source: &str,
     local_dir: Option<&str>,
     thumbnail_fetcher: Option<&ThumbnailFetcher>,
     timeline_cache: &mut TimelineCache,
-) -> windows::core::Result<()> {
-    if !is_music_session(session) {
+) -> Result<(), PlatformError> {
+    if session.is_video() {
         let info = info_tx.borrow();
         if !info.title.is_empty() {
             drop(info);
@@ -255,12 +198,11 @@ pub(super) fn fetch_properties(
         return Ok(());
     }
 
-    let props = session.TryGetMediaPropertiesAsync()?.join()?;
-    let pb_info = session.GetPlaybackInfo()?;
-    let is_playing = pb_info.PlaybackStatus()? == windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
-
-    let metadata = MediaMetadata::read(&props);
-    let source_app_id = session.SourceAppUserModelId()?.to_string();
+    let metadata = session.track()?;
+    let is_playing = session.playback()?;
+    let source_app_id = session
+        .source_app_id()
+        .ok_or(PlatformError::Unavailable("media source"))?;
     let track_changed = {
         let info = info_tx.borrow();
         is_new_track(&info, &metadata, &source_app_id)
@@ -518,7 +460,7 @@ fn is_new_track(info: &MediaInfo, metadata: &MediaMetadata, source_app_id: &str)
 }
 
 fn read_timeline(
-    session: &GlobalSystemMediaTransportControlsSession,
+    session: &Arc<dyn MediaSessionHandle>,
     source_app_id: &str,
     should_fetch: bool,
     reset_cache: bool,
@@ -536,7 +478,7 @@ fn read_timeline(
         };
     }
 
-    let Ok(tl) = session.GetTimelineProperties() else {
+    let Some(timeline) = session.timeline() else {
         cache.last_fetch = Some(Instant::now());
         return TimelineSnapshot {
             position_ms: cache.position_ms,
@@ -545,31 +487,9 @@ fn read_timeline(
         };
     };
 
-    let smtc_pos = tl
-        .Position()
-        .ok()
-        .map(|pos| {
-            if pos.Duration > 0 {
-                u64::try_from(pos.Duration / WINDOWS_TICKS_PER_MILLISECOND).unwrap_or_default()
-            } else {
-                0
-            }
-        })
-        .unwrap_or(0);
-    let (duration_secs, duration_ms) = tl
-        .EndTime()
-        .ok()
-        .map(|end| {
-            if end.Duration > 0 {
-                (
-                    u64::try_from(end.Duration / WINDOWS_TICKS_PER_SECOND).unwrap_or_default(),
-                    u64::try_from(end.Duration / WINDOWS_TICKS_PER_MILLISECOND).unwrap_or_default(),
-                )
-            } else {
-                (0, 0)
-            }
-        })
-        .unwrap_or((0, 0));
+    let smtc_pos = u64::try_from(timeline.position.as_millis()).unwrap_or(u64::MAX);
+    let duration_secs = timeline.duration.as_secs();
+    let duration_ms = u64::try_from(timeline.duration.as_millis()).unwrap_or(u64::MAX);
 
     cache.source_app_id.clear();
     cache.source_app_id.push_str(source_app_id);
@@ -592,13 +512,13 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
         if !thumbnail_request_is_current(info_tx, &request) {
             return;
         }
-        match load_thumbnail(&request) {
+        match request.session.thumbnail(&request.title) {
             Ok(bytes) => {
                 publish_thumbnail(info_tx, &request, bytes);
                 return;
             }
-            Err(error) if error.code() == THUMBNAIL_STALE => return,
-            Err(error) if thumbnail_error_is_terminal(&error) => {
+            Err(ThumbnailError::Stale) => return,
+            Err(ThumbnailError::Terminal) => {
                 log::warn!(
                     "SMTC: could not safely load oversized thumbnail for '{}' - '{}'",
                     request.title,
@@ -618,59 +538,6 @@ fn fetch_thumbnail(request: ThumbnailFetchRequest, info_tx: &watch::Sender<Media
         request.artist,
         THUMBNAIL_FETCH_ATTEMPTS
     );
-}
-
-fn load_thumbnail(request: &ThumbnailFetchRequest) -> windows::core::Result<Vec<u8>> {
-    let props = request.session.TryGetMediaPropertiesAsync()?.join()?;
-    if MediaMetadata::read(&props).title != request.title {
-        return Err(windows::core::Error::new(
-            THUMBNAIL_STALE,
-            "Stale properties",
-        ));
-    }
-    let stream = props.Thumbnail()?.OpenReadAsync()?.join()?;
-    let size = stream.Size()?;
-    if size == 0 {
-        return Err(windows::core::Error::new(
-            THUMBNAIL_UNAVAILABLE,
-            "Empty thumbnail",
-        ));
-    }
-    if size > MAX_THUMBNAIL_STREAM_BYTES {
-        return Err(windows::core::Error::new(
-            THUMBNAIL_TOO_LARGE,
-            "Thumbnail exceeds 64 MiB",
-        ));
-    }
-    let requires_compression = smtc_thumbnail_requires_compression(&stream).unwrap_or(false);
-    stream.Seek(0)?;
-    if size > MAX_THUMBNAIL_BYTES || requires_compression {
-        return compress_smtc_thumbnail(&stream, size).ok_or_else(|| {
-            windows::core::Error::new(
-                THUMBNAIL_COMPRESSION_FAILED,
-                "Failed to compress oversized thumbnail",
-            )
-        });
-    }
-
-    let buffer_size = u32::try_from(size).map_err(|_| {
-        windows::core::Error::new(THUMBNAIL_TOO_LARGE, "Thumbnail buffer is too large")
-    })?;
-    let buffer = Buffer::Create(buffer_size)?;
-    let result = stream
-        .ReadAsync(&buffer, buffer_size, InputStreamOptions::None)?
-        .join()?;
-    let reader = DataReader::FromBuffer(&result)?;
-    let actual_size = reader.UnconsumedBufferLength()?;
-    if actual_size == 0 || actual_size > buffer_size {
-        return Err(windows::core::Error::new(
-            THUMBNAIL_UNAVAILABLE,
-            "Invalid thumbnail length",
-        ));
-    }
-    let mut bytes = vec![0u8; actual_size as usize];
-    reader.ReadBytes(&mut bytes)?;
-    Ok(bytes)
 }
 
 fn publish_thumbnail(
@@ -699,13 +566,6 @@ fn publish_thumbnail(
         log::info!("SMTC: thumbnail fetched ({byte_len} bytes, hash={hash:#x})");
         crate::utils::event_loop::wake();
     }
-}
-
-fn thumbnail_error_is_terminal(error: &windows::core::Error) -> bool {
-    matches!(
-        error.code(),
-        THUMBNAIL_TOO_LARGE | THUMBNAIL_COMPRESSION_FAILED
-    )
 }
 
 fn thumbnail_retry_delay(attempt: usize) -> Duration {

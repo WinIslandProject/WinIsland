@@ -430,6 +430,8 @@ impl App {
     }
 
     fn poll_media_info(&mut self, window: &Window) -> (bool, bool) {
+        self.smtc
+            .set_enabled(self.config.smtc_enabled && crate::platform::capabilities().media_session);
         let smtc_cover_changed = self.smtc.take_info_if_changed().is_some_and(|media| {
             let cover_changed = self.plugin_media_source.is_none()
                 && media.thumbnail.is_some()
@@ -951,7 +953,9 @@ impl App {
             && (!self.expanded || (!playback_active && !dynamic_effect_active))
             && self.last_working_set_trim.elapsed() >= WORKING_SET_TRIM_INTERVAL
         {
-            crate::utils::win32::trim_process_working_set();
+            if let Err(error) = crate::platform::metrics().trim_working_set() {
+                log::warn!("Working set trim failed: {error}");
+            }
             self.last_working_set_trim = now;
         }
         let frame_interval = if transition_active {

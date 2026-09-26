@@ -264,7 +264,7 @@ unsafe extern "system" fn wnf_notification_callback(
     _length: u32,
 ) -> i32 {
     DELIVERY_PENDING.store(true, Ordering::Release);
-    crate::utils::event_loop::wake();
+    super::wake();
     STATUS_SUCCESS
 }
 
@@ -281,6 +281,6 @@ unsafe extern "system" fn event_log_callback(
     } else {
         return 0;
     }
-    crate::utils::event_loop::wake();
+    super::wake();
     0
 }

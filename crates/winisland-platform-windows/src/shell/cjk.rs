@@ -1,12 +1,13 @@
+use windows::Win32::Foundation::LPARAM;
 use windows::Win32::Globalization::{LCMAP_SIMPLIFIED_CHINESE, LCMapStringEx};
 use windows::core::w;
 
-pub fn to_simplified(text: &str) -> String {
+pub(super) fn to_simplified(text: &str) -> String {
     if text.is_empty() {
         return String::new();
     }
     let source: Vec<u16> = text.encode_utf16().collect();
-    // SAFETY: Both calls use valid UTF-16 slices; the first obtains the exact output length.
+    // SAFETY: Both calls use valid UTF-16 slices, and the first obtains the output length.
     unsafe {
         let len = LCMapStringEx(
             w!("zh-CN"),
@@ -15,7 +16,7 @@ pub fn to_simplified(text: &str) -> String {
             None,
             None,
             None,
-            windows::Win32::Foundation::LPARAM(0),
+            LPARAM(0),
         );
         if len <= 0 {
             return text.to_string();
@@ -28,7 +29,7 @@ pub fn to_simplified(text: &str) -> String {
             Some(&mut output),
             None,
             None,
-            windows::Win32::Foundation::LPARAM(0),
+            LPARAM(0),
         );
         if written <= 0 {
             text.to_string()

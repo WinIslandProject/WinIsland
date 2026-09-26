@@ -1,6 +1,3 @@
-use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::core::PCWSTR;
 use winisland_render::{Painter, Point, Radius, Rect, Rgba, Vec2};
 
 use crate::plugin::manager::InstalledPlugin;
@@ -561,12 +558,7 @@ fn open_url(url: &str) {
     if !markdown::safe_web_url(url) {
         return;
     }
-    let wide = url
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    // SAFETY: `wide` is a null-terminated UTF-16 string valid for the duration of the call.
-    unsafe {
-        let _ = ShellExecuteW(None, None, PCWSTR(wide.as_ptr()), None, None, SW_SHOWNORMAL);
+    if let Err(error) = crate::platform::shell().open_url(url) {
+        log::warn!("Could not open link: {error}");
     }
 }

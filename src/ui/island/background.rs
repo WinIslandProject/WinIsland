@@ -41,6 +41,11 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
 
     painter.save();
     painter.clip_path(island_path);
+    let island_style = if island_style == "glass" && !host_backdrop {
+        "dynamic"
+    } else {
+        island_style
+    };
     match island_style {
         "glass" => {
             if host_backdrop {
@@ -57,8 +62,8 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
                     .unwrap_or_default()
                     .as_secs_f64();
 
-                let integrated =
-                    crate::utils::gpu::gpu_profile() == crate::utils::gpu::GpuProfile::Integrated;
+                let integrated = crate::platform::display().gpu_profile()
+                    == winisland_platform::GpuProfile::Integrated;
                 let (rotate_speed, drift_speed_x, drift_speed_y, drift_amp_x, drift_amp_y) =
                     if integrated {
                         (0.015, 0.075, 0.06, 10.0, 7.5)
@@ -95,7 +100,7 @@ pub(super) fn draw_background(params: BackgroundParams<'_, '_>) {
             } else if host_backdrop {
                 draw_host_glass(painter, island_path);
             } else {
-                draw_solid(painter, island_path, fallback_color);
+                draw_solid(painter, island_path, bg_color);
             }
         }
         _ => draw_solid(painter, island_path, bg_color),

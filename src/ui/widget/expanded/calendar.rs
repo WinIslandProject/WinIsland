@@ -71,8 +71,7 @@ pub fn draw_calendar_widget(
     alpha: u8,
     text_color: Rgba,
 ) {
-    // SAFETY: GetLocalTime writes a SYSTEMTIME value and has no preconditions.
-    let local_time = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+    let local_time = crate::platform::shell().local_datetime();
 
     draw_widget_rounded_background(painter, x, y, w, h, scale, alpha);
 
@@ -81,18 +80,18 @@ pub fn draw_calendar_widget(
     let weekday_color = text_color.with_alpha((alpha as f32 * 0.62) as u8);
     CALENDAR_TEXT.with(|cell| {
         let mut cache = cell.borrow_mut();
-        if cache.year != local_time.wYear
-            || cache.month != local_time.wMonth
-            || cache.day != local_time.wDay
-            || cache.weekday != local_time.wDayOfWeek
+        if cache.year != local_time.year
+            || cache.month != local_time.month
+            || cache.day != local_time.day
+            || cache.weekday != local_time.day_of_week
         {
-            cache.year = local_time.wYear;
-            cache.month = local_time.wMonth;
-            cache.day = local_time.wDay;
-            cache.weekday = local_time.wDayOfWeek;
-            cache.month_text = month_name(local_time.wMonth);
-            cache.day_text = local_time.wDay.to_string();
-            cache.weekday_text = weekday_name(local_time.wDayOfWeek);
+            cache.year = local_time.year;
+            cache.month = local_time.month;
+            cache.day = local_time.day;
+            cache.weekday = local_time.day_of_week;
+            cache.month_text = month_name(local_time.month);
+            cache.day_text = local_time.day.to_string();
+            cache.weekday_text = weekday_name(local_time.day_of_week);
         }
 
         draw_widget_text_centered(

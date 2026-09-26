@@ -20,6 +20,9 @@ pub struct DrawVisualizerParams<'a> {
 }
 
 pub fn draw_visualizer(params: DrawVisualizerParams<'_>) {
+    if !crate::platform::capabilities().audio_loopback {
+        return;
+    }
     let DrawVisualizerParams {
         painter,
         x,

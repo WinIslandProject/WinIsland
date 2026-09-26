@@ -161,6 +161,8 @@ pub(crate) struct NumberInput {
 }
 
 pub(crate) enum PluginSettingsRequest {
+    HideIsland,
+    Exit,
     Install(std::path::PathBuf),
     LoadMarketplace,
     InstallMarketplace(Box<MarketplacePlugin>),
@@ -1330,7 +1332,7 @@ impl SettingsApp {
     pub(crate) fn bring_to_front(&self) {
         if let Some(window) = &self.window {
             window.set_minimized(false);
-            crate::utils::win32::bring_window_to_front("WinIsland Settings");
+            let _ = crate::platform::display().bring_foreign_window_to_front("WinIsland Settings");
             window.request_redraw();
         }
     }

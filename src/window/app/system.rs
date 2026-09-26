@@ -2,9 +2,6 @@ use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use windows::ApplicationModel::Package;
-use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-use windows::core::PCWSTR;
 use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
@@ -13,7 +10,7 @@ use crate::core::persistence::{get_config_path, load_config};
 use crate::plugin::marketplace::{self, MarketplacePlugin};
 use crate::plugin::zip_loader;
 use crate::window::backdrop::{HostBackdrop, HostBackdropParams};
-use crate::window::tray::TrayAction;
+use winisland_platform::TrayAction;
 use winisland_render::RendererOptions;
 
 use super::App;
@@ -28,6 +25,7 @@ pub(super) fn update_host_backdrop(
     if let Err(error) = backdrop.update(params) {
         log::warn!("Host backdrop update failed: {error}");
         *host_backdrop = None;
+        crate::platform::update_capabilities(|caps| caps.host_backdrop = false);
         return false;
     }
     true
@@ -40,6 +38,17 @@ impl App {
             .as_mut()
             .and_then(crate::window::settings::SettingsApp::take_plugin_request);
         match request {
+            Some(crate::window::settings::PluginSettingsRequest::HideIsland) => {
+                self.visible = false;
+                if let Some(window) = &self.window {
+                    window.set_visible(false);
+                }
+                self.hide_host_backdrop();
+            }
+            Some(crate::window::settings::PluginSettingsRequest::Exit) => {
+                self.close_settings();
+                event_loop.exit();
+            }
             Some(crate::window::settings::PluginSettingsRequest::Install(path)) => {
                 self.install_zip_drop(&path);
             }
@@ -138,6 +147,9 @@ impl App {
                 None
             }
         };
+        if self.host_backdrop.is_none() {
+            crate::platform::update_capabilities(|caps| caps.host_backdrop = false);
+        }
     }
 
     pub(super) fn hide_host_backdrop(&self) {
@@ -202,64 +214,11 @@ impl App {
     }
 
     pub(super) fn set_aumid() {
-        if Package::Current().is_ok() {
-            return;
-        }
-        let aumid = "WinIsland.PluginManager";
-        let wide: Vec<u16> = aumid.encode_utf16().chain(std::iter::once(0)).collect();
-        // SAFETY: SetCurrentProcessExplicitAppUserModelID sets a process-wide string identifier.
-        // The wide string is valid and null-terminated. Called once during init before any windows.
-        unsafe {
-            let _ = SetCurrentProcessExplicitAppUserModelID(PCWSTR::from_raw(wide.as_ptr()));
-        }
+        crate::platform::notify().set_app_identity();
     }
 
     pub(super) fn show_toast(title: &str, message: &str) {
-        use windows::UI::Notifications::{
-            ToastNotification, ToastNotificationManager, ToastTemplateType,
-        };
-        use windows::core::HSTRING;
-        Self::set_aumid();
-        let tmpl =
-            match ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02) {
-                Ok(t) => t,
-                Err(e) => {
-                    log::error!("Toast template failed: {e:?}");
-                    return;
-                }
-            };
-        if let Ok(nodes) = tmpl.SelectNodes(&HSTRING::from("//text")) {
-            if let Ok(node) = nodes.Item(0) {
-                let _ = node.SetInnerText(&HSTRING::from(title));
-            }
-            if let Ok(node) = nodes.Item(1) {
-                let _ = node.SetInnerText(&HSTRING::from(message));
-            }
-        }
-        let toast = match ToastNotification::CreateToastNotification(&tmpl) {
-            Ok(t) => t,
-            Err(e) => {
-                log::error!("CreateToastNotification failed: {e:?}");
-                return;
-            }
-        };
-        let notifier_result = if Package::Current().is_ok() {
-            ToastNotificationManager::CreateToastNotifier()
-        } else {
-            ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
-                "WinIsland.PluginManager",
-            ))
-        };
-        let notifier = match notifier_result {
-            Ok(n) => n,
-            Err(e) => {
-                log::error!("CreateToastNotifier failed: {e:?}");
-                return;
-            }
-        };
-        if let Err(e) = notifier.Show(&toast) {
-            log::error!("Toast Show failed: {e:?}");
-        }
+        crate::platform::notify().show_toast(title, message);
     }
 
     pub(super) fn install_zip_drop(&mut self, path: &Path) {
@@ -386,6 +345,13 @@ impl App {
     }
 
     pub(super) fn close_settings(&mut self) {
+        if !self.tray_installed && !self.visible {
+            self.visible = true;
+            if let Some(window) = &self.window {
+                window.set_visible(true);
+                window.request_redraw();
+            }
+        }
         if let Some(mut settings) = self.settings.take() {
             if let Some(target) = settings.close()
                 && let Some(renderer) = self.renderer.as_mut()
@@ -394,7 +360,9 @@ impl App {
             }
             drop(settings);
             if !self.expanded {
-                crate::utils::win32::trim_process_working_set();
+                if let Err(error) = crate::platform::metrics().trim_working_set() {
+                    log::warn!("Working set trim failed: {error}");
+                }
                 self.last_working_set_trim = Instant::now();
             }
             log::info!("Settings window closed and resources released");
@@ -402,11 +370,14 @@ impl App {
     }
 
     pub(super) fn handle_tray_events(&mut self, window: &Window, event_loop: &ActiveEventLoop) {
-        if let Some(tray) = &self.tray
-            && let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv()
+        if self.tray_installed
+            && let Some(action) = crate::platform::shell()
+                .poll_tray_events()
+                .into_iter()
+                .next()
         {
-            match TrayAction::from_id(event.id, tray) {
-                Some(TrayAction::ToggleVisibility) => {
+            match action {
+                TrayAction::ToggleVisibility => {
                     self.visible = !self.visible;
                     window.set_visible(self.visible);
                     if !self.visible {
@@ -414,27 +385,27 @@ impl App {
                     } else {
                         window.request_redraw();
                     }
-                    tray.update_item_text(self.visible);
+                    let _ = crate::platform::shell().tray_update(
+                        crate::platform::tray_theme(self.is_light_theme),
+                        crate::platform::tray_labels(self.visible),
+                    );
                     log::info!("Tray: visibility toggled to {}", self.visible);
                 }
-                Some(TrayAction::OpenSettings) => {
+                TrayAction::OpenSettings => {
                     log::info!("Tray: opening settings");
                     self.open_settings(event_loop);
                 }
-                Some(TrayAction::Restart) => {
+                TrayAction::Restart => {
                     log::info!("Tray: restarting application");
                     self.close_settings();
-                    if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe).arg("--restart").spawn();
-                    }
+                    let _ = crate::platform::shell().restart(&["--restart".to_string()]);
                     event_loop.exit();
                 }
-                Some(TrayAction::Exit) => {
+                TrayAction::Exit => {
                     log::info!("Tray: exiting application");
                     self.close_settings();
                     event_loop.exit();
                 }
-                None => (),
             }
         }
     }

@@ -5,18 +5,6 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
-use wasapi::{AudioClient, Direction, SampleType, StreamMode, WaveFormat};
-use windows::Win32::Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, S_OK};
-use windows::Win32::Media::Audio::{
-    Endpoints::IAudioMeterInformation, IAudioSessionControl2, IAudioSessionManager2,
-    IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender,
-};
-use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
-use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
-};
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-use windows::core::{Interface, PWSTR};
 
 const FFT_LEN: usize = 1024;
 const FFT_REFERENCE_SAMPLE_RATE: u32 = 48_000;
@@ -25,8 +13,6 @@ const FFT_BIN_RANGES: [(usize, usize); SPECTRUM_BAND_COUNT] =
     [(2, 8), (8, 20), (20, 50), (50, 120), (120, 280), (280, 511)];
 const SPECTRUM_OUTPUT_MAPPING: [(usize, f32); SPECTRUM_BAND_COUNT] =
     [(5, 0.8), (3, 0.9), (0, 1.0), (1, 1.0), (2, 0.9), (4, 0.8)];
-const PROCESS_CAPTURE_BYTES_PER_FRAME: usize = 8;
-const PROCESS_CAPTURE_BUFFER_LIMIT: usize = LOOPBACK_SAMPLE_RATE * PROCESS_CAPTURE_BYTES_PER_FRAME;
 const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const AUDIO_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const AUDIO_RETRY_INTERVAL: Duration = Duration::from_millis(500);
@@ -38,8 +24,6 @@ const ADAPTIVE_LEVEL_DECAY: f32 = 0.995;
 const ADAPTIVE_LEVEL_LEARNING_RATE: f32 = 0.005;
 const SPECTRUM_NORMALIZATION_GAIN: f32 = 2.3;
 const LOOPBACK_SAMPLE_RATE: usize = 48_000;
-const LOOPBACK_CHANNELS: usize = 2;
-const LOOPBACK_SAMPLE_BITS: usize = 32;
 
 struct AtomicF32(AtomicU32);
 
@@ -226,6 +210,10 @@ impl AudioProcessor {
     }
 
     pub fn get_spectrum(&self) -> [f32; SPECTRUM_BAND_COUNT] {
+        if !crate::platform::capabilities().audio_loopback {
+            self.stop_workers();
+            return [0.0; SPECTRUM_BAND_COUNT];
+        }
         *self
             .spectrum
             .lock()
@@ -261,6 +249,9 @@ impl AudioProcessor {
     }
 
     fn start_workers(&self) {
+        if !crate::platform::capabilities().audio_loopback {
+            return;
+        }
         let cancel = {
             let mut workers = self
                 .workers
@@ -309,18 +300,15 @@ impl AudioProcessor {
         let target_process_id = self.target_process_id.clone();
         let worker_generation = self.worker_generation.clone();
         tokio::task::spawn_blocking(move || {
-            // SAFETY: CoInitializeEx initializes COM for this thread. COINIT_MULTITHREADED
-            // is safe as we don't use single-threaded COM apartments.
-            let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            let mut meter = crate::platform::audio().open_meter().ok();
             let host = cpal::default_host();
             let mut current_device_name = None;
-            let mut session_manager: Option<IAudioSessionManager2> = None;
             let mut current_target_app_id = String::new();
             let mut current_target_process_id = 0;
             let mut next_target_refresh = Instant::now();
             let mut next_device_refresh = Instant::now();
 
-            log::info!("Audio meter thread started (COM: {})", hr.is_ok());
+            log::info!("Audio meter thread started (COM: {})", meter.is_some());
 
             while !cancel.is_cancelled() && worker_generation.load(Ordering::Acquire) == generation
             {
@@ -333,24 +321,16 @@ impl AudioProcessor {
                         .and_then(|d| d.description().map(|desc| desc.name().to_string()).ok());
 
                     if default_device_name != current_device_name {
-                        session_manager = None;
                         current_device_name = None;
                         current_target_process_id = 0;
                         target_process_id.store(0, Ordering::Relaxed);
                         next_target_refresh = Instant::now();
 
+                        if let Some(meter) = meter.as_mut() {
+                            meter.refresh_device();
+                        }
+
                         if default_device_name.is_some() {
-                            session_manager = unsafe {
-                                (|| -> Option<IAudioSessionManager2> {
-                                    let enumerator: IMMDeviceEnumerator =
-                                        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                                            .ok()?;
-                                    let device = enumerator
-                                        .GetDefaultAudioEndpoint(eRender, eConsole)
-                                        .ok()?;
-                                    device.Activate(CLSCTX_ALL, None).ok()
-                                })()
-                            };
                             current_device_name = default_device_name;
                             log::info!(
                                 "Audio meter thread: switched to device {current_device_name:?}"
@@ -365,9 +345,9 @@ impl AudioProcessor {
                     .clone();
                 if requested_app_id != current_target_app_id || now >= next_target_refresh {
                     current_target_app_id = requested_app_id;
-                    current_target_process_id = session_manager
+                    current_target_process_id = meter
                         .as_ref()
-                        .and_then(|manager| find_target_process_id(manager, &current_target_app_id))
+                        .and_then(|meter| meter.find_target_process_id(&current_target_app_id))
                         .unwrap_or(0);
                     if worker_generation.load(Ordering::Acquire) != generation {
                         break;
@@ -382,37 +362,10 @@ impl AudioProcessor {
                     continue;
                 }
 
-                let mut max_peak = 0.0f32;
-                if let Some(ref mgr) = session_manager {
-                    // SAFETY: GetSessionEnumerator and subsequent COM calls enumerate audio
-                    // sessions for peak meter reading. All objects are obtained from the
-                    // session_manager which is valid for the lifetime of this thread.
-                    unsafe {
-                        if let Ok(enumerator) = mgr.GetSessionEnumerator() {
-                            let count = enumerator.GetCount().unwrap_or(0);
-                            for i in 0..count {
-                                if let Ok(session) = enumerator.GetSession(i)
-                                    && let Ok(session2) = session.cast::<IAudioSessionControl2>()
-                                {
-                                    if session2.IsSystemSoundsSession() == S_OK {
-                                        continue;
-                                    }
-                                    if current_target_process_id != 0
-                                        && session2.GetProcessId().ok()
-                                            != Some(current_target_process_id)
-                                    {
-                                        continue;
-                                    }
-                                    if let Ok(meter) = session.cast::<IAudioMeterInformation>()
-                                        && let Ok(peak) = meter.GetPeakValue()
-                                    {
-                                        max_peak = max_peak.max(peak);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                let max_peak = meter
+                    .as_ref()
+                    .map(|meter| meter.peak(current_target_process_id))
+                    .unwrap_or(0.0);
                 let gate_val = if max_peak > ACTIVE_AUDIO_PEAK_THRESHOLD {
                     1.0f32
                 } else {
@@ -423,14 +376,6 @@ impl AudioProcessor {
                 }
                 gate_clone.set(gate_val);
                 std::thread::sleep(AUDIO_POLL_INTERVAL);
-            }
-            // Drop COM objects while COM is still initialized, then clean up.
-            drop(session_manager);
-            if hr.is_ok() {
-                // SAFETY: COM was initialized above, and all COM objects are dropped.
-                unsafe {
-                    CoUninitialize();
-                }
             }
         });
     }
@@ -447,7 +392,6 @@ impl AudioProcessor {
             gate_override: self.gate_override.clone(),
         };
         tokio::task::spawn_blocking(move || {
-            let com_initialized = wasapi::initialize_mta().is_ok();
             let mut active_process_id = 0;
             let mut unavailable_process_id = None;
             let mut retry_after = Instant::now();
@@ -486,9 +430,6 @@ impl AudioProcessor {
             }
 
             context.set_process_capture_active(false);
-            if com_initialized {
-                wasapi::deinitialize();
-            }
         });
     }
 
@@ -647,71 +588,30 @@ fn capture_process_audio(
     process_id: u32,
     context: &ProcessCaptureContext,
     analyzer: &mut SpectrumAnalyzer,
-) -> Result<(), wasapi::WasapiError> {
-    let format = WaveFormat::new(
-        LOOPBACK_SAMPLE_BITS,
-        LOOPBACK_SAMPLE_BITS,
-        &SampleType::Float,
-        LOOPBACK_SAMPLE_RATE,
-        LOOPBACK_CHANNELS,
-        None,
-    );
-    let mut audio_client = AudioClient::new_application_loopback_client(process_id, true)?;
-    audio_client.initialize_client(
-        &format,
-        &Direction::Capture,
-        &StreamMode::EventsShared {
-            autoconvert: true,
-            buffer_duration_hns: 0,
-        },
-    )?;
-    let event = audio_client.set_get_eventhandle()?;
-    let capture_client = audio_client.get_audiocaptureclient()?;
-    audio_client.start_stream()?;
+) -> Result<(), winisland_platform::PlatformError> {
+    let mut capture = crate::platform::audio().open_process_capture(process_id)?;
     context.set_process_capture_active(true);
-
-    let mut bytes = Vec::new();
+    let mut samples = Vec::new();
     let result = (|| {
         while !context.cancel.is_cancelled()
             && context.is_current()
             && context.target_process_id.load(Ordering::Relaxed) == process_id
         {
-            let _ = event.wait_for_event(100);
-            let mut captured = false;
-            while let Some(frame_count) = capture_client
-                .get_next_packet_size()?
-                .filter(|frame_count| *frame_count > 0)
-            {
-                bytes.resize(frame_count as usize * PROCESS_CAPTURE_BYTES_PER_FRAME, 0);
-                let (frames_read, _) = capture_client.read_from_device(&mut bytes)?;
-                let bytes_read = frames_read as usize * PROCESS_CAPTURE_BYTES_PER_FRAME;
-                captured = true;
-                let newer_packet_pending = capture_client
-                    .get_next_packet_size()?
-                    .is_some_and(|frame_count| frame_count > 0);
-                if !newer_packet_pending && analysis_enabled(&context.gate, &context.gate_override)
-                {
-                    for frame in bytes[..bytes_read]
-                        .as_chunks::<PROCESS_CAPTURE_BYTES_PER_FRAME>()
-                        .0
-                    {
-                        let left = f32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]);
-                        let right = f32::from_le_bytes([frame[4], frame[5], frame[6], frame[7]]);
+            let captured = capture.read_cycle(&mut samples)?;
+            if captured {
+                if analysis_enabled(&context.gate, &context.gate_override) {
+                    for &sample in &samples {
                         analyzer.push_sample(
-                            (left + right) * 0.5,
+                            sample,
                             &context.spectrum,
                             &context.gate,
                             &context.gate_override,
                         );
                     }
-                } else if !newer_packet_pending {
+                } else {
                     reset_spectrum(analyzer, &context.spectrum);
                 }
-            }
-            if bytes.capacity() > PROCESS_CAPTURE_BUFFER_LIMIT {
-                bytes = Vec::with_capacity(PROCESS_CAPTURE_BUFFER_LIMIT);
-            }
-            if !captured && analysis_enabled(&context.gate, &context.gate_override) {
+            } else if analysis_enabled(&context.gate, &context.gate_override) {
                 for _ in 0..FFT_LEN {
                     analyzer.push_sample(
                         0.0,
@@ -720,87 +620,14 @@ fn capture_process_audio(
                         &context.gate_override,
                     );
                 }
-            } else if !captured {
+            } else {
                 reset_spectrum(analyzer, &context.spectrum);
             }
         }
         Ok(())
     })();
-
     context.set_process_capture_active(false);
-    let _ = audio_client.stop_stream();
     result
-}
-
-fn find_target_process_id(manager: &IAudioSessionManager2, target_app_id: &str) -> Option<u32> {
-    if target_app_id.is_empty() {
-        return None;
-    }
-
-    // SAFETY: The session manager is owned by the meter thread's COM apartment. Each audio
-    // session interface is used only while its enumerator and manager remain alive.
-    unsafe {
-        let Ok(enumerator) = manager.GetSessionEnumerator() else {
-            return None;
-        };
-        let Ok(count) = enumerator.GetCount() else {
-            return None;
-        };
-        for index in 0..count {
-            let Ok(session) = enumerator.GetSession(index) else {
-                continue;
-            };
-            let Ok(session_control) = session.cast::<IAudioSessionControl2>() else {
-                continue;
-            };
-            let Ok(process_id) = session_control.GetProcessId() else {
-                continue;
-            };
-            if process_id != 0
-                && process_app_user_model_id(process_id)
-                    .is_some_and(|app_id| app_id.eq_ignore_ascii_case(target_app_id))
-            {
-                return Some(process_id);
-            }
-        }
-    }
-    None
-}
-
-fn process_app_user_model_id(process_id: u32) -> Option<String> {
-    // SAFETY: The process ID comes from an active audio session. The requested access only reads
-    // the target process's application identity and does not modify its state.
-    let process =
-        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
-    let mut length = 0;
-    // SAFETY: The process handle is valid while this function runs. Passing a null output buffer
-    // requests the required UTF-16 buffer length without writing through a dangling pointer.
-    let first_result = unsafe { GetApplicationUserModelId(process, &mut length, None) };
-    if first_result != ERROR_INSUFFICIENT_BUFFER || length == 0 {
-        // SAFETY: `process` was opened above and has not been closed yet.
-        unsafe {
-            let _ = CloseHandle(process);
-        }
-        return None;
-    }
-
-    let mut app_id = vec![0u16; length as usize];
-    // SAFETY: `app_id` has the length requested by the previous call and remains allocated for
-    // the duration of this call. The process handle remains valid until it is closed below.
-    let result = unsafe {
-        GetApplicationUserModelId(process, &mut length, Some(PWSTR(app_id.as_mut_ptr())))
-    };
-    // SAFETY: `process` was opened above and is no longer used after this point.
-    unsafe {
-        let _ = CloseHandle(process);
-    }
-    if result.0 != 0 {
-        return None;
-    }
-
-    String::from_utf16(&app_id)
-        .ok()
-        .map(|app_id| app_id.trim_end_matches('\0').to_string())
 }
 
 fn build_capture_stream<T>(

@@ -1,629 +1,53 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
-use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use winisland_render::{Image, ImageOptions, Painter, Radius, Rect, Rgba, Sampling, Vec2};
-
-use windows::ApplicationModel::AppDisplayInfo;
-use windows::Foundation::Size;
-use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
-use windows::UI::Notifications::Management::{
-    UserNotificationListener, UserNotificationListenerAccessStatus,
+use winisland_platform::{
+    IconBounds, NotificationFeed, NotificationIconData, NotificationMonitorUpdate,
+    NotificationPayload,
 };
-use windows::UI::Notifications::{KnownNotificationBindings, NotificationKinds, UserNotification};
-use windows::core::HRESULT;
-
-use crate::ui::compact::notification_event::{self, NotificationEventSubscription};
-use crate::ui::compact::{CompactOverlayState, CompactSize};
-use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 use winisland_render::FontStyle;
 use winisland_render::text::DrawTextCachedParams;
+use winisland_render::{Image, ImageOptions, Painter, Radius, Rect, Rgba, Sampling, Vec2};
+
+use crate::ui::compact::{CompactOverlayState, CompactSize};
+use crate::utils::scroll::{ScrollDrawParams, ScrollText};
 
 const DISPLAY_DURATION: Duration = Duration::from_secs(5);
 const ENTER_DURATION: Duration = Duration::from_millis(220);
 const FADE_DURATION: Duration = Duration::from_millis(280);
 const DETAIL_LINE_GAP: f32 = 21.0;
-const MAX_ICON_BYTES: u64 = 2 * 1024 * 1024;
-const RETRY_INTERVAL: Duration = Duration::from_secs(5);
-
-pub(super) struct NotificationPayload {
-    notification_id: u32,
-    app_name: String,
-    app_user_model_id: Option<String>,
-    title: String,
-    detail: String,
-    icon: Option<NotificationIconData>,
-}
-
-pub(super) enum NotificationMonitorUpdate {
-    Notification(NotificationPayload),
-    Icon {
-        notification_id: u32,
-        icon: NotificationIconData,
-    },
-}
-
-pub(super) struct NotificationIconData {
-    bytes: Vec<u8>,
-    visible_bounds: Option<IconBounds>,
-}
 
 struct NotificationIcon {
     image: Image,
     visible_bounds: Option<IconBounds>,
 }
 
-#[derive(Clone, Copy)]
-struct IconBounds {
-    left: u32,
-    top: u32,
-    width: u32,
-    height: u32,
-}
-
-#[derive(Clone, Copy)]
-enum NotificationReadKind {
-    Baseline,
-    Reconcile,
-    Event,
-}
-
-struct NotificationRecord {
-    id: u32,
-    creation_time: i64,
-}
-
-#[derive(Default)]
-struct CancelSlot(Mutex<Option<Box<dyn Fn() + Send + Sync>>>);
-
-impl CancelSlot {
-    fn set(&self, cancel: impl Fn() + Send + Sync + 'static) {
-        *self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(cancel));
-    }
-
-    fn cancel(&self) {
-        if let Some(cancel) = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            cancel();
-        }
-    }
-}
-
-enum NotificationReadResult {
-    Notifications(Vec<NotificationRecord>),
-    Failed(HRESULT),
-}
-
 #[derive(Default)]
 pub(super) struct NotificationMonitor {
-    listener: Option<UserNotificationListener>,
-    event_subscription: Option<NotificationEventSubscription>,
-    access_receiver: Option<Receiver<bool>>,
-    access_cancel: Option<Arc<CancelSlot>>,
-    read_receiver: Option<Receiver<(NotificationReadKind, NotificationReadResult)>>,
-    read_cancel: Option<Arc<CancelSlot>>,
-    icon_receiver: Option<Receiver<(u32, Option<NotificationIconData>)>>,
-    icon_cancel: Option<Arc<CancelSlot>>,
-    access_attempted: bool,
-    retry_after: Option<Instant>,
-    seen_notifications: HashSet<(u32, i64)>,
-    pending_notification_id: Option<u32>,
+    feed: Option<Box<dyn NotificationFeed>>,
 }
 
 impl NotificationMonitor {
     pub(super) fn update(&mut self, enabled: bool) -> Option<NotificationMonitorUpdate> {
-        if !enabled {
-            self.stop();
-            self.access_attempted = false;
-            self.retry_after = None;
-            return None;
+        if self.feed.is_none() {
+            self.feed =
+                Some(crate::platform::notify().open_feed(Arc::new(crate::utils::event_loop::wake)));
         }
-
-        self.finish_access_request();
-        if self.listener.is_none()
-            && self.access_receiver.is_none()
-            && !self.access_attempted
-            && self
-                .retry_after
-                .is_none_or(|retry_after| Instant::now() >= retry_after)
-        {
-            self.access_attempted = true;
-            self.request_access();
+        let feed = self.feed.as_mut()?;
+        let update = feed.update(enabled);
+        if feed.events_available() == Some(false) {
+            crate::platform::update_capabilities(|caps| caps.toast_events = false);
         }
-        self.finish_notification_read();
-        self.handle_subscription_error();
-        self.read_notifications_when_signaled();
-        self.take_update()
+        update
     }
 
-    fn request_access(&mut self) {
-        let Ok(listener) = UserNotificationListener::Current() else {
-            log::warn!("Notification listener is unavailable");
-            self.schedule_retry();
-            return;
-        };
-        match listener.GetAccessStatus() {
-            Ok(UserNotificationListenerAccessStatus::Allowed) => self.start_monitor(listener),
-            Ok(UserNotificationListenerAccessStatus::Unspecified) => {
-                let Ok(operation) = listener.RequestAccessAsync() else {
-                    log::warn!("Notification access request could not be started");
-                    self.schedule_retry();
-                    return;
-                };
-                let (sender, receiver) = mpsc::sync_channel(1);
-                let cancel_operation = operation.clone();
-                let cancel = Arc::new(CancelSlot::default());
-                cancel.set(move || {
-                    let _ = cancel_operation.Cancel();
-                });
-                self.access_cancel = Some(cancel);
-                tokio::task::spawn_blocking(move || {
-                    let granted = matches!(
-                        operation.join(),
-                        Ok(UserNotificationListenerAccessStatus::Allowed)
-                    );
-                    if sender.send(granted).is_ok() {
-                        crate::utils::event_loop::wake();
-                    }
-                });
-                self.access_receiver = Some(receiver);
-            }
-            Ok(status) => log::warn!("Notification access was not granted: {status:?}"),
-            Err(error) => {
-                log::warn!("Notification access status is unavailable: {error:?}");
-                self.schedule_retry();
-            }
-        }
-    }
-
-    fn finish_access_request(&mut self) {
-        let result = self
-            .access_receiver
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
-        match result {
-            Some(Ok(true)) => {
-                self.access_receiver = None;
-                self.access_cancel = None;
-                let Ok(listener) = UserNotificationListener::Current() else {
-                    log::warn!("Notification listener is unavailable after access was granted");
-                    self.schedule_retry();
-                    return;
-                };
-                self.start_monitor(listener);
-            }
-            Some(Ok(false)) => {
-                self.access_receiver = None;
-                self.access_cancel = None;
-                log::warn!("Notification access was not granted");
-            }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.access_receiver = None;
-                self.access_cancel = None;
-                log::warn!("Notification access request ended unexpectedly");
-                self.schedule_retry();
-            }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => {}
-        }
-    }
-
-    fn start_monitor(&mut self, listener: UserNotificationListener) {
-        self.listener = Some(listener);
-        self.retry_after = None;
-        self.seen_notifications.clear();
-        self.pending_notification_id = None;
-        notification_event::reset_signals();
-        if !self.start_notification_read(NotificationReadKind::Baseline) {
-            self.restart_monitor();
-        }
-    }
-
-    fn finish_notification_read(&mut self) {
-        let result = self
-            .read_receiver
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
-        match result {
-            Some(Ok((kind, NotificationReadResult::Notifications(notifications)))) => {
-                self.read_receiver = None;
-                self.read_cancel = None;
-                self.handle_notification_snapshot(kind, notifications);
-            }
-            Some(Ok((_, NotificationReadResult::Failed(error)))) => {
-                self.read_receiver = None;
-                self.read_cancel = None;
-                log::warn!("Notification history could not be read: {error:?}");
-                self.restart_monitor();
-            }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.read_receiver = None;
-                self.read_cancel = None;
-                log::warn!("Notification history request ended unexpectedly");
-                self.restart_monitor();
-            }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => {}
-        }
-    }
-
-    fn handle_notification_snapshot(
-        &mut self,
-        kind: NotificationReadKind,
-        mut notifications: Vec<NotificationRecord>,
-    ) {
-        notifications
-            .sort_unstable_by_key(|notification| (notification.creation_time, notification.id));
-        if matches!(kind, NotificationReadKind::Baseline) {
-            for notification in notifications {
-                self.seen_notifications
-                    .insert((notification.id, notification.creation_time));
-            }
-            match NotificationEventSubscription::subscribe() {
-                Ok(subscription) => self.event_subscription = Some(subscription),
-                Err(error) => {
-                    log::warn!("Notification event subscription could not be started: {error}");
-                    self.restart_monitor();
-                    return;
-                }
-            }
-            if !self.start_notification_read(NotificationReadKind::Reconcile) {
-                self.restart_monitor();
-            }
-            return;
-        }
-
-        let mut current_notifications = HashSet::with_capacity(notifications.len());
-        let mut newest_notification_id = None;
-        for notification in notifications {
-            let identity = (notification.id, notification.creation_time);
-            current_notifications.insert(identity);
-            if !self.seen_notifications.contains(&identity) {
-                newest_notification_id = Some(notification.id);
-            }
-        }
-        self.seen_notifications = current_notifications;
-        if newest_notification_id.is_some() {
-            self.pending_notification_id = newest_notification_id;
-        }
-    }
-
-    fn handle_subscription_error(&mut self) {
-        let Some(error_code) = notification_event::take_error() else {
-            return;
-        };
-        log::warn!("Notification event subscription failed with Win32 error {error_code}");
-        if self
-            .event_subscription
-            .as_ref()
-            .is_some_and(NotificationEventSubscription::has_wnf)
-        {
-            return;
-        }
-        self.restart_monitor();
-    }
-
-    fn read_notifications_when_signaled(&mut self) {
-        if self.event_subscription.is_none()
-            || self.read_receiver.is_some()
-            || !notification_event::take_delivery()
-        {
-            return;
-        }
-        if !self.start_notification_read(NotificationReadKind::Event) {
-            self.restart_monitor();
-        }
-    }
-
-    fn start_notification_read(&mut self, kind: NotificationReadKind) -> bool {
-        let Some(listener) = self.listener.as_ref() else {
-            return false;
-        };
-        let Ok(operation) = listener.GetNotificationsAsync(NotificationKinds::Toast) else {
-            log::warn!("Notification history request could not be started");
-            return false;
-        };
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let cancel_operation = operation.clone();
-        let cancel = Arc::new(CancelSlot::default());
-        cancel.set(move || {
-            let _ = cancel_operation.Cancel();
-        });
-        self.read_cancel = Some(cancel);
-        tokio::task::spawn_blocking(move || {
-            let result = operation.join().map(|notifications| {
-                let mut records = Vec::new();
-                if let Ok(count) = notifications.Size() {
-                    for index in 0..count {
-                        if let Ok(notification) = notifications.GetAt(index)
-                            && let Ok(notification_id) = notification.Id()
-                        {
-                            let creation_time = notification
-                                .CreationTime()
-                                .map(|time| time.UniversalTime)
-                                .unwrap_or_default();
-                            records.push(NotificationRecord {
-                                id: notification_id,
-                                creation_time,
-                            });
-                        }
-                    }
-                }
-                records
-            });
-            let result = match result {
-                Ok(notifications) => NotificationReadResult::Notifications(notifications),
-                Err(error) => NotificationReadResult::Failed(error.code()),
-            };
-            if sender.send((kind, result)).is_ok() {
-                crate::utils::event_loop::wake();
-            }
-        });
-        self.read_receiver = Some(receiver);
-        true
-    }
-
-    fn stop(&mut self) {
-        for cancel in [
-            self.access_cancel.take(),
-            self.read_cancel.take(),
-            self.icon_cancel.take(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            cancel.cancel();
-        }
-        self.listener = None;
-        self.event_subscription = None;
-        self.access_receiver = None;
-        self.read_receiver = None;
-        self.icon_receiver = None;
-        self.seen_notifications.clear();
-        self.pending_notification_id = None;
-        notification_event::reset_signals();
-    }
-
-    fn restart_monitor(&mut self) {
-        self.stop();
-        self.schedule_retry();
-    }
-
-    fn schedule_retry(&mut self) {
-        self.access_attempted = false;
-        self.retry_after = Some(Instant::now() + RETRY_INTERVAL);
-    }
-
-    fn take_update(&mut self) -> Option<NotificationMonitorUpdate> {
-        if let Some(notification_id) = self.pending_notification_id.take()
-            && let Some(listener) = self.listener.as_ref()
-            && let Some((payload, display)) = read_notification(listener, notification_id)
-        {
-            if let Some(display) = display {
-                self.start_icon_read(notification_id, display);
-            }
-            return Some(NotificationMonitorUpdate::Notification(payload));
-        }
-        self.finish_icon_read()
-    }
-
-    fn start_icon_read(&mut self, notification_id: u32, display: AppDisplayInfo) {
-        if let Some(cancel) = self.icon_cancel.take() {
-            cancel.cancel();
-        }
-        self.icon_receiver = None;
-        let Some(operation) = display
-            .GetLogo(Size {
-                Width: 64.0,
-                Height: 64.0,
-            })
-            .ok()
-            .and_then(|logo| logo.OpenReadAsync().ok())
-        else {
-            return;
-        };
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let cancel_operation = operation.clone();
-        let cancel = Arc::new(CancelSlot::default());
-        cancel.set(move || {
-            let _ = cancel_operation.Cancel();
-        });
-        self.icon_cancel = Some(Arc::clone(&cancel));
-        tokio::task::spawn_blocking(move || {
-            let icon = operation
-                .join()
-                .ok()
-                .and_then(|stream| read_app_icon(stream, &cancel));
-            if sender.send((notification_id, icon)).is_ok() {
-                crate::utils::event_loop::wake();
-            }
-        });
-        self.icon_receiver = Some(receiver);
-    }
-
-    fn finish_icon_read(&mut self) -> Option<NotificationMonitorUpdate> {
-        let result = self
-            .icon_receiver
-            .as_ref()
-            .map(std::sync::mpsc::Receiver::try_recv);
-        match result {
-            Some(Ok((notification_id, icon))) => {
-                self.icon_receiver = None;
-                self.icon_cancel = None;
-                icon.map(|icon| NotificationMonitorUpdate::Icon {
-                    notification_id,
-                    icon,
-                })
-            }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.icon_receiver = None;
-                self.icon_cancel = None;
-                None
-            }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => None,
-        }
-    }
-
-    pub(super) fn remove_notification(&self, notification_id: u32) {
-        if let Some(listener) = &self.listener
-            && let Err(error) = listener.RemoveNotification(notification_id)
-        {
-            log::debug!("Notification could not be removed: {error:?}");
+    pub(super) fn remove_notification(&self, id: u32) {
+        if let Some(feed) = &self.feed {
+            feed.dismiss(id);
         }
     }
 }
-
-impl Drop for NotificationMonitor {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-fn read_notification(
-    listener: &UserNotificationListener,
-    notification_id: u32,
-) -> Option<(NotificationPayload, Option<AppDisplayInfo>)> {
-    let notification = listener.GetNotification(notification_id).ok()?;
-    let (mut title, detail) = read_notification_text(&notification);
-    let (app_name, app_user_model_id, display) = notification
-        .AppInfo()
-        .ok()
-        .and_then(|app| {
-            let display = app.DisplayInfo().ok()?;
-            let name = display
-                .DisplayName()
-                .map(|name| name.to_string())
-                .unwrap_or_default();
-            let app_user_model_id = app
-                .AppUserModelId()
-                .ok()
-                .map(|app_user_model_id| app_user_model_id.to_string())
-                .filter(|app_user_model_id| !app_user_model_id.is_empty());
-            Some((name, app_user_model_id, Some(display)))
-        })
-        .unwrap_or_default();
-
-    if title.is_empty() {
-        title = app_name.clone();
-    }
-    (!title.is_empty()).then_some((
-        NotificationPayload {
-            notification_id,
-            app_name,
-            app_user_model_id,
-            title,
-            detail,
-            icon: None,
-        },
-        display,
-    ))
-}
-
-fn read_notification_text(notification: &UserNotification) -> (String, String) {
-    let Some(binding_name) = KnownNotificationBindings::ToastGeneric().ok() else {
-        return (String::new(), String::new());
-    };
-    let Some(binding) = notification
-        .Notification()
-        .ok()
-        .and_then(|notification| notification.Visual().ok())
-        .and_then(|visual| visual.GetBinding(&binding_name).ok())
-    else {
-        return (String::new(), String::new());
-    };
-    let Some(text_elements) = binding.GetTextElements().ok() else {
-        return (String::new(), String::new());
-    };
-    let mut lines = Vec::new();
-    for index in 0..text_elements.Size().unwrap_or(0) {
-        let Some(text) = text_elements
-            .GetAt(index)
-            .ok()
-            .and_then(|element| element.Text().ok())
-            .map(|text| text.to_string())
-        else {
-            continue;
-        };
-        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if !text.is_empty() {
-            lines.push(text);
-        }
-    }
-    (
-        lines.first().cloned().unwrap_or_default(),
-        lines.into_iter().skip(1).collect::<Vec<_>>().join(" "),
-    )
-}
-
-fn read_app_icon(
-    stream: IRandomAccessStreamWithContentType,
-    cancel: &CancelSlot,
-) -> Option<NotificationIconData> {
-    let size = stream.Size().ok()?;
-    if size == 0 || size > MAX_ICON_BYTES {
-        return None;
-    }
-    let reader = DataReader::CreateDataReader(&stream).ok()?;
-    let operation = reader.LoadAsync(size as u32).ok()?;
-    let cancel_operation = operation.clone();
-    cancel.set(move || {
-        let _ = cancel_operation.Cancel();
-    });
-    operation.join().ok()?;
-    let mut bytes = vec![0; size as usize];
-    reader.ReadBytes(&mut bytes).ok()?;
-    Some(NotificationIconData {
-        visible_bounds: visible_icon_bounds(&bytes),
-        bytes,
-    })
-}
-
-fn visible_icon_bounds(bytes: &[u8]) -> Option<IconBounds> {
-    const ALPHA_THRESHOLD: u8 = 8;
-
-    let image = image::load_from_memory(bytes).ok()?.into_rgba8();
-    let (image_width, image_height) = image.dimensions();
-    let mut bounds: Option<IconBounds> = None;
-    for (x, y, pixel) in image.enumerate_pixels() {
-        if pixel[3] < ALPHA_THRESHOLD {
-            continue;
-        }
-        bounds = Some(match bounds {
-            Some(bounds) => {
-                let right = bounds.left + bounds.width - 1;
-                let bottom = bounds.top + bounds.height - 1;
-                let left = bounds.left.min(x);
-                let top = bounds.top.min(y);
-                IconBounds {
-                    left,
-                    top,
-                    width: right.max(x) - left + 1,
-                    height: bottom.max(y) - top + 1,
-                }
-            }
-            None => IconBounds {
-                left: x,
-                top: y,
-                width: 1,
-                height: 1,
-            },
-        });
-    }
-    bounds.filter(|bounds| {
-        bounds.width > 0
-            && bounds.height > 0
-            && bounds.left + bounds.width <= image_width
-            && bounds.top + bounds.height <= image_height
-    })
-}
-
 #[derive(Default)]
 pub(super) struct NotificationIndicator {
     notification_id: Option<u32>,
@@ -720,7 +144,13 @@ impl NotificationIndicator {
 
     pub(super) fn activate(&mut self) -> Option<u32> {
         let app_user_model_id = self.app_user_model_id.as_deref()?;
-        if crate::utils::win32::activate_application(app_user_model_id) {
+        if crate::platform::shell()
+            .activate_app(app_user_model_id)
+            .unwrap_or_else(|error| {
+                log::warn!("Application activation failed: {error}");
+                false
+            })
+        {
             self.take_notification_id()
         } else {
             None

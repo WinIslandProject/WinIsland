@@ -5,14 +5,9 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use windows::Win32::UI::WindowsAndMessaging::{
-    IDOK, IDYES, MB_ICONINFORMATION, MB_OKCANCEL, MB_SETFOREGROUND, MB_TOPMOST, MessageBoxW,
-};
-use windows::core::PCWSTR;
 use winisland_core::i18n::tr;
 
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -88,13 +83,6 @@ impl InstallerChannel {
             Self::Nightly => "WinIsland-Nightly-Setup.exe",
         }
     }
-
-    fn installed_executable() -> PathBuf {
-        let mut path = dirs::data_local_dir().unwrap_or_else(get_app_dir);
-        path.push("WinIsland");
-        path.push("WinIsland.exe");
-        path
-    }
 }
 
 fn nightly_build_number() -> u64 {
@@ -169,8 +157,7 @@ fn is_version_newer(current: &str, remote: &str) -> bool {
 }
 
 pub fn get_app_dir() -> PathBuf {
-    let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push(".winisland");
+    let path = crate::platform::shell().data_dir();
     if !path.exists() {
         let _ = fs::create_dir_all(&path);
     }
@@ -258,30 +245,19 @@ async fn prompt_update(
     package: UpdatePackage,
     app_dir: &Path,
 ) {
-    let title_w: Vec<u16> = format!("{} ({})\0", tr("update_available_title"), channel_name)
-        .encode_utf16()
-        .collect();
+    let title = format!("{} ({})", tr("update_available_title"), channel_name);
     let description = match package.channel {
         InstallerChannel::Stable => tr("update_available_desc"),
         InstallerChannel::Nightly => {
             tr("update_available_nightly_desc").replace("{}", version_display)
         }
     };
-    let text_w: Vec<u16> = description.add_null().encode_utf16().collect();
-
-    let result = tokio::task::spawn_blocking(move || unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(text_w.as_ptr()),
-            PCWSTR(title_w.as_ptr()),
-            MB_OKCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND,
-        )
+    let result = tokio::task::spawn_blocking(move || {
+        crate::platform::shell().confirm_information(&title, &description)
     })
     .await;
 
-    if let Ok(r) = result
-        && (r == IDOK || r == IDYES)
-    {
+    if let Ok(true) = result {
         perform_update(package, app_dir.to_path_buf()).await;
     }
 }
@@ -500,52 +476,15 @@ async fn perform_update(package: UpdatePackage, app_dir: PathBuf) {
         installer_path.display()
     );
 
-    let installer_path = installer_path.to_string_lossy().into_owned();
-    let installed_executable = InstallerChannel::installed_executable()
-        .to_string_lossy()
-        .into_owned();
-
-    let ps_escape = |s: &str| s.replace('\'', "''");
-
-    let pid = std::process::id();
-    let script = format!(
-        "while (Get-Process -Id {} -ErrorAction SilentlyContinue) {{ Start-Sleep -Milliseconds 100 }}; \
-         $installer = Start-Process -FilePath '{}' -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS') -PassThru -Wait; \
-         if ($installer.ExitCode -eq 0) {{ Start-Process -FilePath '{}' }}",
-        pid,
-        ps_escape(&installer_path),
-        ps_escape(&installed_executable)
-    );
-
-    let _ = Command::new("powershell")
-        .args(["-WindowStyle", "Hidden", "-Command", &script])
-        .spawn();
+    let _ = crate::platform::shell().install_update(&installer_path);
 
     std::process::exit(0);
 }
 
 async fn show_error_box(title: String, text: String) {
-    let title_w: Vec<u16> = title.add_null().encode_utf16().collect();
-    let text_w: Vec<u16> = text.add_null().encode_utf16().collect();
-    // SAFETY: MessageBoxW displays a modal error dialog with the provided
-    // null-terminated UTF-16 strings. All pointers are valid for the call duration.
-    tokio::task::spawn_blocking(move || unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(text_w.as_ptr()),
-            PCWSTR(title_w.as_ptr()),
-            MB_ICONINFORMATION | MB_TOPMOST,
-        );
+    tokio::task::spawn_blocking(move || {
+        crate::platform::shell().information_dialog(&title, &text);
     })
     .await
     .ok();
-}
-
-trait AddNull {
-    fn add_null(&self) -> String;
-}
-impl AddNull for String {
-    fn add_null(&self) -> String {
-        format!("{self}\0")
-    }
 }

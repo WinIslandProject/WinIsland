@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
-use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 
 use winisland_core::lyrics::{
     LyricHighlight, LyricLine, LyricsMode, fetch_online_lyrics, load_local_lyrics,
@@ -15,66 +14,12 @@ mod worker;
 
 const SEEK_GUARD_DURATION: Duration = Duration::from_secs(4);
 
-pub(super) struct WinRtGuard {
-    _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
-}
-
-impl WinRtGuard {
-    pub(super) fn new() -> windows::core::Result<Self> {
-        // SAFETY: This initializes Windows Runtime for the current thread in the MTA. Every
-        // successful call is balanced by WinRtGuard::drop on the same thread.
-        unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
-        Ok(Self {
-            _not_send: std::marker::PhantomData,
-        })
-    }
-}
-
-impl Drop for WinRtGuard {
-    fn drop(&mut self) {
-        // SAFETY: The guard is created only after RoInitialize succeeds and is dropped on the
-        // thread that owns it.
-        unsafe { RoUninitialize() };
-    }
-}
-
 pub(crate) fn detect_active_apps_async() -> std::sync::mpsc::Receiver<Vec<String>> {
     let (tx, rx) = std::sync::mpsc::channel();
     let spawn_result = std::thread::Builder::new()
         .name("winisland-smtc-settings".to_string())
         .spawn(move || {
-            use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
-
-            let _winrt_guard = match WinRtGuard::new() {
-                Ok(guard) => guard,
-                Err(error) => {
-                    log::warn!("SMTC: failed to initialize WinRT for app scan: {error}");
-                    let _ = tx.send(Vec::new());
-                    crate::utils::event_loop::wake();
-                    return;
-                }
-            };
-
-            let apps = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
-                .ok()
-                .and_then(|operation| operation.join().ok())
-                .and_then(|manager| {
-                    let sessions = manager.GetSessions().ok()?;
-                    let count = sessions.Size().ok()?;
-                    let mut apps = Vec::new();
-                    for index in 0..count {
-                        if let Ok(session) = sessions.GetAt(index)
-                            && let Ok(id) = session.SourceAppUserModelId()
-                        {
-                            let app = id.to_string();
-                            if !apps.contains(&app) {
-                                apps.push(app);
-                            }
-                        }
-                    }
-                    Some(apps)
-                })
-                .unwrap_or_default();
+            let apps = crate::platform::media().detect_active_apps();
             let _ = tx.send(apps);
             crate::utils::event_loop::wake();
         });

@@ -3,22 +3,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
-use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, PROPERTYKEY, WPARAM};
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-use windows::Win32::Media::Audio::{
-    DEVICE_STATE, EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient,
-    IMMNotificationClient_Impl, MMDeviceEnumerator, eConsole, eRender,
-};
-use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
-};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP};
-use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
-    WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-};
-use windows::core::{PCWSTR, Result};
+use winisland_platform::{VolumeCommand, VolumeKey, VolumeKeyEvent};
 use winisland_render::{Painter, Point, Radius, Rect, Rgba};
 
 use crate::icons::brightness::draw_brightness_icon;
@@ -35,22 +20,6 @@ const DISPLAY_DURATION: Duration = Duration::from_millis(1600);
 const FADE_DURATION: Duration = Duration::from_millis(240);
 const VOLUME_CHANGE_THRESHOLD: f32 = 0.002;
 const PREVIEW_TIMEOUT: Duration = Duration::from_millis(500);
-
-#[derive(Clone, Copy)]
-enum VolumeCommand {
-    StepUp,
-    StepDown,
-    ToggleMute,
-    SetLevel(f32),
-}
-
-struct VolumeKeyHandler {
-    sender: SyncSender<VolumeCommand>,
-    endpoint_ready: Arc<AtomicBool>,
-    display_enabled: Arc<AtomicBool>,
-}
-
-static VOLUME_KEY_HANDLER: Mutex<Option<VolumeKeyHandler>> = Mutex::new(None);
 
 #[derive(Clone, Copy)]
 pub(super) struct VolumeSnapshot {
@@ -70,7 +39,7 @@ pub(super) struct VolumeMonitor {
     command_sender: SyncSender<VolumeCommand>,
     endpoint_ready: Arc<AtomicBool>,
     display_enabled: Arc<AtomicBool>,
-    keyboard_hook: Option<HHOOK>,
+    keyboard_hook_installed: bool,
 }
 
 impl VolumeMonitor {
@@ -99,7 +68,7 @@ impl VolumeMonitor {
             command_sender,
             endpoint_ready,
             display_enabled,
-            keyboard_hook: None,
+            keyboard_hook_installed: false,
         };
         monitor.set_native_flyout_replacement_enabled(replace_native_volume_flyout);
         monitor
@@ -132,18 +101,28 @@ impl VolumeMonitor {
     }
 
     pub(super) fn set_native_flyout_replacement_enabled(&mut self, enabled: bool) {
-        if enabled {
-            let handler = VolumeKeyHandler {
-                sender: self.command_sender.clone(),
-                endpoint_ready: self.endpoint_ready.clone(),
-                display_enabled: self.display_enabled.clone(),
-            };
-            if self.keyboard_hook.is_some() {
-                *VOLUME_KEY_HANDLER
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
-            } else {
-                self.keyboard_hook = install_volume_keyboard_hook(handler);
+        if enabled && crate::platform::capabilities().input_hooks {
+            if !self.keyboard_hook_installed {
+                let sender = self.command_sender.clone();
+                let endpoint_ready = self.endpoint_ready.clone();
+                let display_enabled = self.display_enabled.clone();
+                let callback = Box::new(move |event: VolumeKeyEvent| {
+                    let command = match event.key {
+                        VolumeKey::Up => VolumeCommand::StepUp,
+                        VolumeKey::Down => VolumeCommand::StepDown,
+                        VolumeKey::Mute => VolumeCommand::ToggleMute,
+                    };
+                    endpoint_ready.load(Ordering::Acquire)
+                        && display_enabled.load(Ordering::Acquire)
+                        && (!event.is_down || sender.try_send(command).is_ok())
+                });
+                match crate::platform::input().install_volume_keys(callback) {
+                    Ok(()) => self.keyboard_hook_installed = true,
+                    Err(error) => {
+                        crate::platform::update_capabilities(|caps| caps.input_hooks = false);
+                        log::warn!("Volume keyboard hook could not be installed: {error}")
+                    }
+                }
             }
         } else {
             self.remove_keyboard_hook();
@@ -152,18 +131,11 @@ impl VolumeMonitor {
 
     fn remove_keyboard_hook(&mut self) {
         self.display_enabled.store(false, Ordering::Release);
-        *VOLUME_KEY_HANDLER
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        if let Some(hook) = self.keyboard_hook {
-            // SAFETY: hook was returned by SetWindowsHookExW and is removed once while the
-            // callback function remains valid for the process lifetime.
-            if unsafe { UnhookWindowsHookEx(hook) }.is_err() {
-                log::warn!("Volume keyboard hook could not be removed");
-            } else {
-                self.keyboard_hook = None;
-                log::info!("Native volume flyout replacement disabled");
+        if self.keyboard_hook_installed {
+            if let Err(error) = crate::platform::input().uninstall_volume_keys() {
+                log::warn!("Volume keyboard hook could not be removed: {error}");
             }
+            self.keyboard_hook_installed = false;
         }
     }
 }
@@ -175,76 +147,6 @@ impl Drop for VolumeMonitor {
     }
 }
 
-fn install_volume_keyboard_hook(handler: VolumeKeyHandler) -> Option<HHOOK> {
-    // SAFETY: the current process module contains the static hook callback, and the hook is
-    // installed on the main thread whose winit event loop pumps messages for its lifetime.
-    let hook_result = unsafe {
-        match GetModuleHandleW(None) {
-            Ok(module) => SetWindowsHookExW(
-                WH_KEYBOARD_LL,
-                Some(volume_keyboard_hook),
-                Some(HINSTANCE(module.0)),
-                0,
-            ),
-            Err(error) => Err(error),
-        }
-    };
-    let hook = match hook_result {
-        Ok(hook) => hook,
-        Err(error) => {
-            log::warn!("Volume keyboard hook could not be installed: {error}");
-            return None;
-        }
-    };
-    *VOLUME_KEY_HANDLER
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handler);
-    log::info!("Volume keys are handled by WinIsland");
-    Some(hook)
-}
-
-unsafe extern "system" fn volume_keyboard_hook(
-    code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if code == HC_ACTION as i32
-        && matches!(
-            wparam.0 as u32,
-            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP
-        )
-    {
-        // SAFETY: for HC_ACTION, Windows supplies lparam as a valid KBDLLHOOKSTRUCT pointer for
-        // the duration of this callback.
-        let key = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-        let command = match key.vkCode {
-            value if value == VK_VOLUME_UP.0 as u32 => Some(VolumeCommand::StepUp),
-            value if value == VK_VOLUME_DOWN.0 as u32 => Some(VolumeCommand::StepDown),
-            value if value == VK_VOLUME_MUTE.0 as u32 => Some(VolumeCommand::ToggleMute),
-            _ => None,
-        };
-        if let Some(command) = command {
-            let is_key_down = matches!(wparam.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
-            let handled = VOLUME_KEY_HANDLER
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                .is_some_and(|handler| {
-                    handler.endpoint_ready.load(Ordering::Acquire)
-                        && handler.display_enabled.load(Ordering::Acquire)
-                        && (!is_key_down || handler.sender.try_send(command).is_ok())
-                });
-            if handled {
-                return LRESULT(1);
-            }
-        }
-    }
-
-    // SAFETY: unhandled input is forwarded with the original hook parameters, as required by
-    // the low-level keyboard hook contract.
-    unsafe { CallNextHookEx(None, code, wparam, lparam) }
-}
-
 fn spawn_volume_monitor(
     state: Arc<SharedVolumeState>,
     cancellation: CancellationToken,
@@ -252,50 +154,44 @@ fn spawn_volume_monitor(
     endpoint_ready: Arc<AtomicBool>,
 ) {
     tokio::task::spawn_blocking(move || {
-        // SAFETY: This worker owns its COM apartment and releases every COM interface before
-        // uninitializing it when the monitor stops.
-        let com_initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() };
-        if !com_initialized {
-            log::warn!("Volume monitor could not initialize COM");
-            return;
-        }
-
-        let mut enumerator = create_endpoint_enumerator();
-        let mut notifier = enumerator.as_ref().and_then(register_endpoint_notifier);
-        let mut endpoint = None;
+        let mut device = match crate::platform::audio().open_volume_endpoint() {
+            Ok(device) => device,
+            Err(error) => {
+                crate::platform::update_capabilities(|caps| caps.volume_control = false);
+                log::warn!("Volume monitor could not initialize COM: {error}");
+                return;
+            }
+        };
         let mut next_endpoint_retry = Instant::now();
         let mut next_notifier_retry = Instant::now() + NOTIFIER_RETRY_INTERVAL;
         let mut previous: Option<VolumeSnapshot> = None;
 
         while !cancellation.is_cancelled() {
             let now = Instant::now();
-            if notifier
-                .as_ref()
-                .is_some_and(DefaultEndpointNotifier::take_change)
-            {
-                endpoint = None;
+            if device.take_device_change() {
+                device.invalidate_endpoint();
                 endpoint_ready.store(false, Ordering::Release);
                 previous = None;
                 next_endpoint_retry = now;
             }
 
-            if enumerator.is_none() && now >= next_endpoint_retry {
-                enumerator = create_endpoint_enumerator();
-                next_endpoint_retry = if enumerator.is_some() {
+            if !device.has_enumerator() && now >= next_endpoint_retry {
+                next_endpoint_retry = if device.ensure_enumerator() {
                     now
                 } else {
                     now + ENDPOINT_RETRY_INTERVAL
                 };
             }
 
-            if notifier.is_none() && now >= next_notifier_retry {
-                notifier = enumerator.as_ref().and_then(register_endpoint_notifier);
+            if !device.has_notifier() && now >= next_notifier_retry {
+                device.ensure_notifier();
                 next_notifier_retry = now + NOTIFIER_RETRY_INTERVAL;
             }
 
-            if endpoint.is_none() && now >= next_endpoint_retry {
-                endpoint = enumerator.as_ref().and_then(create_default_endpoint);
-                endpoint_ready.store(endpoint.is_some(), Ordering::Release);
+            if !device.has_endpoint() && now >= next_endpoint_retry {
+                let available = device.ensure_endpoint();
+                endpoint_ready.store(available, Ordering::Release);
+                crate::platform::update_capabilities(|caps| caps.volume_control = available);
                 previous = None;
                 next_endpoint_retry = now + ENDPOINT_RETRY_INTERVAL;
             }
@@ -310,88 +206,32 @@ fn spawn_volume_monitor(
                 .try_iter()
                 .chain(pending_level.map(VolumeCommand::SetLevel))
             {
-                if endpoint
-                    .as_ref()
-                    .is_some_and(|endpoint| apply_volume_command(endpoint, command))
-                {
+                if device.apply(command) {
                     command_handled = true;
                 } else {
-                    endpoint = None;
+                    device.invalidate_endpoint();
                     endpoint_ready.store(false, Ordering::Release);
                 }
             }
 
-            if let Some(current) = endpoint.as_ref().and_then(read_volume) {
+            if let Some(current) = device.read() {
+                let current = VolumeSnapshot {
+                    level: current.level,
+                    muted: current.muted,
+                    revision: 0,
+                };
                 publish_volume_snapshot(&state, current, previous, command_handled);
-
                 previous = Some(current);
             } else {
-                endpoint = None;
+                device.invalidate_endpoint();
                 endpoint_ready.store(false, Ordering::Release);
             }
-
             std::thread::sleep(POLL_INTERVAL);
         }
-
-        drop(endpoint);
+        drop(device);
         endpoint_ready.store(false, Ordering::Release);
-        drop(notifier);
-        drop(enumerator);
-        // SAFETY: COM was initialized successfully on this worker and all COM interfaces have
-        // been dropped before the apartment is uninitialized.
-        unsafe {
-            CoUninitialize();
-        }
     });
 }
-
-fn apply_volume_command(endpoint: &IAudioEndpointVolume, command: VolumeCommand) -> bool {
-    // SAFETY: endpoint belongs to this initialized COM worker thread. A null event-context GUID
-    // is explicitly supported by the endpoint volume API.
-    unsafe {
-        match command {
-            VolumeCommand::StepUp => endpoint.VolumeStepUp(std::ptr::null()),
-            VolumeCommand::StepDown => endpoint.VolumeStepDown(std::ptr::null()),
-            VolumeCommand::ToggleMute => endpoint
-                .GetMute()
-                .and_then(|muted| endpoint.SetMute(!muted.as_bool(), std::ptr::null())),
-            VolumeCommand::SetLevel(level) => endpoint
-                .SetMasterVolumeLevelScalar(level, std::ptr::null())
-                .and_then(|()| endpoint.SetMute(level <= 0.0, std::ptr::null())),
-        }
-        .is_ok()
-    }
-}
-
-fn create_endpoint_enumerator() -> Option<IMMDeviceEnumerator> {
-    // SAFETY: The monitor calls this only from its initialized COM worker thread. The returned
-    // interface is retained and used only by that thread.
-    unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok() }
-}
-
-fn create_default_endpoint(enumerator: &IMMDeviceEnumerator) -> Option<IAudioEndpointVolume> {
-    // SAFETY: enumerator was created on the monitor's initialized COM thread and is used only
-    // there to obtain the current default render endpoint.
-    unsafe {
-        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
-        device.Activate(CLSCTX_ALL, None).ok()
-    }
-}
-
-fn read_volume(endpoint: &IAudioEndpointVolume) -> Option<VolumeSnapshot> {
-    // SAFETY: endpoint was created on the monitor's initialized COM thread and is used only
-    // there for read-only endpoint volume queries.
-    unsafe {
-        let level = endpoint.GetMasterVolumeLevelScalar().ok()?.clamp(0.0, 1.0);
-        let muted = endpoint.GetMute().ok()?.as_bool();
-        Some(VolumeSnapshot {
-            level,
-            muted,
-            revision: 0,
-        })
-    }
-}
-
 fn publish_volume_snapshot(
     state: &SharedVolumeState,
     current: VolumeSnapshot,
@@ -419,87 +259,6 @@ fn publish_volume_snapshot(
     drop(snapshot);
     if changed {
         crate::utils::event_loop::wake();
-    }
-}
-
-struct DefaultEndpointNotifier {
-    enumerator: IMMDeviceEnumerator,
-    client: IMMNotificationClient,
-    changed: Arc<AtomicBool>,
-}
-
-impl DefaultEndpointNotifier {
-    fn take_change(&self) -> bool {
-        self.changed.swap(false, Ordering::Acquire)
-    }
-}
-
-impl Drop for DefaultEndpointNotifier {
-    fn drop(&mut self) {
-        // SAFETY: The callback was registered with the default-device enumerator on this COM
-        // worker thread. Unregistering it before dropping the callback prevents future calls.
-        unsafe {
-            let _ = self
-                .enumerator
-                .UnregisterEndpointNotificationCallback(&self.client);
-        }
-    }
-}
-
-fn register_endpoint_notifier(enumerator: &IMMDeviceEnumerator) -> Option<DefaultEndpointNotifier> {
-    let changed = Arc::new(AtomicBool::new(false));
-    let client: IMMNotificationClient = DefaultEndpointNotification {
-        changed: changed.clone(),
-    }
-    .into();
-
-    // SAFETY: enumerator and callback are owned by the monitor's initialized COM thread. The
-    // notifier retains the callback until it can be unregistered during worker shutdown.
-    unsafe {
-        enumerator
-            .RegisterEndpointNotificationCallback(&client)
-            .ok()?;
-    }
-
-    Some(DefaultEndpointNotifier {
-        enumerator: enumerator.clone(),
-        client,
-        changed,
-    })
-}
-
-#[windows::core::implement(IMMNotificationClient)]
-struct DefaultEndpointNotification {
-    changed: Arc<AtomicBool>,
-}
-
-impl IMMNotificationClient_Impl for DefaultEndpointNotification_Impl {
-    fn OnDeviceStateChanged(&self, _device_id: &PCWSTR, _state: DEVICE_STATE) -> Result<()> {
-        Ok(())
-    }
-
-    fn OnDeviceAdded(&self, _device_id: &PCWSTR) -> Result<()> {
-        Ok(())
-    }
-
-    fn OnDeviceRemoved(&self, _device_id: &PCWSTR) -> Result<()> {
-        Ok(())
-    }
-
-    fn OnDefaultDeviceChanged(
-        &self,
-        flow: EDataFlow,
-        role: ERole,
-        _device_id: &PCWSTR,
-    ) -> Result<()> {
-        if flow == eRender && role == eConsole {
-            self.changed.store(true, Ordering::Release);
-        }
-        Ok(())
-    }
-
-    fn OnPropertyValueChanged(&self, _device_id: &PCWSTR, _key: &PROPERTYKEY) -> Result<()> {
-        Ok(())
     }
 }
 

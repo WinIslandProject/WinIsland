@@ -35,6 +35,8 @@ dependencies = [
  "windows-core",
  "windows-numerics",
  "winisland-core",
+ "winisland-platform",
+ "winisland-platform-windows",
  "winisland-plugin-api",
  "winisland-render",
  "winit",
@@ -5193,6 +5195,26 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
+name = "winisland-platform"
+version = "1.3.9"
+
+[[package]]
+name = "winisland-platform-windows"
+version = "1.3.9"
+dependencies = [
+ "dirs",
+ "image",
+ "libloading 0.9.0",
+ "log",
+ "tokio",
+ "tray-icon",
+ "wasapi",
+ "windows",
+ "windows-core",
+ "winisland-platform",
 ]
 
 [[package]]
