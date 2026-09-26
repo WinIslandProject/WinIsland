@@ -11,8 +11,8 @@ pub const CONTEXT_FLAG_SHOW_COMPACT: u32 = 1 << 0;
 /// Context content owned by a plugin resource.
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct ContextDataV1 {
-    /// Must be `size_of::<ContextDataV1>()`.
+pub struct ContextDataV2 {
+    /// Must be `size_of::<ContextDataV2>()`.
     pub struct_size: u32,
     /// Priority: [`PRIORITY_LOW`], [`PRIORITY_MEDIUM`], [`PRIORITY_HIGH`].
     pub priority: u32,
@@ -28,7 +28,7 @@ pub struct ContextDataV1 {
     pub compact_text: [u8; 128],
 }
 
-impl Default for ContextDataV1 {
+impl Default for ContextDataV2 {
     fn default() -> Self {
         Self {
             struct_size: std::mem::size_of::<Self>() as u32,
@@ -45,8 +45,8 @@ impl Default for ContextDataV1 {
 /// Snapshot of the current host state that a plugin can query.
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct HostStateV1 {
-    /// Must be `size_of::<HostStateV1>()`.
+pub struct HostStateV2 {
+    /// Must be `size_of::<HostStateV2>()`.
     pub struct_size: u32,
     /// Reserved for future state flags.
     pub flags: u32,
@@ -61,7 +61,7 @@ pub struct HostStateV1 {
     pub theme: [u8; 32],
 }
 
-impl Default for HostStateV1 {
+impl Default for HostStateV2 {
     fn default() -> Self {
         Self {
             struct_size: std::mem::size_of::<Self>() as u32,
@@ -90,24 +90,24 @@ pub const MEDIA_COMMAND_SEEK: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct MediaCommandV1 {
+pub struct MediaCommandV2 {
     pub struct_size: u32,
     pub command: u32,
     /// Used only by `MEDIA_COMMAND_SEEK`.
     pub position_ms: u64,
 }
 
-pub type MediaCommandFnV1 = unsafe extern "C" fn(
+pub type MediaCommandFnV2 = unsafe extern "C" fn(
     callback_data: *mut std::ffi::c_void,
-    resource_id: crate::ResourceId,
-    command: *const MediaCommandV1,
+    resource_id: super::ResourceId,
+    command: *const MediaCommandV2,
 );
 
 /// Display-only media source data supplied by a plugin.
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct MediaSourceDataV1 {
-    /// Must be `size_of::<MediaSourceDataV1>()`.
+pub struct MediaSourceDataV2 {
+    /// Must be `size_of::<MediaSourceDataV2>()`.
     pub struct_size: u32,
     /// Combination of `MEDIA_FLAG_*` values.
     pub flags: u32,
@@ -125,14 +125,14 @@ pub struct MediaSourceDataV1 {
     /// Album name. Max 255 bytes + NUL.
     pub album: [u8; 256],
     /// Raw JPEG or PNG bytes. The host copies them before returning.
-    pub cover: crate::ByteSliceV1,
+    pub cover: super::ByteSlice,
     /// Optional callback for controls declared in `available_controls`.
-    pub on_command: Option<MediaCommandFnV1>,
+    pub on_command: Option<MediaCommandFnV2>,
     /// Opaque pointer passed back to `on_command`.
     pub callback_data: *mut std::ffi::c_void,
 }
 
-impl Default for MediaSourceDataV1 {
+impl Default for MediaSourceDataV2 {
     fn default() -> Self {
         Self {
             struct_size: std::mem::size_of::<Self>() as u32,
@@ -144,7 +144,7 @@ impl Default for MediaSourceDataV1 {
             title: [0; 256],
             artist: [0; 256],
             album: [0; 256],
-            cover: crate::ByteSliceV1::empty(),
+            cover: super::ByteSlice::empty(),
             on_command: None,
             callback_data: std::ptr::null_mut(),
         }

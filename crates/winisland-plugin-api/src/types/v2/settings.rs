@@ -1,4 +1,5 @@
-use crate::{ByteSliceV1, PluginResultC, ResourceId};
+use super::{ByteSlice, ResourceId};
+use crate::abi::PluginStatus;
 
 pub const SETTINGS_ITEM_SECTION: u32 = 1;
 pub const SETTINGS_ITEM_GROUP_START: u32 = 2;
@@ -13,7 +14,7 @@ pub const SETTINGS_ITEM_FLAG_DISABLED: u32 = 1 << 0;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct SettingsOptionV1 {
+pub struct SettingsOptionV2 {
     pub struct_size: u32,
     /// Stable value returned to the plugin. Max 127 bytes plus NUL.
     pub value: [u8; 128],
@@ -21,7 +22,7 @@ pub struct SettingsOptionV1 {
     pub label: [u8; 256],
 }
 
-impl Default for SettingsOptionV1 {
+impl Default for SettingsOptionV2 {
     fn default() -> Self {
         Self {
             struct_size: std::mem::size_of::<Self>() as u32,
@@ -33,7 +34,7 @@ impl Default for SettingsOptionV1 {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct SettingsItemV1 {
+pub struct SettingsItemV2 {
     pub struct_size: u32,
     /// One of the `SETTINGS_ITEM_*` constants.
     pub kind: u32,
@@ -46,7 +47,7 @@ pub struct SettingsItemV1 {
     /// Current switch/select/stepper value, or the button label.
     pub value: [u8; 256],
     /// Borrowed options used only by `SETTINGS_ITEM_SELECT`.
-    pub options: *const SettingsOptionV1,
+    pub options: *const SettingsOptionV2,
     pub option_count: u32,
     /// Numeric bounds used only by `SETTINGS_ITEM_STEPPER`.
     pub minimum: f64,
@@ -54,7 +55,7 @@ pub struct SettingsItemV1 {
     pub step: f64,
 }
 
-impl Default for SettingsItemV1 {
+impl Default for SettingsItemV2 {
     fn default() -> Self {
         Self {
             struct_size: std::mem::size_of::<Self>() as u32,
@@ -74,7 +75,7 @@ impl Default for SettingsItemV1 {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct SettingsChangeV1 {
+pub struct SettingsChangeV2 {
     pub struct_size: u32,
     /// Key of the changed item.
     pub key: [u8; 64],
@@ -83,37 +84,37 @@ pub struct SettingsChangeV1 {
 }
 
 /// Handle a user setting change. Return an error to reject the new value.
-pub type SettingsChangedFnV1 = unsafe extern "C" fn(
+pub type SettingsChangedFnV2 = unsafe extern "C" fn(
     callback_data: *mut std::ffi::c_void,
     page_id: ResourceId,
-    change: *const SettingsChangeV1,
-) -> PluginResultC;
+    change: *const SettingsChangeV2,
+) -> PluginStatus;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct SettingsPageDataV1 {
+pub struct SettingsPageDataV2 {
     pub struct_size: u32,
     /// Stable page key within this plugin. Max 63 ASCII bytes plus NUL.
     pub key: [u8; 64],
     /// Sidebar and page title. Max 127 bytes plus NUL.
     pub title: [u8; 128],
     /// Optional encoded PNG, JPEG, or WebP icon copied by the host.
-    pub icon: ByteSliceV1,
+    pub icon: ByteSlice,
     /// Borrowed declarative items copied by the host during create or update.
-    pub items: *const SettingsItemV1,
+    pub items: *const SettingsItemV2,
     pub item_count: u32,
-    /// Called on the settings UI thread after a user action.
-    pub on_change: Option<SettingsChangedFnV1>,
+    /// Called on the plugin worker thread after a user action.
+    pub on_change: Option<SettingsChangedFnV2>,
     pub callback_data: *mut std::ffi::c_void,
 }
 
-impl Default for SettingsPageDataV1 {
+impl Default for SettingsPageDataV2 {
     fn default() -> Self {
         Self {
             struct_size: std::mem::size_of::<Self>() as u32,
             key: [0; 64],
             title: [0; 128],
-            icon: ByteSliceV1::empty(),
+            icon: ByteSlice::empty(),
             items: std::ptr::null(),
             item_count: 0,
             on_change: None,

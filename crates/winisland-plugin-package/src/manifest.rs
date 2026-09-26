@@ -60,21 +60,12 @@ impl PluginManifest {
     }
 
     /// Compute a safe directory name from the plugin name.
-    pub fn safe_dir_name(&self) -> String {
-        self.id
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect()
+    pub fn safe_dir_name(&self) -> &str {
+        &self.id
     }
 
     /// Validate required fields are non-empty.
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self, expected_abi: u32) -> Result<(), String> {
         if self.id.is_empty()
             || self.id.len() > 63
             || !self
@@ -89,8 +80,11 @@ impl PluginManifest {
         validate_text("version", &self.version, 31)?;
         validate_text("description", &self.description, 255)?;
         validate_text("github-link", &self.github_link, 2048)?;
-        if self.abi_version != crate::ABI_VERSION_1 {
-            return Err(format!("'abi-version' must be {}", crate::ABI_VERSION_1));
+        if self.abi_version != expected_abi {
+            return Err(format!(
+                "Unsupported plugin ABI version {}; expected {expected_abi}",
+                self.abi_version
+            ));
         }
         let entry = Path::new(&self.entry);
         if self.entry.is_empty()
