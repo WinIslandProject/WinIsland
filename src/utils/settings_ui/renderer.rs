@@ -8,8 +8,10 @@ use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::input::{
     WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot, WidgetSource,
 };
+use std::collections::HashMap;
 use winisland_core::config::{CompactWidgetKind, CompactWidgetSlot, PluginWidgetSlot, WidgetSlot};
 use winisland_core::widgets::PluginWidget;
+use winisland_plugin_host::draw::replay::PreparedFrame;
 
 use super::anim::SwitchAnimator;
 use super::items::SettingsItem;
@@ -42,6 +44,7 @@ pub struct DrawItemsParams<'a> {
     pub widget_layout: &'a [WidgetSlot],
     pub plugin_widget_layout: &'a [PluginWidgetSlot],
     pub plugin_widgets: &'a [PluginWidget],
+    pub plugin_frames: &'a HashMap<u64, PreparedFrame>,
     pub widget_dragging: Option<&'a WidgetSource>,
     pub widget_drag_hover_slot: Option<WidgetEditorSlot>,
     pub widget_preview_hover_slot: Option<WidgetEditorSlot>,

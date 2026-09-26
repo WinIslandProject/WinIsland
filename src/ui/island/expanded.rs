@@ -1,7 +1,10 @@
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{DrawMusicPageParams, draw_music_page};
 use crate::ui::expanded::widget_view::draw_widget_page;
+use std::collections::HashMap;
 use winisland_core::config::{PluginWidgetSlot, WidgetSlot};
+use winisland_plugin_host::draw::replay::PreparedFrame;
+use winisland_plugin_host::host::PluginHost;
 use winisland_render::{BlurSpec, LayerSpec, Painter, Rgba, Vec2};
 
 pub(super) struct ExpandedContentParams<'a> {
@@ -28,6 +31,8 @@ pub(super) struct ExpandedContentParams<'a> {
     pub(super) widget_layout: &'a [WidgetSlot],
     pub(super) plugin_widget_layout: &'a [PluginWidgetSlot],
     pub(super) plugin_widgets: &'a winisland_core::widgets::WidgetManager,
+    pub(super) plugin_frames: &'a HashMap<u64, PreparedFrame>,
+    pub(super) plugin_host: Option<&'a PluginHost>,
 }
 
 pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
@@ -55,6 +60,8 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
         widget_layout,
         plugin_widget_layout,
         plugin_widgets,
+        plugin_frames,
+        plugin_host,
     } = params;
     let mut widget_animating = false;
     if expanded_alpha_f > 0.01 {
@@ -113,6 +120,8 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
                 widget_layout,
                 plugin_widget_layout,
                 plugin_widgets,
+                plugin_frames,
+                plugin_host,
                 text_color,
                 music_page_available,
             );

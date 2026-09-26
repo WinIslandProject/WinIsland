@@ -172,7 +172,35 @@ fn crash_flag_path() -> PathBuf {
 
 pub fn check_crash_flag() {
     let flag = crash_flag_path();
-    if flag.exists() {
+    let plugin_dir = dirs::config_dir()
+        .unwrap_or_default()
+        .join("WinIsland")
+        .join("plugins");
+    if flag.exists() || winisland_plugin_host::fault::has_active_plugin_markers(&plugin_dir) {
+        let config_dir = crate::platform::shell().config_dir();
+        match winisland_plugin_host::fault::recover_crashed_plugin(&config_dir, &plugin_dir) {
+            Ok(ids) if !ids.is_empty() => {
+                let names = ids.join(", ");
+                let report_path =
+                    log_dir().join(format!("plugin-crash-recovery-{}.txt", file_timestamp()));
+                let report = format!(
+                    "---- WinIsland Plugin Crash Recovery ----\nTime: {}\nPlugins active at termination: {names}\nThe callback marker survived process termination. These plugins were disabled on startup.\n",
+                    timestamp()
+                );
+                if let Err(error) = write_report_to(&report_path, &report) {
+                    log::error!("Could not write plugin recovery report: {error}");
+                }
+                log::warn!("Plugin callback(s) active during previous crash: {names}; disabled");
+                let message = if ids.len() == 1 {
+                    format!("上次崩溃由插件 {names} 引起，已自动禁用。")
+                } else {
+                    format!("上次崩溃时插件 {names} 正在执行，已自动禁用。")
+                };
+                crate::platform::shell().information_dialog("WinIsland plugin disabled", &message);
+            }
+            Ok(_) => {}
+            Err(error) => log::error!("Could not disable the crashed plugin: {error}"),
+        }
         log::warn!("Previous session crashed; delaying startup by 1s for GPU recovery");
         let _ = fs::remove_file(&flag);
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -183,7 +211,10 @@ pub fn flush() {
     log::logger().flush();
 }
 
-fn write_crash_report(panic_info: &PanicHookInfo) {
+fn write_crash_report(
+    panic_info: &PanicHookInfo,
+    plugin: Option<&winisland_plugin_host::fault::PluginIdentity>,
+) {
     let ts = timestamp();
     let file_ts = file_timestamp();
 
@@ -199,11 +230,15 @@ fn write_crash_report(panic_info: &PanicHookInfo) {
         .map(|l| format!("{}:{}", l.file(), l.line()))
         .unwrap_or_else(|| "unknown".into());
 
+    let plugin_line = plugin
+        .map(|plugin| format!("Plugin: {} v{}\n", plugin.id, plugin.version))
+        .unwrap_or_default();
     let report = format!(
         r#"---- WinIsland Crash Report ----
 Time: {ts}
 Version: {}
 Thread: main
+{plugin_line}
 
 // The crash happened at
 Location: {location}
@@ -273,7 +308,10 @@ fn get_desktop_path() -> Option<std::path::PathBuf> {
 fn panic_hook(info: &PanicHookInfo) {
     log::logger().flush();
     let _ = fs::write(crash_flag_path(), "");
-    write_crash_report(info);
+    let plugin = winisland_plugin_host::fault::record_crash(&crate::platform::shell().config_dir())
+        .ok()
+        .flatten();
+    write_crash_report(info, plugin.as_deref());
 }
 
 pub fn init() -> Result<(), SetLoggerError> {

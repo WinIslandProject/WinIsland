@@ -6,9 +6,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use winisland_platform::{MediaSessionHandle, PlatformError, ThumbnailError, TrackInfo};
 
-use winisland_core::lyrics::LyricsMode;
-
-use super::{LyricsFetchRequest, MediaInfo, spawn_lyrics_fetch};
+use super::{LyricsFetchConfig, LyricsFetchRequest, MediaInfo, spawn_lyrics_fetch};
 
 const TIMELINE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const THUMBNAIL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
@@ -183,9 +181,7 @@ struct PendingMediaRequests {
 pub(super) fn fetch_properties(
     session: &Arc<dyn MediaSessionHandle>,
     info_tx: &watch::Sender<MediaInfo>,
-    lyrics_mode: LyricsMode,
-    lyrics_source: &str,
-    local_dir: Option<&str>,
+    lyrics: LyricsFetchConfig<'_>,
     thumbnail_fetcher: Option<&ThumbnailFetcher>,
     timeline_cache: &mut TimelineCache,
 ) -> Result<(), PlatformError> {
@@ -248,11 +244,12 @@ pub(super) fn fetch_properties(
                 title,
                 artist,
                 duration_secs: timeline.duration_secs,
-                mode: lyrics_mode,
-                source: lyrics_source.to_string(),
-                local_dir: local_dir.map(str::to_string),
+                mode: lyrics.mode,
+                source: lyrics.source.to_string(),
+                local_dir: lyrics.local_dir.map(str::to_string),
                 request_id,
             },
+            lyrics.bridge.cloned(),
         );
     }
     Ok(())

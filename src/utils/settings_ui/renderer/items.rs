@@ -669,6 +669,7 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
     let widget_layout = params.widget_layout;
     let plugin_widget_layout = params.plugin_widget_layout;
     let plugin_widgets = params.plugin_widgets;
+    let plugin_frames = params.plugin_frames;
     let widget_dragging = params.widget_dragging;
     let widget_drag_hover_slot = params.widget_drag_hover_slot;
     let widget_preview_hover_slot = params.widget_preview_hover_slot;
@@ -859,6 +860,7 @@ pub fn draw_items(params: DrawItemsParams<'_>) {
                     widget_layout,
                     plugin_widget_layout,
                     plugin_widgets,
+                    plugin_frames,
                     widget_dragging,
                     widget_drag_hover_slot,
                     widget_preview_hover_slot,

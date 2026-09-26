@@ -73,7 +73,7 @@ pub(super) fn clear_plugin_settings_icon_cache() {
 fn draw_plugin_settings_icon(
     drawing_context: &mut DrawingContext<'_>,
     painter: Painter<'_>,
-    page: &crate::core::plugin_settings::PluginSettingsPage,
+    page: &winisland_core::plugin_settings::PluginSettingsPage,
     rect: Rect,
 ) {
     if page.icon.is_empty() {

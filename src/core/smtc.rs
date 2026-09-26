@@ -195,6 +195,7 @@ impl SmtcListener {
         local_dir: Option<String>,
         allowed: Vec<String>,
         known_apps: Vec<String>,
+        lyrics_bridge: Option<winisland_plugin_host::lifecycle::LyricsBridge>,
     ) -> Self {
         let (info_tx, info_rx) = watch::channel(MediaInfo::default());
         let (enabled_tx, enabled_rx) = watch::channel(enabled);
@@ -227,6 +228,7 @@ impl SmtcListener {
                     allowed_apps_rx,
                     wake_rx,
                     known_apps,
+                    lyrics_bridge,
                 },
                 cancel,
             );
@@ -335,6 +337,14 @@ pub(super) struct LyricsFetchRequest {
     pub(super) request_id: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct LyricsFetchConfig<'a> {
+    pub(super) mode: LyricsMode,
+    pub(super) source: &'a str,
+    pub(super) local_dir: Option<&'a str>,
+    pub(super) bridge: Option<&'a winisland_plugin_host::lifecycle::LyricsBridge>,
+}
+
 impl LyricsFetchRequest {
     fn matches(&self, media: &MediaInfo) -> bool {
         media.title == self.title
@@ -343,7 +353,11 @@ impl LyricsFetchRequest {
     }
 }
 
-pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: LyricsFetchRequest) {
+pub(super) fn spawn_lyrics_fetch(
+    info_tx: &watch::Sender<MediaInfo>,
+    request: LyricsFetchRequest,
+    lyrics_bridge: Option<winisland_plugin_host::lifecycle::LyricsBridge>,
+) {
     let info_tx = info_tx.clone();
     tokio::spawn(async move {
         let lyrics = if request.mode == LyricsMode::Lrc {
@@ -371,7 +385,14 @@ pub(super) fn spawn_lyrics_fetch(info_tx: &watch::Sender<MediaInfo>, request: Ly
             )
             .await
         };
-        let lyrics = lyrics.map(crate::plugin::manager::apply_lyrics_transforms);
+        let lyrics = match (lyrics, lyrics_bridge) {
+            (Some(lyrics), Some(bridge)) => {
+                tokio::task::spawn_blocking(move || bridge.apply(lyrics))
+                    .await
+                    .ok()
+            }
+            (lyrics, _) => lyrics,
+        };
         let applied = info_tx.send_if_modified(|current| {
             if !request.matches(current) {
                 return false;

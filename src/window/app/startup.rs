@@ -95,16 +95,13 @@ impl App {
             self.create_host_backdrop(&window_ref);
             let is_light = window().theme(id) == Some(Theme::Light);
             self.is_light_theme = is_light;
-            crate::plugin::manager::update_host_state(crate::plugin::types::HostState {
-                theme: if is_light {
-                    "light".to_string()
-                } else {
-                    "dark".to_string()
-                },
-                ..Default::default()
-            });
-            self.plugin_mgr.load_all();
-            log::info!("{} plugin(s) loaded", self.plugin_mgr.len());
+            self.update_v2_host_state("", "", false);
+            if let Some(host) = &self.plugin_host {
+                for error in host.load_all() {
+                    log::warn!("Plugin load failed: {error}");
+                }
+                log::info!("{} ABI v2 plugin(s) loaded", host.len());
+            }
             match crate::platform::shell().tray_install(
                 crate::platform::tray_theme(is_light),
                 crate::platform::tray_labels(true),

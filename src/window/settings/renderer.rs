@@ -1,4 +1,4 @@
-use crate::ui::expanded::widget_view::draw_plugin_widget;
+use crate::ui::expanded::widget_view::draw_prepared_widget;
 use crate::ui::widget::expanded::draw_mini_card;
 use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, SettingsItem};
@@ -6,7 +6,9 @@ use crate::utils::settings_ui::{
     ActiveStepperValue, DrawItemsParams, SettingsPainter, WidgetSource, draw_items, ellipsize_text,
     settings_color, widget_grid_geom, widget_source_span,
 };
+use std::collections::HashMap;
 use winisland_core::i18n::tr;
+use winisland_plugin_host::draw::replay::PreparedFrame;
 use winisland_render::Renderer;
 use winisland_render::text::{DrawTextCachedParams, FontManager};
 use winisland_render::{Painter, Path, Point, Radius, Rect, Rgba, StrokeCap, StrokeJoin, Vec2};
@@ -115,6 +117,21 @@ impl SettingsApp {
         }
 
         self.ensure_items_cache();
+        let plugin_frames = self
+            .plugin_host
+            .as_ref()
+            .map(|host| {
+                self.plugin_widgets
+                    .iter()
+                    .filter_map(|widget| {
+                        host.prepare_widget_frame(widget.id)
+                            .ok()
+                            .flatten()
+                            .map(|frame| (widget.id, frame))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         let theme = self.theme();
         let win_w = self.win_w / scale;
         let win_h = self.win_h / scale;
@@ -187,6 +204,7 @@ impl SettingsApp {
                 widget_layout: &self.config.widget_layout,
                 plugin_widget_layout: &self.config.plugin_widget_layout,
                 plugin_widgets: &self.plugin_widgets,
+                plugin_frames: &plugin_frames,
                 widget_dragging: self.widget_dragging.as_ref(),
                 widget_drag_hover_slot: self.widget_drag_hover_slot,
                 widget_preview_hover_slot: self.widget_preview_hover_slot,
@@ -219,7 +237,7 @@ impl SettingsApp {
                 self.draw_plugins_page(drawing_context, painter, &theme, win_w, win_h);
             }
 
-            self.draw_widget_drag_overlay(painter, win_w, win_h);
+            self.draw_widget_drag_overlay(painter, win_w, win_h, &plugin_frames);
             self.draw_resource_editor(painter, &theme, win_w, win_h);
             self.draw_popup(painter, &theme);
             painter.restore();
@@ -252,7 +270,13 @@ impl SettingsApp {
         None
     }
 
-    fn draw_widget_drag_overlay(&self, painter: Painter<'_>, win_w: f32, win_h: f32) {
+    fn draw_widget_drag_overlay(
+        &self,
+        painter: Painter<'_>,
+        win_w: f32,
+        win_h: f32,
+        plugin_frames: &HashMap<u64, PreparedFrame>,
+    ) {
         let lift = self.widget_drag_lift_progress.clamp(0.0, 1.0);
         let lift_scale = 0.94 + 0.06 * (1.0 - (1.0 - lift).powi(3));
         if self.widget_editor_mode == WidgetEditorMode::Compact {
@@ -326,12 +350,9 @@ impl SettingsApp {
                     .plugin_widgets
                     .iter()
                     .find(|widget| widget.layout_id().as_ref() == Some(id))
+                    && let Some(frame) = plugin_frames.get(&widget.id)
                 {
-                    let span = widget.span();
-                    let logical_width = (span.0 as f32 * 60.0).max(1.0);
-                    let logical_height = (span.1 as f32 * 48.0).max(1.0);
-                    let scale = (w / logical_width).min(h / logical_height).min(1.0);
-                    draw_plugin_widget(painter, widget, x, y, w, h, scale, 255);
+                    draw_prepared_widget(painter, widget.id, frame, x, y, w, h, 255);
                 }
             }
         }

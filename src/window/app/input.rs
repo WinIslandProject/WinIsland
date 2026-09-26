@@ -227,14 +227,19 @@ impl App {
                     self.config.expanded_scale,
                 );
                 if music_on
-                    && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_TOGGLE_PLAY)
+                    && self.media_control_available(
+                        winisland_plugin_api::types::v2::context::MEDIA_CONTROL_TOGGLE_PLAY,
+                    )
                     && cx >= bx
                     && cx <= bx + bw
                     && cy >= by
                     && cy <= by + bh
                 {
                     trigger_pause_click(media.is_playing);
-                    self.dispatch_media_command(crate::plugin::types::MEDIA_COMMAND_TOGGLE_PLAY, 0);
+                    self.dispatch_media_command(
+                        winisland_plugin_api::types::v2::context::MEDIA_COMMAND_TOGGLE_PLAY,
+                        0,
+                    );
                     return;
                 }
 
@@ -245,7 +250,9 @@ impl App {
                     self.config.expanded_scale,
                 );
                 if music_on
-                    && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_PREVIOUS)
+                    && self.media_control_available(
+                        winisland_plugin_api::types::v2::context::MEDIA_CONTROL_PREVIOUS,
+                    )
                     && cx >= px
                     && cx <= px + pw
                     && cy >= py
@@ -253,7 +260,10 @@ impl App {
                 {
                     trigger_cover_flip();
                     trigger_prev_click();
-                    self.dispatch_media_command(crate::plugin::types::MEDIA_COMMAND_PREVIOUS, 0);
+                    self.dispatch_media_command(
+                        winisland_plugin_api::types::v2::context::MEDIA_COMMAND_PREVIOUS,
+                        0,
+                    );
                     return;
                 }
 
@@ -264,7 +274,9 @@ impl App {
                     self.config.expanded_scale,
                 );
                 if music_on
-                    && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_NEXT)
+                    && self.media_control_available(
+                        winisland_plugin_api::types::v2::context::MEDIA_CONTROL_NEXT,
+                    )
                     && cx >= nx
                     && cx <= nx + nw
                     && cy >= ny
@@ -272,7 +284,10 @@ impl App {
                 {
                     trigger_cover_flip();
                     trigger_next_click();
-                    self.dispatch_media_command(crate::plugin::types::MEDIA_COMMAND_NEXT, 0);
+                    self.dispatch_media_command(
+                        winisland_plugin_api::types::v2::context::MEDIA_COMMAND_NEXT,
+                        0,
+                    );
                     return;
                 }
 
@@ -282,8 +297,9 @@ impl App {
                     w as f32,
                     music_on,
                     self.config.expanded_scale,
-                ) && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_SEEK)
-                    && cx >= bar_left
+                ) && self.media_control_available(
+                    winisland_plugin_api::types::v2::context::MEDIA_CONTROL_SEEK,
+                ) && cx >= bar_left
                     && cx <= bar_right
                     && cy >= bar_top
                     && cy <= bar_top + bar_hit_h

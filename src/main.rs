@@ -31,7 +31,6 @@ fn main() {
         platform::update_capabilities(|caps| caps.autostart = false);
         log::warn!("Autostart is unavailable: {error}");
     }
-    logger::check_crash_flag();
     set_system_locale_provider(platform::system_locale);
     winisland_core::lyrics::set_simplify_hook(platform::to_simplified);
     init_i18n(&config.language);
@@ -50,6 +49,7 @@ fn main() {
     let Some(_instance_mutex) = acquire_instance_mutex(restart_requested) else {
         return;
     };
+    logger::check_crash_flag();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

@@ -72,7 +72,7 @@ impl App {
 
         self.poll_pending_plugin_install();
         self.poll_pending_plugin_marketplace();
-        if let Some(pages) = crate::plugin::manager::drain_settings_page_changes()
+        if let Some(pages) = self.next_v2_settings_pages()
             && let Some(settings) = self.settings.as_mut()
         {
             settings.set_plugin_settings_pages(pages);
@@ -224,7 +224,15 @@ impl App {
         };
         match rx.try_recv() {
             Ok(Ok((manifest, staging))) => {
-                if let Err(error) = self.plugin_mgr.activate_staged_plugin(&manifest, &staging) {
+                let activation = self
+                    .plugin_host
+                    .as_ref()
+                    .ok_or_else(|| "ABI v2 plugin host is unavailable".to_string())
+                    .and_then(|host| {
+                        host.activate_staged_plugin(&manifest, &staging)
+                            .map_err(|error| error.to_string())
+                    });
+                if let Err(error) = activation {
                     let _ = std::fs::remove_dir_all(staging);
                     Self::show_toast("Plugin Error", &error);
                     log::error!("Failed to activate installed plugin: {error}");
@@ -627,7 +635,9 @@ impl App {
             true
         } else if self.expanded
             && (self.springs.view.value as f64) < 0.5
-            && self.media_control_available(crate::plugin::types::MEDIA_CONTROL_SEEK)
+            && self.media_control_available(
+                winisland_plugin_api::types::v2::context::MEDIA_CONTROL_SEEK,
+            )
         {
             if let Some((bar_left, bar_right, bar_top, bar_hit_h)) = get_progress_bar_rect(
                 offset_x as f32,

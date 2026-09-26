@@ -459,7 +459,9 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             }
         });
 
-        if available_controls & crate::plugin::types::MEDIA_CONTROL_PREVIOUS != 0 {
+        if available_controls & winisland_plugin_api::types::v2::context::MEDIA_CONTROL_PREVIOUS
+            != 0
+        {
             draw_skip_button(
                 painter,
                 btn_cx - skip_gap,
@@ -473,7 +475,9 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             );
         }
 
-        if available_controls & crate::plugin::types::MEDIA_CONTROL_TOGGLE_PLAY != 0 {
+        if available_controls & winisland_plugin_api::types::v2::context::MEDIA_CONTROL_TOGGLE_PLAY
+            != 0
+        {
             draw_pause_control(
                 painter, btn_cx, btn_cy, pause_t, alpha, scale, use_blur, dt, text_color,
             );
@@ -494,7 +498,7 @@ pub fn draw_music_page(params: DrawMusicPageParams<'_>) {
             }
         });
 
-        if available_controls & crate::plugin::types::MEDIA_CONTROL_NEXT != 0 {
+        if available_controls & winisland_plugin_api::types::v2::context::MEDIA_CONTROL_NEXT != 0 {
             draw_skip_button(
                 painter,
                 btn_cx + skip_gap,

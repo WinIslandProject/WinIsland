@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 
 use winisland_render::{
@@ -6,6 +7,7 @@ use winisland_render::{
     Sampling, StrokeCap, StrokeJoin, TileMode, Vec2,
 };
 
+use crate::ui::expanded::widget_view::draw_prepared_widget;
 use crate::ui::widget::expanded::{
     draw_mini_card, draw_widget_preview as draw_widget_card_preview,
 };
@@ -20,6 +22,7 @@ use winisland_core::config::{
 };
 use winisland_core::i18n::tr;
 use winisland_core::widgets::PluginWidget;
+use winisland_plugin_host::draw::replay::PreparedFrame;
 
 use super::super::input::{
     COMPACT_WIDGET_ISLAND_PANEL_H, CompactWidgetGridGeom, WIDGET_ISLAND_PANEL_H,
@@ -48,6 +51,7 @@ pub(super) struct WidgetPreviewParams<'a> {
     pub(super) widget_layout: &'a [WidgetSlot],
     pub(super) plugin_widget_layout: &'a [PluginWidgetSlot],
     pub(super) plugin_widgets: &'a [PluginWidget],
+    pub(super) plugin_frames: &'a HashMap<u64, PreparedFrame>,
     pub(super) widget_dragging: Option<&'a WidgetSource>,
     pub(super) widget_drag_hover_slot: Option<WidgetEditorSlot>,
     pub(super) widget_preview_hover_slot: Option<WidgetEditorSlot>,
@@ -419,6 +423,7 @@ fn draw_library_tile(
     painter: Painter<'_>,
     source: &WidgetSource,
     plugin_widgets: &[PluginWidget],
+    plugin_frames: &HashMap<u64, PreparedFrame>,
     rect: Rect,
     hover: f32,
     theme: &SettingsTheme,
@@ -461,16 +466,18 @@ fn draw_library_tile(
                     .min(1.0);
                 let width = natural_width * scale;
                 let height = natural_height * scale;
-                crate::ui::expanded::widget_view::draw_plugin_widget(
-                    painter,
-                    widget,
-                    preview_rect.center_x() - width / 2.0,
-                    preview_rect.center_y() - height / 2.0,
-                    width,
-                    height,
-                    scale,
-                    255,
-                );
+                if let Some(frame) = plugin_frames.get(&widget.id) {
+                    draw_prepared_widget(
+                        painter,
+                        widget.id,
+                        frame,
+                        preview_rect.center_x() - width / 2.0,
+                        preview_rect.center_y() - height / 2.0,
+                        width,
+                        height,
+                        255,
+                    );
+                }
             }
         }
     }
@@ -606,6 +613,7 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         widget_layout,
         plugin_widget_layout,
         plugin_widgets,
+        plugin_frames,
         widget_dragging,
         widget_drag_hover_slot,
         widget_preview_hover_slot,
@@ -740,16 +748,9 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
         let rect = Rect::from_xywh(x, y, width, height);
         begin_card_transform(painter, rect, hover, drop);
         draw_card_feedback(painter, rect, 12.0 * geometry.cap_scale, hover, drop, theme);
-        crate::ui::expanded::widget_view::draw_plugin_widget(
-            painter,
-            widget,
-            x,
-            y,
-            width,
-            height,
-            geometry.cap_scale,
-            255,
-        );
+        if let Some(frame) = plugin_frames.get(&widget.id) {
+            draw_prepared_widget(painter, widget.id, frame, x, y, width, height, 255);
+        }
         painter.restore();
         let hovered = widget_preview_hover_slot.is_some_and(|slot| cells.contains(&slot));
         if dragging || hovered {
@@ -783,7 +784,15 @@ fn draw_expanded_widget_preview(params: WidgetPreviewParams<'_>) {
             } else {
                 0.0
             };
-            draw_library_tile(painter, source, plugin_widgets, rect, hover, theme);
+            draw_library_tile(
+                painter,
+                source,
+                plugin_widgets,
+                plugin_frames,
+                rect,
+                hover,
+                theme,
+            );
         }
     }
 }

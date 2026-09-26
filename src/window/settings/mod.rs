@@ -1,22 +1,24 @@
-use crate::core::plugin_settings::PluginSettingsPage;
 use crate::platform::{MonitorRef, WindowRef, window};
-use crate::plugin::manager::InstalledPlugin;
-use crate::plugin::marketplace::{MarketplaceCatalog, MarketplacePlugin};
+use crate::plugin::inventory::InstalledPlugin;
 use crate::utils::color::{SettingsTheme, dark_settings_theme, light_settings_theme};
 use crate::utils::settings_ui::items::{POPUP_MENU_R, SIDEBAR_PAD, SettingsItem};
 use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use winisland_core::anim::AnimPool;
 use winisland_core::config::AppConfig;
+use winisland_core::plugin_settings::PluginSettingsPage;
 use winisland_core::widgets::PluginWidget;
 use winisland_platform::{
     CursorKind, InputState, Key, LogicalWindowSize, MouseButton, MouseWheelDelta, PlatformEvent,
     SettingsSpec, Theme, TouchPhase, WindowId, WindowPoint, WindowPosition, WindowSize,
 };
+use winisland_plugin_host::host::PluginHost;
+use winisland_plugin_package::marketplace::{MarketplaceCatalog, MarketplacePlugin};
 use winisland_render::{Renderer, RendererTargetId};
 
 pub mod input;
@@ -234,6 +236,7 @@ pub struct SettingsApp {
     pub(crate) widget_drop_animation: Option<WidgetDropAnimation>,
     pub(crate) resource_editor_open: bool,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
+    pub(crate) plugin_host: Option<Rc<PluginHost>>,
     pub(crate) plugins: Vec<InstalledPlugin>,
     plugin_inventory_rx: Option<mpsc::Receiver<Vec<InstalledPlugin>>>,
     pub(crate) plugin_page_tab: PluginPageTab,
@@ -365,6 +368,7 @@ impl SettingsApp {
             widget_drop_animation: None,
             resource_editor_open: false,
             plugin_widgets,
+            plugin_host: None,
             plugins,
             plugin_inventory_rx: None,
             plugin_page_tab: PluginPageTab::Installed,
@@ -1364,6 +1368,10 @@ impl SettingsApp {
             crate::core::persistence::save_config(&self.config);
         }
         self.request_redraw();
+    }
+
+    pub(crate) fn set_plugin_host(&mut self, host: Option<Rc<PluginHost>>) {
+        self.plugin_host = host;
     }
 
     pub(crate) fn set_plugin_settings_pages(&mut self, pages: Vec<PluginSettingsPage>) {
