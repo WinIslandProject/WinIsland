@@ -27,6 +27,140 @@ pub struct MonitorInfo {
     pub bounds: Rect,
     pub work_area: Rect,
     pub primary: bool,
+    pub scale_factor: f64,
+    pub refresh_rate_millihertz: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl WindowSize {
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl WindowPosition {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WindowPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl WindowPoint {
+    pub const fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LogicalWindowSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+impl LogicalWindowSize {
+    pub const fn new(width: f64, height: f64) -> Self {
+        Self { width, height }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Theme {
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorKind {
+    Default,
+    Pointer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputState {
+    Pressed,
+    Released,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MouseWheelDelta {
+    Lines { x: f32, y: f32 },
+    Pixels { x: f64, y: f64 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Key {
+    Backspace,
+    Enter,
+    Escape,
+    ArrowLeft,
+    ArrowRight,
+    Character(String),
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TouchPhase {
+    Started,
+    Moved,
+    Ended,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OverlaySpec {
+    pub title: &'static str,
+    pub size: WindowSize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SettingsSpec {
+    pub title: &'static str,
+    pub logical_size: LogicalWindowSize,
+    pub monitor: Option<MonitorId>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OverlayStyles {
+    pub skip_taskbar: bool,
+    pub topmost: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HitRegion {
+    WholeWindow(bool),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HostBackdropParams {
+    pub enabled: bool,
+    pub screen_x: f32,
+    pub screen_y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub radius: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

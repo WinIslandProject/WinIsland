@@ -118,6 +118,8 @@ unsafe extern "system" fn collect_monitor(
             bounds: rect(info.rcMonitor),
             work_area: rect(info.rcWork),
             primary: info.dwFlags & 1 != 0,
+            scale_factor: 1.0,
+            refresh_rate_millihertz: None,
         });
     }
     true.into()
