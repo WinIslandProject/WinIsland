@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::{Arc, Mutex};
 
+use parking_lot::Mutex;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Variant::{VARIANT, VT_I4, VT_UI1, VT_UI4};
 use windows::Win32::System::Wmi::{ISWbemLocator, ISWbemObject, ISWbemServices, SWbemLocator};
@@ -44,10 +45,7 @@ impl WindowsBrightnessFeed {
 
 impl BrightnessFeed for WindowsBrightnessFeed {
     fn snapshot(&self) -> BrightnessSnapshot {
-        *self
-            .snapshot
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self.snapshot.lock()
     }
 
     fn set_level(&self, level: f32) {
@@ -205,9 +203,7 @@ unsafe fn set_brightness(object: &ISWbemObject, level: u8) -> windows::core::Res
 }
 
 fn publish(snapshot: &Mutex<BrightnessSnapshot>, level: f32, notify: bool) {
-    let mut current = snapshot
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut current = snapshot.lock();
     if (current.level - level).abs() > 0.001 && notify {
         current.revision = current.revision.wrapping_add(1);
     }

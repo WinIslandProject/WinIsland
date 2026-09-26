@@ -10,6 +10,7 @@ windows-registry = "0.6.1"
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Wmi", "Win32_System_Variant", "Win32_Globalization", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_LibraryLoader", "Win32_System_EventLog", "Win32_System_WinRT", "Win32_System_WinRT_Composition", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_Storage_Packaging_Appx", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Storage_FileSystem", "ApplicationModel", "Foundation", "Foundation_Collections", "Storage_Streams", "UI_Notifications", "UI_Notifications_Management", "UI_Composition", "UI_Composition_Desktop", "Media_Control", "Graphics_Imaging", "Data_Xml_Dom", "System"] }
 dirs = "6.0"
 log = { version = "0.4", features = ["std"] }
+parking_lot = "0.12"
 tray-icon = "0.24.1"
 image = "0.25"
 wasapi = "0.24.0"

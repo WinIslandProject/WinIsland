@@ -1,9 +1,10 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, Stream, StreamConfig};
+use parking_lot::{Mutex, RwLock};
 use pollkit::Cooldown;
 use realfft::RealFftPlanner;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
@@ -88,7 +89,7 @@ impl SpectrumAnalyzer {
         gate_override: &AtomicF32,
     ) {
         if !analysis_enabled(gate, gate_override) {
-            if let Ok(mut spectrum) = spectrum.try_lock() {
+            if let Some(mut spectrum) = spectrum.try_lock() {
                 *spectrum = [0.0; SPECTRUM_BAND_COUNT];
             }
             return;
@@ -119,7 +120,7 @@ impl SpectrumAnalyzer {
         for (output_band, (input_band, gain)) in SPECTRUM_OUTPUT_MAPPING.iter().enumerate() {
             final_bins[output_band] = raw_bins[*input_band] * gain;
         }
-        if let Ok(mut spectrum) = spectrum.try_lock() {
+        if let Some(mut spectrum) = spectrum.try_lock() {
             *spectrum = final_bins;
         }
     }
@@ -215,10 +216,7 @@ impl AudioProcessor {
             self.stop_workers();
             return [0.0; SPECTRUM_BAND_COUNT];
         }
-        *self
-            .spectrum
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        *self.spectrum.lock()
     }
 
     pub fn set_gate_override(&self, value: bool) {
@@ -227,10 +225,7 @@ impl AudioProcessor {
 
     pub fn set_target_app_id(&self, app_id: &str) {
         let changed = {
-            let mut target_app_id = self
-                .target_app_id
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_app_id = self.target_app_id.write();
             if *target_app_id == app_id {
                 false
             } else {
@@ -254,10 +249,7 @@ impl AudioProcessor {
             return;
         }
         let cancel = {
-            let mut workers = self
-                .workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut workers = self.workers.lock();
             if workers.is_some() {
                 return;
             }
@@ -276,21 +268,14 @@ impl AudioProcessor {
     }
 
     fn stop_workers(&self) {
-        let cancel = self
-            .workers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        let cancel = self.workers.lock().take();
         if let Some(cancel) = cancel {
             self.worker_generation.fetch_add(1, Ordering::AcqRel);
             cancel.cancel();
             self.target_process_id.store(0, Ordering::Relaxed);
             self.process_capture_active.store(false, Ordering::Release);
             self.gate.set(0.0);
-            *self
-                .spectrum
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = [0.0; SPECTRUM_BAND_COUNT];
+            *self.spectrum.lock() = [0.0; SPECTRUM_BAND_COUNT];
             log::info!("Audio media ended, stopping capture workers");
         }
     }
@@ -340,10 +325,7 @@ impl AudioProcessor {
                     }
                 }
 
-                let requested_app_id = target_app_id
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone();
+                let requested_app_id = target_app_id.read().clone();
                 if requested_app_id != current_target_app_id || now >= next_target_refresh {
                     current_target_app_id = requested_app_id;
                     current_target_process_id = meter
@@ -696,7 +678,7 @@ fn analysis_enabled(gate: &AtomicF32, gate_override: &AtomicF32) -> bool {
 
 fn reset_spectrum(analyzer: &mut SpectrumAnalyzer, spectrum: &Mutex<[f32; SPECTRUM_BAND_COUNT]>) {
     analyzer.input_len = 0;
-    if let Ok(mut spectrum) = spectrum.try_lock() {
+    if let Some(mut spectrum) = spectrum.try_lock() {
         *spectrum = [0.0; SPECTRUM_BAND_COUNT];
     }
 }

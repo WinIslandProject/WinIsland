@@ -8,10 +8,11 @@ use winisland_platform::{
 };
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
 use windows::ApplicationModel::AppDisplayInfo;
 use windows::Foundation::Size;
 use windows::UI::Notifications::Management::{
@@ -40,19 +41,11 @@ struct CancelSlot(Mutex<Option<Box<dyn Fn() + Send + Sync>>>);
 
 impl CancelSlot {
     fn set(&self, cancel: impl Fn() + Send + Sync + 'static) {
-        *self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(cancel));
+        *self.0.lock() = Some(Box::new(cancel));
     }
 
     fn cancel(&self) {
-        if let Some(cancel) = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
+        if let Some(cancel) = self.0.lock().take() {
             cancel();
         }
     }
