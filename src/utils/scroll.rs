@@ -1,16 +1,19 @@
-use crate::utils::font::{DrawTextCachedParams, FontManager};
-use skia_safe::{Canvas, ClipOp, FontStyle, Paint, Rect};
 use std::time::Instant;
+use winisland_render::FontStyle;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
+use winisland_render::{BlurSpec, Rgba};
+use winisland_render::{Painter, Rect};
 
 pub struct ScrollDrawParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub text: &'a str,
     pub x: f32,
     pub y: f32,
     pub max_w: f32,
     pub size: f32,
     pub style: FontStyle,
-    pub paint: &'a Paint,
+    pub color: Rgba,
+    pub blur: Option<BlurSpec>,
     pub scale: f32,
     pub render_as_paths: bool,
 }
@@ -40,14 +43,15 @@ impl ScrollText {
     }
 
     pub fn draw(&mut self, params: ScrollDrawParams<'_>) {
-        let canvas = params.canvas;
+        let painter = params.painter;
         let text = params.text;
         let x = params.x;
         let y = params.y;
         let max_w = params.max_w;
         let size = params.size;
         let style = params.style;
-        let paint = params.paint;
+        let color = params.color;
+        let blur = params.blur;
         let scale = params.scale;
         let render_as_paths = params.render_as_paths;
 
@@ -74,22 +78,19 @@ impl ScrollText {
                 }
             }
 
-            canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(x, y - size * 1.2, max_w, size * 1.5),
-                ClipOp::Intersect,
-                true,
-            );
+            painter.save();
+            painter.clip_rect(Rect::from_xywh(x, y - size * 1.2, max_w, size * 1.5));
 
             draw_text(
                 DrawTextCachedParams {
-                    canvas,
+                    painter,
                     text,
                     x: x - self.offset,
                     y,
                     size,
-                    bold: *style.weight() >= 700,
-                    paint,
+                    bold: style.weight().value() >= 700,
+                    color,
+                    blur,
                 },
                 render_as_paths,
             );
@@ -97,29 +98,31 @@ impl ScrollText {
             if next_x < x + max_w {
                 draw_text(
                     DrawTextCachedParams {
-                        canvas,
+                        painter,
                         text,
                         x: next_x,
                         y,
                         size,
-                        bold: *style.weight() >= 700,
-                        paint,
+                        bold: style.weight().value() >= 700,
+                        color,
+                        blur,
                     },
                     render_as_paths,
                 );
             }
-            canvas.restore();
+            painter.restore();
         } else {
             self.offset = 0.0;
             draw_text(
                 DrawTextCachedParams {
-                    canvas,
+                    painter,
                     text,
                     x,
                     y,
                     size,
-                    bold: *style.weight() >= 700,
-                    paint,
+                    bold: style.weight().value() >= 700,
+                    color,
+                    blur,
                 },
                 render_as_paths,
             );

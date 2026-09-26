@@ -1,4 +1,4 @@
-use skia_safe::{Color, Image, Rect};
+use winisland_render::{Image, Rect, Rgba};
 
 use crate::utils::settings_ui::items::{
     CONTENT_PADDING, GROUP_INNER_PAD, POPUP_BTN_H, POPUP_BTN_W, ROW_HEIGHT, STEPPER_BTN_SIZE,
@@ -99,12 +99,22 @@ impl<A> SettingsPage<A> {
         );
     }
 
-    pub(crate) fn center_link(&mut self, label: String, color: Color, action: A) {
-        self.push_action(SettingsItem::CenterLink { label, color }, action);
+    pub(crate) fn center_link(&mut self, label: String, color: impl Into<Rgba>, action: A) {
+        self.push_action(
+            SettingsItem::CenterLink {
+                label,
+                color: color.into(),
+            },
+            action,
+        );
     }
 
-    pub(crate) fn center_text(&mut self, text: String, size: f32, color: Color) {
-        self.push(SettingsItem::CenterText { text, size, color });
+    pub(crate) fn center_text(&mut self, text: String, size: f32, color: impl Into<Rgba>) {
+        self.push(SettingsItem::CenterText {
+            text,
+            size,
+            color: color.into(),
+        });
     }
 
     pub(crate) fn center_image(&mut self, image: Image, size: f32, height: f32) {

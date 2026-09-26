@@ -1,4 +1,4 @@
-use skia_safe::{Contains, Point, Rect};
+use winisland_render::{Point, Rect};
 
 use crate::utils::settings_ui::items::SettingsItem;
 use crate::utils::settings_ui::{

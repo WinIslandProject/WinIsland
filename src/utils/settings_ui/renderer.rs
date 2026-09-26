@@ -2,7 +2,7 @@ mod controls;
 mod items;
 mod widget_preview;
 
-use skia_safe::{Canvas, Rect};
+use winisland_render::{Painter, Rect};
 
 use crate::utils::color::SettingsTheme;
 use crate::utils::settings_ui::input::{
@@ -14,7 +14,8 @@ use winisland_core::widgets::PluginWidget;
 use super::anim::SwitchAnimator;
 use super::items::SettingsItem;
 
-pub(crate) use controls::{SettingsPainter, ellipsize_text, settings_paint};
+pub(crate) use crate::utils::color::settings_color;
+pub(crate) use controls::{SettingsPainter, ellipsize_text};
 pub use items::{content_height, draw_items};
 
 pub struct ActiveStepperValue<'a> {
@@ -24,7 +25,7 @@ pub struct ActiveStepperValue<'a> {
 }
 
 pub struct DrawItemsParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub items: &'a [SettingsItem],
     pub start_y: f32,
     pub width: f32,

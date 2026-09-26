@@ -1,17 +1,16 @@
 use crate::icons::arrows::draw_arrow_left;
 use crate::plugin::types::{INTERFACE_VERSION_1, WidgetDrawContextV1};
 use crate::ui::widget::expanded::{draw_widget, widget_animates, widget_grid_layout};
-use skia_safe::{Canvas, Color, Rect};
-use std::ffi::c_void;
 use winisland_core::config::{
     PluginWidgetSlot, WIDGET_GRID_SLOTS, WidgetSlot, first_free_anchor, plugin_widget_slot,
     span_cells, widget_footprint,
 };
 use winisland_core::widgets::WidgetManager;
+use winisland_render::{Painter, Rect, Rgba};
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_plugin_widget(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     widget: &winisland_core::widgets::PluginWidget,
     x: f32,
     y: f32,
@@ -24,6 +23,10 @@ pub fn draw_plugin_widget(
         return;
     };
     let inv_scale = if scale > 0.0 { 1.0 / scale } else { 1.0 };
+    let save_count = painter.save();
+    painter.clip_rect_with_anti_alias(Rect::from_xywh(x, y, width, height), false);
+    painter.translate(winisland_render::Vec2::new(x, y));
+    crate::plugin::manager::reset_draw_transform();
     let ctx = WidgetDrawContextV1 {
         struct_size: std::mem::size_of::<WidgetDrawContextV1>() as u32,
         version: INTERFACE_VERSION_1,
@@ -31,20 +34,16 @@ pub fn draw_plugin_widget(
         height: height * inv_scale,
         scale,
         alpha,
-        canvas_handle: canvas as *const Canvas as *mut c_void,
+        canvas_handle: painter.plugin_canvas_handle_v1(),
         draw: crate::plugin::manager::draw_api(),
     };
-    let save_count = canvas.save();
-    canvas.clip_rect(Rect::from_xywh(x, y, width, height), None, false);
-    canvas.translate((x, y));
-    crate::plugin::manager::reset_draw_transform();
     callback.draw(&ctx);
-    canvas.restore_to_count(save_count);
+    painter.restore_to(save_count);
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_widget_page(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     ox: f32,
     oy: f32,
     w: f32,
@@ -54,7 +53,7 @@ pub fn draw_widget_page(
     widget_layout: &[WidgetSlot],
     plugin_widget_layout: &[PluginWidgetSlot],
     plugin_widgets: &WidgetManager,
-    text_color: Color,
+    text_color: Rgba,
     show_page_switcher: bool,
 ) -> bool {
     let mut animating = false;
@@ -75,7 +74,7 @@ pub fn draw_widget_page(
             let (slot_x, slot_y, tile_w, tile_h) = layout.footprint_rect(kind, slot);
 
             draw_widget(
-                canvas, kind, slot_x, slot_y, tile_w, tile_h, scale, alpha, text_color,
+                painter, kind, slot_x, slot_y, tile_w, tile_h, scale, alpha, text_color,
             );
 
             for cell in widget_footprint(kind, slot) {
@@ -108,13 +107,15 @@ pub fn draw_widget_page(
                 occupied[cell] = true;
             }
             let (slot_x, slot_y, tile_w, tile_h) = layout.footprint_rect_span(anchor, span);
-            draw_plugin_widget(canvas, widget, slot_x, slot_y, tile_w, tile_h, scale, alpha);
+            draw_plugin_widget(
+                painter, widget, slot_x, slot_y, tile_w, tile_h, scale, alpha,
+            );
         }
     }
 
     if show_page_switcher && alpha > 0 {
         draw_arrow_left(
-            canvas,
+            painter,
             ox + 7.5 * scale,
             oy + h / 2.0,
             alpha,

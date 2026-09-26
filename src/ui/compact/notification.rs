@@ -4,11 +4,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use skia_safe::canvas::SrcRectConstraint;
-use skia_safe::{
-    Canvas, ClipOp, Color, Data, FilterMode, FontStyle, Image, MipmapMode, Paint, RRect, Rect,
-    SamplingOptions,
-};
+use winisland_render::{Image, ImageOptions, Painter, Radius, Rect, Rgba, Sampling, Vec2};
+
 use windows::ApplicationModel::AppDisplayInfo;
 use windows::Foundation::Size;
 use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
@@ -20,8 +17,9 @@ use windows::core::HRESULT;
 
 use crate::ui::compact::notification_event::{self, NotificationEventSubscription};
 use crate::ui::compact::{CompactOverlayState, CompactSize};
-use crate::utils::font::DrawTextCachedParams;
 use crate::utils::scroll::{ScrollDrawParams, ScrollText};
+use winisland_render::FontStyle;
+use winisland_render::text::DrawTextCachedParams;
 
 const DISPLAY_DURATION: Duration = Duration::from_secs(5);
 const ENTER_DURATION: Duration = Duration::from_millis(220);
@@ -763,54 +761,45 @@ impl NotificationIndicator {
         }
     }
 
-    pub(super) fn draw(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
+    pub(super) fn draw(&self, painter: Painter<'_>, rect: Rect, scale: f32, alpha: f32) {
         let (opacity, offset_y) = self.presentation();
         let alpha = (alpha * opacity * 255.0).round().clamp(0.0, 255.0) as u8;
         if alpha == 0 {
             return;
         }
 
-        canvas.save();
-        canvas.translate((0.0, offset_y * scale));
+        painter.save();
+        painter.translate(Vec2::new(0.0, offset_y * scale));
 
         let has_icon = self.icon.is_some();
         let content_left = if has_icon {
-            rect.left() + 72.0 * scale
+            rect.left + 72.0 * scale
         } else {
-            rect.left() + 20.0 * scale
+            rect.left + 20.0 * scale
         };
-        let content_width = rect.right() - 18.0 * scale - content_left;
+        let content_width = rect.right - 18.0 * scale - content_left;
         if content_width <= 0.0 {
-            canvas.restore();
+            painter.restore();
             return;
         }
 
         if let Some(icon) = &self.icon {
-            draw_notification_icon(canvas, icon, rect, scale, alpha);
+            draw_notification_icon(painter, icon, rect, scale, alpha);
         }
 
-        let mut app_paint = Paint::default();
-        app_paint.set_anti_alias(true);
-        app_paint.set_color(Color::from_argb((alpha as f32 * 0.65) as u8, 255, 255, 255));
-        let mut title_paint = Paint::default();
-        title_paint.set_anti_alias(true);
-        title_paint.set_color(Color::from_argb(alpha, 255, 255, 255));
-        let mut detail_paint = Paint::default();
-        detail_paint.set_anti_alias(true);
-        detail_paint.set_color(Color::from_argb((alpha as f32 * 0.72) as u8, 255, 255, 255));
-
-        let top = rect.top();
+        let top = rect.top;
         if !self.app_name.is_empty() {
             draw_notification_text(
                 &self.app_name_scroll,
                 DrawTextCachedParams {
-                    canvas,
+                    painter,
                     text: &self.app_name,
                     x: content_left,
                     y: top + 22.0 * scale,
                     size: 11.0 * scale,
                     bold: false,
-                    paint: &app_paint,
+                    color: Rgba::WHITE.with_alpha((alpha as f32 * 0.65) as u8),
+                    blur: None,
                 },
                 content_width,
                 scale,
@@ -826,13 +815,14 @@ impl NotificationIndicator {
         draw_notification_text(
             &self.title_scroll,
             DrawTextCachedParams {
-                canvas,
+                painter,
                 text: &self.title,
                 x: content_left,
                 y: title_y,
                 size: 13.0 * scale,
                 bold: true,
-                paint: &title_paint,
+                color: Rgba::WHITE.with_alpha(alpha),
+                blur: None,
             },
             content_width,
             scale,
@@ -841,19 +831,20 @@ impl NotificationIndicator {
             draw_notification_text(
                 &self.detail_scroll,
                 DrawTextCachedParams {
-                    canvas,
+                    painter,
                     text: &self.detail,
                     x: content_left,
                     y: title_y + DETAIL_LINE_GAP * scale,
                     size: 11.0 * scale,
                     bold: false,
-                    paint: &detail_paint,
+                    color: Rgba::WHITE.with_alpha((alpha as f32 * 0.72) as u8),
+                    blur: None,
                 },
                 content_width,
                 scale,
             );
         }
-        canvas.restore();
+        painter.restore();
     }
 
     fn presentation(&self) -> (f32, f32) {
@@ -885,7 +876,7 @@ impl NotificationIndicator {
 }
 
 fn decode_notification_icon(icon: NotificationIconData) -> Option<NotificationIcon> {
-    Image::from_encoded(Data::new_copy(&icon.bytes)).map(|image| NotificationIcon {
+    Image::from_encoded(&icon.bytes).map(|image| NotificationIcon {
         image,
         visible_bounds: icon.visible_bounds,
     })
@@ -907,21 +898,22 @@ fn draw_notification_text(
         FontStyle::normal()
     };
     scroll.borrow_mut().draw(ScrollDrawParams {
-        canvas: params.canvas,
+        painter: params.painter,
         text: params.text,
         x: params.x,
         y: params.y,
         max_w: max_width,
         size: params.size,
         style,
-        paint: params.paint,
+        color: params.color,
+        blur: params.blur,
         scale,
         render_as_paths: false,
     });
 }
 
 fn draw_notification_icon(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     icon: &NotificationIcon,
     rect: Rect,
     scale: f32,
@@ -929,7 +921,7 @@ fn draw_notification_icon(
 ) {
     let size = 42.0 * scale;
     let icon_rect = Rect::from_xywh(
-        rect.left() + 18.0 * scale,
+        rect.left + 18.0 * scale,
         rect.center_y() - size / 2.0,
         size,
         size,
@@ -963,21 +955,15 @@ fn draw_notification_icon(
         source.width() * scale,
         source.height() * scale,
     );
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_alpha_f(alpha as f32 / 255.0);
-    canvas.save();
-    canvas.clip_rrect(
-        RRect::new_rect_xy(icon_rect, 11.0 * scale, 11.0 * scale),
-        ClipOp::Intersect,
-        true,
-    );
-    canvas.draw_image_rect_with_sampling_options(
+    painter.save();
+    painter.clip_round_rect(icon_rect, Radius::uniform(11.0 * scale));
+    painter.draw_image(
         &icon.image,
-        Some((&source, SrcRectConstraint::Fast)),
         destination,
-        SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
-        &paint,
+        &ImageOptions::default()
+            .with_src(source)
+            .with_sampling(Sampling::LinearLinear)
+            .with_alpha(alpha),
     );
-    canvas.restore();
+    painter.restore();
 }

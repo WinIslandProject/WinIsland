@@ -4,10 +4,10 @@ use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
 
-use crate::core::render::draw_island;
+use crate::ui::island::draw_island;
 use crate::utils::blur::calculate_blur_sigmas;
 use crate::utils::mouse::get_global_cursor_pos;
-use crate::window::renderer::HostBackdropParams;
+use crate::window::backdrop::HostBackdropParams;
 
 use super::App;
 use super::input::InputSource;
@@ -196,7 +196,7 @@ impl App {
                                         let mut hasher = DefaultHasher::new();
                                         source.cover_data.hash(&mut hasher);
                                         (
-                                            Some(skia_safe::Data::new_copy(&source.cover_data)),
+                                            Some(std::sync::Arc::from(source.cover_data)),
                                             hasher.finish(),
                                         )
                                     } else {
@@ -324,9 +324,8 @@ impl App {
                                 ("", "")
                             };
 
-                        let main_target = renderer.main_target();
-                        let host_backdrop = renderer.update_host_backdrop(
-                            main_target,
+                        let host_backdrop = super::system::update_host_backdrop(
+                            &mut self.host_backdrop,
                             HostBackdropParams {
                                 enabled: !compact_components_hidden
                                     && matches!(
@@ -342,13 +341,14 @@ impl App {
                                 radius: self.springs.r.value,
                             },
                         );
+                        let main_target = renderer.main_target();
                         let render_result =
-                            renderer.draw(main_target, |drawing_context, surface| {
+                            renderer.frame(main_target, |drawing_context, painter| {
                                 draw_island(
                                     drawing_context,
-                                    surface,
-                                    crate::core::render::DrawIslandParams {
-                                        layout: crate::core::render::LayoutParams {
+                                    painter,
+                                    crate::ui::island::DrawIslandParams {
+                                        layout: crate::ui::island::LayoutParams {
                                             current_w: self.springs.w.value,
                                             current_h: self.springs.h.value,
                                             current_r: self.springs.r.value,
@@ -369,7 +369,7 @@ impl App {
                                             stable_island_y: island_layout.stable_island_y as f32,
                                             base_h: compact_content_h,
                                         },
-                                        media: crate::core::render::MediaParams {
+                                        media: crate::ui::island::MediaParams {
                                             media: if compact_components_hidden {
                                                 &default_media_info
                                             } else {
@@ -379,7 +379,7 @@ impl App {
                                                 && !compact_components_hidden,
                                             available_controls,
                                         },
-                                        lyrics: crate::core::render::LyricsParams {
+                                        lyrics: crate::ui::island::LyricsParams {
                                             current_lyric: &self.lyrics.current_text,
                                             current_secondary_lyric,
                                             old_lyric: &self.lyrics.old_text,
@@ -392,7 +392,7 @@ impl App {
                                             lyric_scroll_offset: self.lyrics.scroll_offset,
                                             lyric_side_gap: self.config.lyrics_side_gap,
                                         },
-                                        style: crate::core::render::StyleParams {
+                                        style: crate::ui::island::StyleParams {
                                             island_style: if compact_components_hidden {
                                                 "solid"
                                             } else {
@@ -427,7 +427,7 @@ impl App {
                             });
                         self.renderer = Some(renderer);
                         if let Err(error) = render_result {
-                            self.invalidate_renderer(&error, Instant::now());
+                            self.invalidate_renderer(&error.to_string(), Instant::now());
                         }
                     }
                 }

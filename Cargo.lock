@@ -25,7 +25,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.11.0",
- "skia-safe",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",
@@ -37,6 +36,7 @@ dependencies = [
  "windows-numerics",
  "winisland-core",
  "winisland-plugin-api",
+ "winisland-render",
  "winit",
  "winres",
  "zip",
@@ -5211,6 +5211,17 @@ dependencies = [
  "thiserror 2.0.20",
  "toml 1.1.4+spec-1.1.0",
  "zip",
+]
+
+[[package]]
+name = "winisland-render"
+version = "1.3.9"
+dependencies = [
+ "image",
+ "log",
+ "skia-safe",
+ "thiserror 2.0.20",
+ "windows",
 ]
 
 [[package]]

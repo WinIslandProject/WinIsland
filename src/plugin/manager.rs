@@ -23,6 +23,7 @@ use super::types::{
 };
 use super::zip_loader::{self, PluginManifest};
 use skia_safe::{Canvas, Color, ColorType, ISize, ImageInfo, Paint, Rect};
+use winisland_render::plugin_v1_backend as skia_safe;
 
 const MAX_COVER_BYTES: u32 = 16 * 1024 * 1024;
 const MAX_CONTEXTS_PER_PLUGIN: usize = 64;
@@ -1230,14 +1231,21 @@ unsafe extern "C" fn ffi_draw_text(
         };
         let (tx, ty) = draw_transform();
         let size = size.clamp(1.0, 512.0);
-        let font = crate::utils::font::FontManager::global().get_font(size * ctx.scale, bold != 0);
-        let (_, metrics) = font.metrics();
-        let baseline = (y + ty) * ctx.scale - metrics.ascent;
-        canvas.draw_str(
+        let font_manager = winisland_render::text::FontManager::global();
+        let scaled_size = size * ctx.scale;
+        let baseline = (y + ty) * ctx.scale - font_manager.ascent(scaled_size, bold != 0);
+        font_manager.draw_plugin_str_v1(
+            canvas,
             text,
-            ((x + tx) * ctx.scale, baseline),
-            &font,
-            &argb_paint(color, ctx.alpha),
+            winisland_render::Point::new((x + tx) * ctx.scale, baseline),
+            scaled_size,
+            bold != 0,
+            winisland_render::Rgba::from_argb(
+                (((color >> 24) & 0xff) as u8 as u32 * ctx.alpha as u32 / 255) as u8,
+                (color >> 16) as u8,
+                (color >> 8) as u8,
+                color as u8,
+            ),
         );
     });
 }
@@ -1255,10 +1263,13 @@ unsafe extern "C" fn ffi_measure_text(
         return 0.0;
     };
     let size = size.clamp(1.0, 512.0);
-    let font = crate::utils::font::FontManager::global().get_font(size * ctx.scale, bold != 0);
-    let (advance, _) = font.measure_str(text, None);
+    let advance = winisland_render::text::FontManager::global().measure_str(
+        text,
+        size * ctx.scale,
+        bold != 0,
+    );
     if ctx.scale > 0.0 {
-        advance / ctx.scale
+        advance.width() / ctx.scale
     } else {
         0.0
     }

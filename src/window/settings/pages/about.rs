@@ -1,9 +1,9 @@
 use std::cell::OnceCell;
 
-use skia_safe::{Data, Image};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::PCWSTR;
+use winisland_render::Image;
 
 use crate::utils::settings_ui::ClickResult;
 use crate::utils::settings_ui::items::SettingsItem;
@@ -23,10 +23,8 @@ thread_local! {
 fn app_icon() -> Image {
     ABOUT_ICON.with(|icon| {
         icon.get_or_init(|| {
-            Image::from_encoded(Data::new_copy(include_bytes!(
-                "../../../../resources/icon-dark.png"
-            )))
-            .expect("Failed to load about page icon")
+            Image::from_encoded(include_bytes!("../../../../resources/icon-dark.png"))
+                .expect("Failed to load about page icon")
         })
         .clone()
     })

@@ -2,18 +2,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use skia_safe::{
-    AlphaType, Color, ColorType, FilterMode, ISize, Image, ImageInfo, MipmapMode, Paint, Rect,
-    SamplingOptions, surfaces,
-};
+use winisland_render::{Image, Rgba};
 
 const PALETTE_SAMPLE_SIZE: i32 = 8;
 
 thread_local! {
-    static COLOR_CACHE: RefCell<HashMap<u64, Arc<[Color]>>> = RefCell::new(HashMap::new());
+    static COLOR_CACHE: RefCell<HashMap<u64, Arc<[Rgba]>>> = RefCell::new(HashMap::new());
 }
 
-pub(super) fn get_palette_from_image(img: &Image, cache_key: u64) -> Arc<[Color]> {
+pub(super) fn get_palette_from_image(img: &Image, cache_key: u64) -> Arc<[Rgba]> {
     COLOR_CACHE.with(|cache| {
         let mut cache_mut = cache.borrow_mut();
         if cache_mut.len() > 50
@@ -26,7 +23,7 @@ pub(super) fn get_palette_from_image(img: &Image, cache_key: u64) -> Arc<[Color]
         }
         let mut palette = Vec::with_capacity(3);
         if let Some((r_avg, g_avg, b_avg)) = average_image_color(img) {
-            let brighten = |r: f32, g: f32, b: f32, factor: f32| -> Color {
+            let brighten = |r: f32, g: f32, b: f32, factor: f32| -> Rgba {
                 let mut r = r * factor;
                 let mut g = g * factor;
                 let mut b = b * factor;
@@ -39,7 +36,7 @@ pub(super) fn get_palette_from_image(img: &Image, cache_key: u64) -> Arc<[Color]
                     b += boost;
                 }
 
-                Color::from_rgb(r.min(255.0) as u8, g.min(255.0) as u8, b.min(255.0) as u8)
+                Rgba::from_rgb(r.min(255.0) as u8, g.min(255.0) as u8, b.min(255.0) as u8)
             };
 
             let primary = brighten(r_avg, g_avg, b_avg, 1.3);
@@ -50,9 +47,9 @@ pub(super) fn get_palette_from_image(img: &Image, cache_key: u64) -> Arc<[Color]
             palette.push(primary);
         }
         if palette.is_empty() {
-            palette.push(Color::from_rgb(200, 200, 200));
+            palette.push(Rgba::from_rgb(200, 200, 200));
         }
-        let palette: Arc<[Color]> = Arc::from(palette);
+        let palette: Arc<[Rgba]> = Arc::from(palette);
         cache_mut.insert(cache_key, palette.clone());
         palette
     })
@@ -62,25 +59,7 @@ fn average_image_color(image: &Image) -> Option<(f32, f32, f32)> {
     if image.width() <= 0 || image.height() <= 0 {
         return None;
     }
-    let info = ImageInfo::new(
-        ISize::new(PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE),
-        ColorType::BGRA8888,
-        AlphaType::Premul,
-        None,
-    );
-    let mut surface = surfaces::raster(&info, None, None)?;
-    let paint = Paint::default();
-    surface.canvas().draw_image_rect_with_sampling_options(
-        image,
-        None,
-        Rect::from_wh(PALETTE_SAMPLE_SIZE as f32, PALETTE_SAMPLE_SIZE as f32),
-        SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
-        &paint,
-    );
-    let mut pixels = [0u8; (PALETTE_SAMPLE_SIZE as usize).pow(2) * 4];
-    if !surface.read_pixels(&info, &mut pixels, info.min_row_bytes(), (0, 0)) {
-        return None;
-    }
+    let pixels = image.sample_bgra8(PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE)?;
     let mut red = 0u32;
     let mut green = 0u32;
     let mut blue = 0u32;

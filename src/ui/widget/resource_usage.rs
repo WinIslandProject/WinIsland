@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::time::{Duration, Instant};
 
-use skia_safe::Color;
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
@@ -18,6 +17,7 @@ use windows::core::{Interface, PCWSTR};
 use winisland_core::config::{
     ResourceMetricConfig, ResourceMetricKind, default_resource_metrics, normalize_resource_metrics,
 };
+use winisland_render::Rgba;
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const TRANSITION_DURATION: Duration = Duration::from_millis(400);
@@ -262,21 +262,21 @@ pub(crate) fn is_animating(metrics: &[ResourceMetricConfig]) -> bool {
     })
 }
 
-pub(crate) fn metric_color(value: u32) -> Color {
-    Color::from_rgb(
+pub(crate) fn metric_color(value: u32) -> Rgba {
+    Rgba::from_rgb(
         ((value >> 16) & 0xff) as u8,
         ((value >> 8) & 0xff) as u8,
         (value & 0xff) as u8,
     )
 }
 
-pub(crate) fn alpha_color(color: Color, alpha: u8) -> Color {
-    Color::from_argb(alpha, color.r(), color.g(), color.b())
+pub(crate) fn alpha_color(color: Rgba, alpha: u8) -> Rgba {
+    color.with_alpha(alpha)
 }
 
-pub(crate) fn usage_color(base: Color, usage: f32) -> Color {
-    const WARNING_COLOR: Color = Color::from_rgb(255, 159, 10);
-    const CRITICAL_COLOR: Color = Color::from_rgb(255, 69, 58);
+pub(crate) fn usage_color(base: Rgba, usage: f32) -> Rgba {
+    const WARNING_COLOR: Rgba = Rgba::from_rgb(255, 159, 10);
+    const CRITICAL_COLOR: Rgba = Rgba::from_rgb(255, 69, 58);
     if usage <= 0.75 {
         base
     } else if usage <= 0.9 {
@@ -286,9 +286,9 @@ pub(crate) fn usage_color(base: Color, usage: f32) -> Color {
     }
 }
 
-fn blend_color(from: Color, to: Color, amount: f32) -> Color {
+fn blend_color(from: Rgba, to: Rgba, amount: f32) -> Rgba {
     let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount) as u8;
-    Color::from_rgb(
+    Rgba::from_rgb(
         mix(from.r(), to.r()),
         mix(from.g(), to.g()),
         mix(from.b(), to.b()),

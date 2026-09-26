@@ -6,10 +6,10 @@ use winit::platform::windows::WindowExtWindows;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::utils::font::FontManager;
 use winisland_core::config::{
     DockPosition, MAX_HIDDEN_WIDTH, MAX_LYRIC_WIDTH, PADDING, TOP_OFFSET,
 };
+use winisland_render::text::FontManager;
 
 use super::{App, DEFAULT_ANIMATION_REFRESH_RATE_MILLIHERTZ, IslandLayout};
 
@@ -28,7 +28,7 @@ impl App {
             compact_scale,
         );
         let compact_lyric_height = if self.config.show_secondary_lyrics {
-            crate::core::render::mini_lyric_pair_height(self.config.font_size, compact_scale)
+            crate::ui::island::mini_lyric_pair_height(self.config.font_size, compact_scale)
         } else {
             self.config.base_height * compact_scale
         };
@@ -445,7 +445,7 @@ impl App {
             return base_height;
         }
 
-        base_height.max(crate::core::render::mini_lyric_pair_height(
+        base_height.max(crate::ui::island::mini_lyric_pair_height(
             self.config.font_size,
             scale,
         ))
@@ -473,9 +473,12 @@ impl App {
 
     pub(super) fn measure_lyric_text_width(&self, text: &str) -> f32 {
         let scale = self.config.compact_scale.max(f32::EPSILON);
-        let font_size = crate::core::render::mini_lyric_font_size(self.config.font_size, scale);
-        FontManager::global().measure_text_cached(text, font_size, skia_safe::FontStyle::normal())
-            / scale
+        let font_size = crate::ui::island::mini_lyric_font_size(self.config.font_size, scale);
+        FontManager::global().measure_text_cached(
+            text,
+            font_size,
+            winisland_render::FontStyle::normal(),
+        ) / scale
     }
 
     fn measure_lyric_pair_width(&self, primary: &str, secondary: &str) -> f32 {
@@ -497,7 +500,7 @@ impl App {
 
             if has_visible_lyrics {
                 let (left_inset, right_inset) =
-                    crate::core::render::mini_lyric_insets(self.config.lyrics_side_gap);
+                    crate::ui::island::mini_lyric_insets(self.config.lyrics_side_gap);
                 let horizontal_insets = left_inset + right_inset;
                 if self.config.lyrics_scroll {
                     let (primary, secondary) = self.displayed_lyric_texts();

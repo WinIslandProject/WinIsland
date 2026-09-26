@@ -1,7 +1,7 @@
 use std::cell::LazyCell;
 
 use image::imageops::FilterType;
-use skia_safe::{AlphaType, Canvas, ColorType, Data, Image, ImageInfo, Paint, Point, Rect, images};
+use winisland_render::{Image, ImageOptions, Painter, Point, Rect};
 
 thread_local! {
     static SUN_ICONS: LazyCell<[Option<Image>; 2]> = LazyCell::new(|| [
@@ -40,22 +40,17 @@ fn load_icon(bytes: &[u8]) -> Option<Image> {
         pixel[1] = pixel[3];
         pixel[2] = pixel[3];
     }
-    let info = ImageInfo::new((64, 64), ColorType::RGBA8888, AlphaType::Premul, None);
-    images::raster_from_data(&info, Data::new_copy(&pixels), 64 * 4)
+    Image::from_rgba8_premul(64, 64, &pixels)
 }
 
-pub fn draw_brightness_icon(canvas: &Canvas, center: Point, size: f32, alpha: u8, level: f32) {
+pub fn draw_brightness_icon(painter: Painter<'_>, center: Point, size: f32, alpha: u8, level: f32) {
     let index = usize::from(level >= 0.5);
     SUN_ICONS.with(|icons| {
         if let Some(icon) = icons[index].as_ref() {
-            let mut paint = Paint::default();
-            paint.set_anti_alias(true);
-            paint.set_alpha(alpha);
-            canvas.draw_image_rect(
+            painter.draw_image(
                 icon,
-                None,
                 Rect::from_xywh(center.x - size / 2.0, center.y - size / 2.0, size, size),
-                &paint,
+                &ImageOptions::default().with_alpha(alpha),
             );
         }
     });

@@ -8,7 +8,6 @@ use crate::utils::settings_ui::{
     SwitchAnimator, WidgetDropAnimation, WidgetEditorHover, WidgetEditorMode, WidgetEditorSlot,
     WidgetSource,
 };
-use crate::window::renderer::{Renderer, RendererTargetId};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
@@ -16,6 +15,7 @@ use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use winisland_core::anim::AnimPool;
 use winisland_core::config::AppConfig;
 use winisland_core::widgets::PluginWidget;
+use winisland_render::{Renderer, RendererTargetId};
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -155,7 +155,7 @@ pub(crate) struct PendingPluginSetting {
 }
 
 pub(crate) struct NumberInput {
-    pub(crate) rect: skia_safe::Rect,
+    pub(crate) rect: winisland_render::Rect,
     pub(crate) text: String,
     pub(crate) on_commit: NumberInputHandler,
 }
@@ -573,7 +573,13 @@ impl SettingsApp {
         let scale = window.scale_factor();
         self.logical_win_w = size.width as f64 / scale;
         self.logical_win_h = size.height as f64 / scale;
-        self.renderer_target = match renderer.create_target(&window, size.width, size.height) {
+        self.renderer_target = match crate::window::native_surface(&window)
+            .map_err(|error| error.to_string())
+            .and_then(|surface| {
+                renderer
+                    .create_target(surface, size.width, size.height)
+                    .map_err(|error| error.to_string())
+            }) {
             Ok(target) => Some(target),
             Err(error) => {
                 log::error!("Settings renderer initialization failed: {error}");
@@ -601,7 +607,12 @@ impl SettingsApp {
             return Ok(());
         };
         let size = window.inner_size();
-        self.renderer_target = Some(renderer.create_target(window, size.width, size.height)?);
+        let surface = crate::window::native_surface(window)?;
+        self.renderer_target = Some(
+            renderer
+                .create_target(surface, size.width, size.height)
+                .map_err(|error| error.to_string())?,
+        );
         window.request_redraw();
         Ok(())
     }
@@ -683,6 +694,9 @@ impl SettingsApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
+        if window.is_minimized() == Some(true) || size.width == 0 || size.height == 0 {
+            return;
+        }
         if let Some(expected) = self.pending_dpi_size.take() {
             if expected.width.abs_diff(size.width) > 2 || expected.height.abs_diff(size.height) > 2
             {
@@ -733,6 +747,9 @@ impl SettingsApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
+        if window.is_minimized() == Some(true) {
+            return;
+        }
         let Some(target) = self.target_monitor.as_ref() else {
             return;
         };
@@ -1178,7 +1195,10 @@ impl SettingsApp {
     }
 
     pub(crate) fn update(&mut self) -> Option<Instant> {
-        self.window.as_ref()?;
+        let window = self.window.as_ref()?;
+        if window.is_minimized() == Some(true) {
+            return None;
+        }
 
         self.frame_count += 1;
         self.poll_detected_apps();

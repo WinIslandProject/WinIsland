@@ -12,7 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, GetWindowThreadProcessId, IsIconic,
 };
 
-use crate::utils::shape::continuous_rounded_rect_path;
+use winisland_render::{Path, Point, Rect};
 
 pub fn get_global_cursor_pos() -> (i32, i32) {
     let mut point = POINT::default();
@@ -51,11 +51,11 @@ pub fn is_point_in_continuous_rounded_rect(
         return false;
     }
 
-    continuous_rounded_rect_path(
-        skia_safe::Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32),
+    Path::continuous_rounded_rect(
+        Rect::from_xywh(rx as f32, ry as f32, rw as f32, rh as f32),
         radius as f32,
     )
-    .contains(skia_safe::Point::new(px as f32, py as f32))
+    .contains(Point::new(px as f32, py as f32))
 }
 
 pub fn is_left_button_pressed() -> bool {

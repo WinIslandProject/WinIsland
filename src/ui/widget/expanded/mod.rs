@@ -3,10 +3,10 @@ pub mod resource_usage;
 pub mod settings;
 pub mod time;
 
-use crate::utils::font::FontManager;
-use crate::utils::shape::{continuous_rounded_rect_path, expanded_island_radius};
-use skia_safe::{Canvas, Color, Paint, Rect};
+use crate::utils::shape::expanded_island_radius;
 use winisland_core::config::{WIDGET_GRID_COLS, WIDGET_GRID_ROWS, WidgetKind, widget_footprint};
+use winisland_render::text::FontManager;
+use winisland_render::{Painter, Path, Point, Rect, Rgba, StrokeCap, StrokeJoin};
 
 #[derive(Debug, Clone, Copy)]
 pub struct WidgetGridLayout {
@@ -88,7 +88,7 @@ pub fn widget_grid_layout(x: f32, y: f32, w: f32, h: f32, scale: f32) -> WidgetG
 }
 
 pub(crate) fn draw_widget_rounded_background(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     w: f32,
@@ -96,20 +96,20 @@ pub(crate) fn draw_widget_rounded_background(
     scale: f32,
     alpha: u8,
 ) {
-    let mut background = Paint::default();
-    background.set_anti_alias(true);
-    background.set_color(Color::from_argb((alpha as f32 * 0.05) as u8, 28, 28, 30));
     let rect = Rect::from_xywh(x, y, w, h);
     let radius = widget_corner_radius(w, h, scale);
-    let path = continuous_rounded_rect_path(rect, radius);
-    canvas.draw_path(&path, &background);
-
-    let mut border = Paint::default();
-    border.set_anti_alias(true);
-    border.set_style(skia_safe::paint::Style::Stroke);
-    border.set_stroke_width(1.0 * scale);
-    border.set_color(Color::from_argb((alpha as f32 * 0.16) as u8, 255, 255, 255));
-    canvas.draw_path(&path, &border);
+    let path = Path::continuous_rounded_rect(rect, radius);
+    painter.fill_path(
+        &path,
+        Rgba::from_argb((alpha as f32 * 0.05) as u8, 28, 28, 30),
+    );
+    painter.stroke_path(
+        &path,
+        scale,
+        Rgba::from_argb((alpha as f32 * 0.16) as u8, 255, 255, 255),
+        StrokeCap::Butt,
+        StrokeJoin::Miter,
+    );
 }
 
 pub(crate) fn widget_corner_radius(w: f32, h: f32, scale: f32) -> f32 {
@@ -117,20 +117,25 @@ pub(crate) fn widget_corner_radius(w: f32, h: f32, scale: f32) -> f32 {
 }
 
 pub(crate) fn draw_widget_text_centered(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     text: &str,
     bounds: Rect,
     size: f32,
     bold: bool,
-    paint: &Paint,
+    color: Rgba,
 ) {
-    let font = FontManager::global().get_font(size, bold);
-    let (_, glyph_bounds) = font.measure_str(text, None);
-    let text_x =
-        bounds.left() + (bounds.width() - glyph_bounds.width()) / 2.0 - glyph_bounds.left();
+    let glyph_bounds = FontManager::global().measure_str(text, size, bold);
+    let text_x = bounds.left + (bounds.width() - glyph_bounds.width()) / 2.0 - glyph_bounds.left;
     let baseline_y =
-        bounds.top() + (bounds.height() - glyph_bounds.height()) / 2.0 - glyph_bounds.top();
-    canvas.draw_str(text, (text_x, baseline_y), &font, paint);
+        bounds.top + (bounds.height() - glyph_bounds.height()) / 2.0 - glyph_bounds.top;
+    FontManager::global().draw_str(
+        painter,
+        text,
+        Point::new(text_x, baseline_y),
+        size,
+        bold,
+        color,
+    );
 }
 
 pub fn widget_animates(kind: WidgetKind) -> bool {
@@ -142,7 +147,7 @@ pub fn widget_animates(kind: WidgetKind) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_widget(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     kind: WidgetKind,
     x: f32,
     y: f32,
@@ -150,25 +155,25 @@ pub fn draw_widget(
     h: f32,
     scale: f32,
     alpha: u8,
-    text_color: Color,
+    text_color: Rgba,
 ) {
     match kind {
-        WidgetKind::Clock => time::draw_time_widget(canvas, x, y, w, h, scale, alpha, text_color),
+        WidgetKind::Clock => time::draw_time_widget(painter, x, y, w, h, scale, alpha, text_color),
         WidgetKind::Calendar => {
-            calendar::draw_calendar_widget(canvas, x, y, w, h, scale, alpha, text_color)
+            calendar::draw_calendar_widget(painter, x, y, w, h, scale, alpha, text_color)
         }
-        WidgetKind::ResourceUsage => {
-            resource_usage::draw_resource_usage_widget(canvas, x, y, w, h, scale, alpha, text_color)
-        }
+        WidgetKind::ResourceUsage => resource_usage::draw_resource_usage_widget(
+            painter, x, y, w, h, scale, alpha, text_color,
+        ),
         WidgetKind::Settings => {
-            settings::draw_settings_widget(canvas, x, y, w, h, scale, alpha, text_color)
+            settings::draw_settings_widget(painter, x, y, w, h, scale, alpha, text_color)
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_widget_preview(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     kind: WidgetKind,
     x: f32,
     y: f32,
@@ -176,15 +181,15 @@ pub fn draw_widget_preview(
     h: f32,
     scale: f32,
     alpha: u8,
-    text_color: Color,
+    text_color: Rgba,
 ) {
     if kind == WidgetKind::ResourceUsage {
-        resource_usage::draw_resource_usage_preview(canvas, x, y, w, h, scale, alpha, text_color);
+        resource_usage::draw_resource_usage_preview(painter, x, y, w, h, scale, alpha, text_color);
     } else {
-        draw_widget(canvas, kind, x, y, w, h, scale, alpha, text_color);
+        draw_widget(painter, kind, x, y, w, h, scale, alpha, text_color);
     }
 }
 
-pub fn draw_mini_card(canvas: &Canvas, kind: WidgetKind, x: f32, y: f32, w: f32, h: f32) {
-    draw_widget_preview(canvas, kind, x, y, w, h, 1.0, 255, Color::WHITE);
+pub fn draw_mini_card(painter: Painter<'_>, kind: WidgetKind, x: f32, y: f32, w: f32, h: f32) {
+    draw_widget_preview(painter, kind, x, y, w, h, 1.0, 255, Rgba::WHITE);
 }

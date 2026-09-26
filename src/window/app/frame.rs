@@ -43,11 +43,11 @@ impl App {
         if let Some(error) = self
             .renderer
             .as_mut()
-            .and_then(crate::window::renderer::Renderer::take_failure)
+            .and_then(winisland_render::Renderer::take_failure)
         {
             self.invalidate_renderer(&error, now);
         }
-        if crate::window::renderer::take_dwm_composition_changed() {
+        if crate::window::take_dwm_composition_changed() {
             self.invalidate_renderer("DWM composition changed", now);
         }
         self.recover_renderer(&window, now, RENDERER_RECOVERY_INTERVAL);

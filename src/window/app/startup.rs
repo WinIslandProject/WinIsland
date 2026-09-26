@@ -101,12 +101,13 @@ impl App {
                     self.geom.win_y
                 );
             }
-            let renderer = match crate::window::renderer::Renderer::new(
-                &window,
-                &backdrop_window,
-                self.geom.os_w,
-                self.geom.os_h,
-            ) {
+            let renderer = match crate::window::native_surface(&window).and_then(|surface| {
+                winisland_render::Renderer::new(
+                    surface,
+                    winisland_render::RendererOptions::new(self.geom.os_w, self.geom.os_h),
+                )
+                .map_err(|error| error.to_string())
+            }) {
                 Ok(renderer) => renderer,
                 Err(error) => {
                     log::error!("Renderer initialization failed: {error}");
@@ -119,6 +120,7 @@ impl App {
                 }
             };
             self.renderer = Some(renderer);
+            self.create_host_backdrop(&window, &backdrop_window);
             let is_light = window.theme() == Some(winit::window::Theme::Light);
             self.is_light_theme = is_light;
             crate::plugin::manager::update_host_state(crate::plugin::types::HostState {

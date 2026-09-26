@@ -1,8 +1,8 @@
 mod resource_usage;
 mod time;
 
-use skia_safe::{Canvas, Color, Paint, Rect};
 use winisland_core::config::{CompactWidgetAlignment, CompactWidgetKind, CompactWidgetSlot};
+use winisland_render::{Painter, Point, Rect, Rgba, StrokeCap};
 
 const CONTENT_EDGE_INSET: f32 = 9.0;
 const CONTENT_GAP: f32 = 7.0;
@@ -156,7 +156,7 @@ pub(crate) fn preview_width(
 }
 
 pub(crate) fn draw(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     layout: &[CompactWidgetSlot],
     rect: Rect,
     scale: f32,
@@ -168,7 +168,7 @@ pub(crate) fn draw(
     }
     if has_mini_content {
         draw_strip(
-            canvas,
+            painter,
             widgets(layout, CompactWidgetAlignment::Left),
             rect.left + CONTENT_EDGE_INSET * scale,
             rect,
@@ -179,7 +179,7 @@ pub(crate) fn draw(
             .chain(widgets(layout, CompactWidgetAlignment::Right));
         let right_width = strip_width(right_widgets) * scale;
         draw_strip(
-            canvas,
+            painter,
             widgets(layout, CompactWidgetAlignment::Center)
                 .chain(widgets(layout, CompactWidgetAlignment::Right)),
             rect.right - CONTENT_EDGE_INSET * scale - right_width,
@@ -187,11 +187,11 @@ pub(crate) fn draw(
             scale,
             alpha,
         );
-        draw_content_separators(canvas, layout, rect, scale, alpha);
+        draw_content_separators(painter, layout, rect, scale, alpha);
     } else {
         let logical_width = rect.width() / scale.max(f32::EPSILON);
         draw_strip(
-            canvas,
+            painter,
             widgets(layout, CompactWidgetAlignment::Left),
             rect.left
                 + alignment_offset(layout, logical_width, CompactWidgetAlignment::Left) * scale,
@@ -200,7 +200,7 @@ pub(crate) fn draw(
             alpha,
         );
         draw_strip(
-            canvas,
+            painter,
             widgets(layout, CompactWidgetAlignment::Center),
             rect.left
                 + alignment_offset(layout, logical_width, CompactWidgetAlignment::Center) * scale,
@@ -209,7 +209,7 @@ pub(crate) fn draw(
             alpha,
         );
         draw_strip(
-            canvas,
+            painter,
             widgets(layout, CompactWidgetAlignment::Right),
             rect.left
                 + alignment_offset(layout, logical_width, CompactWidgetAlignment::Right) * scale,
@@ -221,7 +221,7 @@ pub(crate) fn draw(
 }
 
 fn draw_strip(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     widgets: impl Iterator<Item = CompactWidgetKind>,
     mut x: f32,
     rect: Rect,
@@ -232,7 +232,7 @@ fn draw_strip(
     while let Some(widget) = widgets.next() {
         let width = widget_width(widget) * scale;
         draw_widget(
-            canvas,
+            painter,
             widget,
             Rect::from_xywh(x, rect.top, width, rect.height()),
             scale,
@@ -240,24 +240,26 @@ fn draw_strip(
         );
         x += width;
         if widgets.peek().is_some() {
-            draw_separator(canvas, x + CONTENT_GAP * scale / 2.0, rect, scale, alpha);
+            draw_separator(painter, x + CONTENT_GAP * scale / 2.0, rect, scale, alpha);
             x += CONTENT_GAP * scale;
         }
     }
 }
 
-fn draw_separator(canvas: &Canvas, x: f32, rect: Rect, scale: f32, alpha: u8) {
-    let mut paint = Paint::default();
-    paint.set_anti_alias(true);
-    paint.set_stroke_width(scale.max(1.0));
-    paint.set_color(Color::from_argb((alpha as f32 * 0.14) as u8, 255, 255, 255));
+fn draw_separator(painter: Painter<'_>, x: f32, rect: Rect, scale: f32, alpha: u8) {
     let top = rect.top + rect.height() * 0.25;
     let bottom = rect.bottom - rect.height() * 0.25;
-    canvas.draw_line((x, top), (x, bottom), &paint);
+    painter.stroke_line(
+        Point::new(x, top),
+        Point::new(x, bottom),
+        scale.max(1.0),
+        Rgba::from_argb((alpha as f32 * 0.14) as u8, 255, 255, 255),
+        StrokeCap::Butt,
+    );
 }
 
 fn draw_content_separators(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     layout: &[CompactWidgetSlot],
     rect: Rect,
     scale: f32,
@@ -270,7 +272,7 @@ fn draw_content_separators(
     );
     if left_width > 0.0 {
         draw_separator(
-            canvas,
+            painter,
             rect.left + (left_width - CONTENT_GAP / 2.0) * scale,
             rect,
             scale,
@@ -279,7 +281,7 @@ fn draw_content_separators(
     }
     if right_width > 0.0 {
         draw_separator(
-            canvas,
+            painter,
             rect.right - (right_width - CONTENT_GAP / 2.0) * scale,
             rect,
             scale,
@@ -289,15 +291,15 @@ fn draw_content_separators(
 }
 
 pub(crate) fn draw_widget(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     widget: CompactWidgetKind,
     rect: Rect,
     scale: f32,
     alpha: u8,
 ) {
     match widget {
-        CompactWidgetKind::Time => time::draw(canvas, rect, scale, alpha),
-        CompactWidgetKind::ResourceUsage => resource_usage::draw(canvas, rect, scale, alpha),
+        CompactWidgetKind::Time => time::draw(painter, rect, scale, alpha),
+        CompactWidgetKind::ResourceUsage => resource_usage::draw(painter, rect, scale, alpha),
     }
 }
 

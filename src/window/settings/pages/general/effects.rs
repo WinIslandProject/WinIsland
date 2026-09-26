@@ -1,7 +1,7 @@
-use crate::utils::font::FontManager;
 use crate::utils::settings_ui::ClickResult;
 use crate::window::settings::PopupState;
 use winisland_core::i18n::tr;
+use winisland_render::text::FontManager;
 
 use super::super::{PageInput, SettingsPage};
 use super::SettingsApp;

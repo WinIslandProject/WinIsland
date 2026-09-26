@@ -1,41 +1,46 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use skia_safe::{Color, Image, ImageInfo, Paint, Rect, Surface, gpu, image_filters};
-use winit::window::Window;
+use skia_safe::{Color, ImageInfo, Paint, Rect, Surface, gpu, image_filters};
 
-use super::backdrop::HostBackdrop;
-use super::d3d::{D3DDevice, RenderTarget};
-
-pub(crate) use super::backdrop::HostBackdropParams;
+use crate::backend::{D3DDevice, RenderTarget, check_surface_supported};
+use crate::error::{RenderError, RenderResult};
+use crate::image::Image;
+use crate::painter::Painter;
+use crate::surface::NativeSurface;
+use crate::types::Mipmapped;
+use crate::types::{Sampling, TileMode};
 
 const MAIN_TARGET: RendererTargetId = RendererTargetId(0);
 
-static DWM_COMPOSITION_CHANGED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn signal_dwm_composition_changed() {
-    DWM_COMPOSITION_CHANGED.store(true, Ordering::Release);
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RendererOptions {
+    pub width: u32,
+    pub height: u32,
 }
 
-pub(crate) fn take_dwm_composition_changed() -> bool {
-    DWM_COMPOSITION_CHANGED.swap(false, Ordering::AcqRel)
+impl RendererOptions {
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
 }
 
-pub(crate) struct DrawingContext<'a> {
+pub struct DrawingContext<'a> {
     direct_context: &'a mut gpu::DirectContext,
 }
 
 impl DrawingContext<'_> {
-    pub(crate) fn prepare_image(
-        &mut self,
-        image: Image,
-        mipmapped: gpu::Mipmapped,
-    ) -> Option<Image> {
-        image.new_texture_image(self.direct_context, mipmapped)
+    pub fn prepare_image(&mut self, image: Image, mipmapped: Mipmapped) -> Option<Image> {
+        let mipmapped = match mipmapped {
+            Mipmapped::No => gpu::Mipmapped::No,
+            Mipmapped::Yes => gpu::Mipmapped::Yes,
+        };
+        image
+            .as_skia()
+            .new_texture_image(self.direct_context, mipmapped)
+            .map(Image::from_skia)
     }
 
-    pub(crate) fn render_surface(&mut self, info: &ImageInfo) -> Option<Surface> {
+    fn render_surface(&mut self, info: &ImageInfo) -> Option<Surface> {
         gpu::surfaces::render_target(
             self.direct_context,
             gpu::Budgeted::Yes,
@@ -48,56 +53,93 @@ impl DrawingContext<'_> {
         )
     }
 
-    pub(crate) fn finish_surface(&mut self, surface: &mut Surface) {
+    fn finish_surface(&mut self, surface: &mut Surface) {
         self.direct_context.flush_surface(surface);
+    }
+
+    pub fn scale_image(&mut self, image: &Image, width: i32, height: i32) -> Option<Image> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let info = ImageInfo::new_n32_premul((width, height), None);
+        let mut surface = self.render_surface(&info)?;
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        surface.canvas().draw_image_rect_with_sampling_options(
+            image.as_skia(),
+            None,
+            Rect::from_xywh(0.0, 0.0, width as f32, height as f32),
+            crate::convert::to_skia_sampling(Sampling::LinearNone),
+            &paint,
+        );
+        self.finish_surface(&mut surface);
+        Some(Image::from_skia(surface.image_snapshot()))
+    }
+
+    pub fn blur_image(
+        &mut self,
+        image: &Image,
+        width: i32,
+        height: i32,
+        sigma: (f32, f32),
+        tile: Option<TileMode>,
+    ) -> Option<Image> {
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let info = ImageInfo::new_n32_premul((width, height), None);
+        let mut surface = self.render_surface(&info)?;
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        if let Some(filter) = image_filters::blur(
+            sigma,
+            tile.map(crate::convert::to_skia_tile_mode),
+            None,
+            None,
+        ) {
+            paint.set_image_filter(filter);
+        }
+        surface
+            .canvas()
+            .draw_image(image.as_skia(), (0, 0), Some(&paint));
+        self.finish_surface(&mut surface);
+        Some(Image::from_skia(surface.image_snapshot()))
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct RendererTargetId(u64);
+pub struct RendererTargetId(u64);
 
-pub(crate) struct Renderer {
+pub struct Renderer {
     targets: HashMap<RendererTargetId, RenderTarget>,
-    host_backdrop: Option<HostBackdrop>,
     device: D3DDevice,
     next_target_id: u64,
     failure: Option<String>,
 }
 
 impl Renderer {
-    pub(crate) fn new(
-        window: &Arc<Window>,
-        backdrop_window: &Arc<Window>,
-        width: u32,
-        height: u32,
-    ) -> Result<Self, String> {
+    pub fn new(surface: NativeSurface, options: RendererOptions) -> RenderResult<Self> {
+        check_surface_supported(&surface)?;
         let mut device = D3DDevice::new()?;
-        let target = device.create_target(window, width, height)?;
+        let target = device.create_target(surface, options.width, options.height)?;
         Self::prewarm_expansion_effects(&mut device);
-        let host_backdrop = match HostBackdrop::new(window, backdrop_window) {
-            Ok(backdrop) => Some(backdrop),
-            Err(error) => {
-                log::warn!("Host backdrop is unavailable: {error}");
-                None
-            }
-        };
         Ok(Self {
             targets: HashMap::from([(MAIN_TARGET, target)]),
-            host_backdrop,
             device,
             next_target_id: 1,
             failure: None,
         })
     }
 
-    pub(crate) fn create_target(
+    pub fn create_target(
         &mut self,
-        window: &Arc<Window>,
+        surface: NativeSurface,
         width: u32,
         height: u32,
-    ) -> Result<RendererTargetId, String> {
+    ) -> RenderResult<RendererTargetId> {
+        check_surface_supported(&surface)?;
         self.check_ready()?;
-        let target = self.device.create_target(window, width, height);
+        let target = self.device.create_target(surface, width, height);
         let target = self.record_result(target)?;
         let id = RendererTargetId(self.next_target_id);
         self.next_target_id += 1;
@@ -128,29 +170,43 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn main_target(&self) -> RendererTargetId {
+    pub fn main_target(&self) -> RendererTargetId {
         MAIN_TARGET
     }
 
-    pub(crate) fn draw<T>(
+    fn draw<T>(
         &mut self,
         target_id: RendererTargetId,
         draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
-    ) -> Result<T, String> {
+    ) -> RenderResult<T> {
         let result = self.draw_inner(target_id, draw);
         self.record_result(result)
+    }
+
+    pub fn frame<T>(
+        &mut self,
+        target_id: RendererTargetId,
+        draw: impl FnOnce(&mut DrawingContext<'_>, Painter<'_>) -> T,
+    ) -> RenderResult<T> {
+        self.draw(target_id, |drawing_context, surface| {
+            draw(
+                drawing_context,
+                Painter {
+                    canvas: surface.canvas(),
+                },
+            )
+        })
     }
 
     fn draw_inner<T>(
         &mut self,
         target_id: RendererTargetId,
         draw: impl FnOnce(&mut DrawingContext<'_>, &mut Surface) -> T,
-    ) -> Result<T, String> {
+    ) -> RenderResult<T> {
         self.check_ready()?;
-        let target = self
-            .targets
-            .get_mut(&target_id)
-            .ok_or_else(|| "D3D12 render target is unavailable".to_string())?;
+        let target = self.targets.get_mut(&target_id).ok_or_else(|| {
+            RenderError::Backend("D3D12 render target is unavailable".to_string())
+        })?;
         let surface = target.current_surface()?;
         let canvas = surface.canvas();
         canvas.restore_to_count(1);
@@ -176,12 +232,12 @@ impl Renderer {
         Ok(output)
     }
 
-    pub(crate) fn resize(
+    pub fn resize(
         &mut self,
         target_id: RendererTargetId,
         width: u32,
         height: u32,
-    ) -> Result<(), String> {
+    ) -> RenderResult<()> {
         let result = self.resize_inner(target_id, width, height);
         self.record_result(result)
     }
@@ -191,45 +247,19 @@ impl Renderer {
         target_id: RendererTargetId,
         width: u32,
         height: u32,
-    ) -> Result<(), String> {
+    ) -> RenderResult<()> {
         self.check_ready()?;
-        let target = self
-            .targets
-            .get_mut(&target_id)
-            .ok_or_else(|| "D3D12 render target is unavailable".to_string())?;
+        let target = self.targets.get_mut(&target_id).ok_or_else(|| {
+            RenderError::Backend("D3D12 render target is unavailable".to_string())
+        })?;
         self.device.resize_target(target, width, height)
     }
 
-    pub(crate) fn take_failure(&mut self) -> Option<String> {
+    pub fn take_failure(&mut self) -> Option<String> {
         self.failure.take()
     }
 
-    pub(crate) fn update_host_backdrop(
-        &mut self,
-        target_id: RendererTargetId,
-        params: HostBackdropParams,
-    ) -> bool {
-        if target_id != MAIN_TARGET {
-            return false;
-        }
-        let Some(host_backdrop) = self.host_backdrop.as_ref() else {
-            return false;
-        };
-        if let Err(error) = host_backdrop.update(params) {
-            log::warn!("Host backdrop update failed: {error}");
-            self.host_backdrop = None;
-            return false;
-        }
-        true
-    }
-
-    pub(crate) fn hide_host_backdrop(&self) {
-        if let Some(host_backdrop) = self.host_backdrop.as_ref() {
-            host_backdrop.hide();
-        }
-    }
-
-    pub(crate) fn remove_target(&mut self, target_id: RendererTargetId) {
+    pub fn remove_target(&mut self, target_id: RendererTargetId) {
         if !self.targets.contains_key(&target_id) {
             return;
         }
@@ -244,16 +274,17 @@ impl Renderer {
             .purge_unlocked_resources(gpu::PurgeResourceOptions::AllResources);
     }
 
-    fn check_ready(&mut self) -> Result<(), String> {
+    fn check_ready(&mut self) -> RenderResult<()> {
         if let Some(error) = &self.failure {
-            return Err(error.clone());
+            return Err(RenderError::Backend(error.clone()));
         }
         self.device.check_health()
     }
 
-    fn record_result<T>(&mut self, result: Result<T, String>) -> Result<T, String> {
+    fn record_result<T>(&mut self, result: RenderResult<T>) -> RenderResult<T> {
         if let Err(error) = &result {
-            self.failure.get_or_insert_with(|| error.clone());
+            let message = error.to_string();
+            self.failure.get_or_insert(message);
         }
         result
     }
@@ -261,7 +292,6 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        self.host_backdrop.take();
         if self.device.synchronize().is_err() {
             self.device.context.abandon();
         }

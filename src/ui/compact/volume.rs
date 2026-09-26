@@ -2,8 +2,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-use skia_safe::{Canvas, Color, FontStyle, Paint, Rect};
 use tokio_util::sync::CancellationToken;
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, PROPERTYKEY, WPARAM};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
@@ -21,12 +19,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 use windows::core::{PCWSTR, Result};
+use winisland_render::{Painter, Point, Radius, Rect, Rgba};
 
 use crate::icons::brightness::draw_brightness_icon;
 use crate::icons::volume::draw_volume_icon;
 use crate::ui::compact::{CompactOverlayState, CompactSize};
-use crate::utils::font::{DrawTextCachedParams, FontManager};
 use winisland_core::i18n::tr;
+use winisland_render::FontStyle;
+use winisland_render::text::{DrawTextCachedParams, FontManager};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const ENDPOINT_RETRY_INTERVAL: Duration = Duration::from_millis(500);
@@ -614,8 +614,8 @@ impl VolumeIndicator {
     pub(super) fn begin_drag(&mut self, x: f32, y: f32, rect: Rect, scale: f32) -> bool {
         let track = self.track_rect(rect, scale);
         if !self.is_visible()
-            || x < track.left() - 4.0 * scale
-            || x > track.right() + 4.0 * scale
+            || x < track.left - 4.0 * scale
+            || x > track.right + 4.0 * scale
             || (y - track.center_y()).abs() > 12.0 * scale
         {
             return false;
@@ -629,7 +629,7 @@ impl VolumeIndicator {
             return None;
         }
         let track = self.track_rect(rect, scale);
-        let level = ((x - track.left()) / track.width()).clamp(0.0, 1.0);
+        let level = ((x - track.left) / track.width()).clamp(0.0, 1.0);
         let changed = self
             .preview
             .is_none_or(|(last, _)| (last - level).abs() > f32::EPSILON);
@@ -653,11 +653,11 @@ impl VolumeIndicator {
             12.0 * scale,
             FontStyle::normal(),
         );
-        let left = rect.left() + (37.0 + 11.0) * scale + label_width;
+        let left = rect.left + (37.0 + 11.0) * scale + label_width;
         Rect::from_xywh(
             left,
             rect.center_y() - 2.0 * scale,
-            (rect.right() - 14.0 * scale - left).max(1.0),
+            (rect.right - 14.0 * scale - left).max(1.0),
             4.0 * scale,
         )
     }
@@ -669,15 +669,22 @@ impl VolumeIndicator {
         }
     }
 
-    pub(super) fn draw(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
-        self.draw_level(canvas, rect, scale, alpha, false);
+    pub(super) fn draw(&self, painter: Painter<'_>, rect: Rect, scale: f32, alpha: f32) {
+        self.draw_level(painter, rect, scale, alpha, false);
     }
 
-    pub(super) fn draw_brightness(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32) {
-        self.draw_level(canvas, rect, scale, alpha, true);
+    pub(super) fn draw_brightness(&self, painter: Painter<'_>, rect: Rect, scale: f32, alpha: f32) {
+        self.draw_level(painter, rect, scale, alpha, true);
     }
 
-    fn draw_level(&self, canvas: &Canvas, rect: Rect, scale: f32, alpha: f32, brightness: bool) {
+    fn draw_level(
+        &self,
+        painter: Painter<'_>,
+        rect: Rect,
+        scale: f32,
+        alpha: f32,
+        brightness: bool,
+    ) {
         let alpha = (alpha * self.opacity() * 255.0).round().clamp(0.0, 255.0) as u8;
         if alpha == 0 {
             return;
@@ -685,66 +692,56 @@ impl VolumeIndicator {
 
         let center_y = rect.center_y();
         let icon_size = 20.0 * scale;
-        let icon_center = skia_safe::Point::new(rect.left() + 21.0 * scale, center_y);
+        let icon_center = Point::new(rect.left + 21.0 * scale, center_y);
         let level = self.preview.map_or(self.snapshot.level, |(level, _)| level);
         let muted = self
             .preview
             .map_or(self.snapshot.muted, |(level, _)| level <= 0.0)
             || level <= VOLUME_CHANGE_THRESHOLD;
         if brightness {
-            draw_brightness_icon(canvas, icon_center, icon_size, alpha, level);
+            draw_brightness_icon(painter, icon_center, icon_size, alpha, level);
         } else {
             draw_volume_icon(
-                canvas,
+                painter,
                 icon_center,
                 icon_size,
                 alpha,
                 if muted { 0.0 } else { level },
-                Color::WHITE,
+                Rgba::WHITE,
             );
         }
 
         let label_size = 12.0 * scale;
-        let label_x = rect.left() + 37.0 * scale;
-        let mut label_paint = Paint::default();
-        label_paint.set_anti_alias(true);
-        label_paint.set_color(Color::from_argb((alpha as f32 * 0.9) as u8, 255, 255, 255));
+        let label_x = rect.left + 37.0 * scale;
         FontManager::global().draw_text_cached(DrawTextCachedParams {
-            canvas,
+            painter,
             text: &self.label,
             x: label_x,
             y: center_y + 4.0 * scale,
             size: label_size,
             bold: false,
-            paint: &label_paint,
+            color: Rgba::WHITE.with_alpha((alpha as f32 * 0.9) as u8),
+            blur: None,
         });
 
         let track = self.track_rect(rect, scale);
-        let track_left = track.left();
+        let track_left = track.left;
         let track_width = track.width();
         let track_height = track.height();
-        let track_top = track.top();
+        let track_top = track.top;
         let thumb_x = track_left + track_width * level;
 
-        let mut track_paint = Paint::default();
-        track_paint.set_anti_alias(true);
-        track_paint.set_color(Color::from_argb((alpha as f32 * 0.28) as u8, 255, 255, 255));
-        canvas.draw_round_rect(
+        painter.fill_round_rect(
             Rect::from_xywh(track_left, track_top, track_width, track_height),
-            track_height / 2.0,
-            track_height / 2.0,
-            &track_paint,
+            Radius::uniform(track_height / 2.0),
+            Rgba::WHITE.with_alpha((alpha as f32 * 0.28) as u8),
         );
 
         if thumb_x > track_left {
-            let mut fill_paint = Paint::default();
-            fill_paint.set_anti_alias(true);
-            fill_paint.set_color(Color::from_argb(alpha, 255, 255, 255));
-            canvas.draw_round_rect(
+            painter.fill_round_rect(
                 Rect::from_xywh(track_left, track_top, thumb_x - track_left, track_height),
-                track_height / 2.0,
-                track_height / 2.0,
-                &fill_paint,
+                Radius::uniform(track_height / 2.0),
+                Rgba::WHITE.with_alpha(alpha),
             );
         }
     }

@@ -1,7 +1,7 @@
 use super::{draw_widget_rounded_background, draw_widget_text_centered};
-use skia_safe::{Canvas, Color, Paint, Rect};
 use std::cell::RefCell;
 use winisland_core::i18n::tr;
+use winisland_render::{Painter, Rect, Rgba};
 
 struct CalendarText {
     year: u16,
@@ -62,28 +62,23 @@ fn month_name(month: u16) -> String {
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_calendar_widget(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     x: f32,
     y: f32,
     w: f32,
     h: f32,
     scale: f32,
     alpha: u8,
-    text_color: Color,
+    text_color: Rgba,
 ) {
     // SAFETY: GetLocalTime writes a SYSTEMTIME value and has no preconditions.
     let local_time = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
 
-    draw_widget_rounded_background(canvas, x, y, w, h, scale, alpha);
+    draw_widget_rounded_background(painter, x, y, w, h, scale, alpha);
 
-    let mut month_paint = Paint::default();
-    month_paint.set_anti_alias(true);
-    month_paint.set_color(Color::from_argb(
-        (alpha as f32 * 0.78) as u8,
-        text_color.r(),
-        text_color.g(),
-        text_color.b(),
-    ));
+    let month_color = text_color.with_alpha((alpha as f32 * 0.78) as u8);
+    let day_color = text_color.with_alpha(alpha);
+    let weekday_color = text_color.with_alpha((alpha as f32 * 0.62) as u8);
     CALENDAR_TEXT.with(|cell| {
         let mut cache = cell.borrow_mut();
         if cache.year != local_time.wYear
@@ -101,47 +96,31 @@ pub fn draw_calendar_widget(
         }
 
         draw_widget_text_centered(
-            canvas,
+            painter,
             &cache.month_text,
             Rect::from_xywh(x, y + h * 0.08, w, h * 0.18),
             (h * 0.14).clamp(9.0 * scale, 15.0 * scale),
             true,
-            &month_paint,
+            month_color,
         );
 
         let day_size = (h * 0.53).min(w * 0.70).max(26.0 * scale);
-        let mut day_paint = Paint::default();
-        day_paint.set_anti_alias(true);
-        day_paint.set_color(Color::from_argb(
-            alpha,
-            text_color.r(),
-            text_color.g(),
-            text_color.b(),
-        ));
         draw_widget_text_centered(
-            canvas,
+            painter,
             &cache.day_text,
             Rect::from_xywh(x, y + h * 0.27, w, h * 0.48),
             day_size,
             true,
-            &day_paint,
+            day_color,
         );
 
-        let mut weekday_paint = Paint::default();
-        weekday_paint.set_anti_alias(true);
-        weekday_paint.set_color(Color::from_argb(
-            (alpha as f32 * 0.62) as u8,
-            text_color.r(),
-            text_color.g(),
-            text_color.b(),
-        ));
         draw_widget_text_centered(
-            canvas,
+            painter,
             &cache.weekday_text,
             Rect::from_xywh(x, y + h * 0.78, w, h * 0.14),
             (h * 0.12).clamp(8.0 * scale, 12.0 * scale),
             false,
-            &weekday_paint,
+            weekday_color,
         );
     });
 }

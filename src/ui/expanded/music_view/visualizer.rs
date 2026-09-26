@@ -1,18 +1,18 @@
 use std::cell::RefCell;
 
-use skia_safe::{Canvas, Color, Paint, Point, Rect, TileMode, gradient_shader};
+use winisland_render::{GradientStop, Painter, Point, Radius, Rect, Rgba, TileMode};
 
 thread_local! {
     static VIZ_HEIGHTS: RefCell<[f32; 6]> = const { RefCell::new([3.0; 6]) };
 }
 
 pub struct DrawVisualizerParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub x: f32,
     pub y: f32,
     pub alpha: u8,
     pub is_playing: bool,
-    pub palette: &'a [Color],
+    pub palette: &'a [Rgba],
     pub spectrum: &'a [f32; 6],
     pub w_scale: f32,
     pub h_scale: f32,
@@ -21,7 +21,7 @@ pub struct DrawVisualizerParams<'a> {
 
 pub fn draw_visualizer(params: DrawVisualizerParams<'_>) {
     let DrawVisualizerParams {
-        canvas,
+        painter,
         x,
         y,
         alpha,
@@ -54,31 +54,21 @@ pub fn draw_visualizer(params: DrawVisualizerParams<'_>) {
             heights[i] = heights[i].max(3.0 * h_scale);
         }
         let start_x = x - (bar_count as f32 * (bar_w + spacing)) / 2.0;
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
-        let first = palette.first().copied().unwrap_or(Color::WHITE);
+        let first = palette.first().copied().unwrap_or(Rgba::WHITE);
         let second = palette.get(1).copied().unwrap_or(first);
-        let colors_with_alpha = [
-            Color::from_argb(alpha, first.r(), first.g(), first.b()),
-            Color::from_argb(alpha, second.r(), second.g(), second.b()),
+        let colors_with_alpha = [first.with_alpha(alpha), second.with_alpha(alpha)];
+        let from = Point::new(start_x, y - max_h / 2.0);
+        let to = Point::new(start_x + (20.0 * w_scale), y + max_h / 2.0);
+        let stops = [
+            GradientStop {
+                offset: 0.0,
+                color: colors_with_alpha[0],
+            },
+            GradientStop {
+                offset: 1.0,
+                color: colors_with_alpha[1],
+            },
         ];
-        if palette.len() >= 2 {
-            let shader = gradient_shader::linear(
-                (
-                    Point::new(start_x, y - max_h / 2.0),
-                    Point::new(start_x + (20.0 * w_scale), y + max_h / 2.0),
-                ),
-                &colors_with_alpha[..],
-                None,
-                TileMode::Mirror,
-                None,
-                None,
-            )
-            .unwrap();
-            paint.set_shader(shader);
-        } else {
-            paint.set_color(colors_with_alpha[0]);
-        }
         for i in 0..bar_count {
             let h = heights[i];
             let rect = Rect::from_xywh(
@@ -88,7 +78,18 @@ pub fn draw_visualizer(params: DrawVisualizerParams<'_>) {
                 h,
             );
             let r = bar_w / 2.0;
-            canvas.draw_round_rect(rect, r, r, &paint);
+            if palette.len() >= 2 {
+                painter.fill_round_rect_with_gradient(
+                    rect,
+                    Radius::uniform(r),
+                    from,
+                    to,
+                    &stops,
+                    TileMode::Mirror,
+                );
+            } else {
+                painter.fill_round_rect(rect, Radius::uniform(r), colors_with_alpha[0]);
+            }
         }
     });
 }

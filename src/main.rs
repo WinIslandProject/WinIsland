@@ -22,6 +22,10 @@ const RESTART_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 const INSTANCE_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 const TERMINATION_GRACE_PERIOD: Duration = Duration::from_millis(500);
 
+#[used]
+#[unsafe(export_name = "RTSSHooksCompatibility")]
+pub static RTSS_HOOKS_COMPATIBILITY: u32 = 0;
+
 fn main() {
     let _ = logger::init();
     log::info!("WinIsland v{} starting", env!("CARGO_PKG_VERSION"));
@@ -64,7 +68,7 @@ fn main() {
             // dispatched, and the pointer is only read during this synchronous callback.
             let message = unsafe { &*message.cast::<MSG>() };
             if message.message == WM_DWMCOMPOSITIONCHANGED {
-                window::renderer::signal_dwm_composition_changed();
+                window::signal_dwm_composition_changed();
             }
         }
         false

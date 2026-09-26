@@ -5,7 +5,6 @@ pub mod cjk;
 pub mod color;
 pub(crate) mod cover;
 pub(crate) mod event_loop;
-pub mod font;
 pub mod gpu;
 pub mod icon;
 pub mod locale;

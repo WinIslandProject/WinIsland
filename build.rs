@@ -8,6 +8,9 @@ fn main() {
 
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
         println!("cargo:rerun-if-env-changed=WINISLAND_PACKAGE_CHANNEL");
+        if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+            println!("cargo:rustc-link-arg=/EXPORT:RTSSHooksCompatibility,DATA");
+        }
 
         let mut res = winres::WindowsResource::new();
 

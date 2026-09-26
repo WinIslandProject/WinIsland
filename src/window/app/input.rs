@@ -133,7 +133,7 @@ impl App {
             && self.compact_overlay.begin_volume_drag(
                 rel_x as f32,
                 rel_y as f32,
-                skia_safe::Rect::from_xywh(
+                winisland_render::Rect::from_xywh(
                     current_island_x as f32,
                     current_island_y as f32,
                     self.springs.w.value,
@@ -151,7 +151,7 @@ impl App {
             && self.compact_overlay.begin_brightness_drag(
                 rel_x as f32,
                 rel_y as f32,
-                skia_safe::Rect::from_xywh(
+                winisland_render::Rect::from_xywh(
                     current_island_x as f32,
                     current_island_y as f32,
                     self.springs.w.value,
@@ -462,7 +462,7 @@ impl App {
     pub(super) fn update_volume_drag_position(&mut self, rel_x: i32, layout: &IslandLayout) {
         self.compact_overlay.update_volume_drag(
             rel_x as f32,
-            skia_safe::Rect::from_xywh(
+            winisland_render::Rect::from_xywh(
                 layout.current_island_x as f32,
                 layout.current_island_y as f32,
                 self.springs.w.value,
@@ -475,7 +475,7 @@ impl App {
     pub(super) fn update_brightness_drag_position(&mut self, rel_x: i32, layout: &IslandLayout) {
         self.compact_overlay.update_brightness_drag(
             rel_x as f32,
-            skia_safe::Rect::from_xywh(
+            winisland_render::Rect::from_xywh(
                 layout.current_island_x as f32,
                 layout.current_island_y as f32,
                 self.springs.w.value,

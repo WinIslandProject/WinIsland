@@ -1,7 +1,7 @@
-use skia_safe::Rect;
+use winisland_render::Rect;
 
-use crate::utils::font::FontManager;
 use crate::utils::settings_ui::items::{POPUP_ITEM_H, POPUP_MENU_PAD};
+use winisland_render::text::FontManager;
 
 use super::SettingsApp;
 
@@ -31,7 +31,11 @@ impl PopupState {
         let content_width = options
             .iter()
             .map(|option| {
-                font_manager.measure_text_cached(option, 12.0, skia_safe::FontStyle::normal())
+                font_manager.measure_text_cached(
+                    option,
+                    12.0,
+                    winisland_render::FontStyle::normal(),
+                )
             })
             .fold(120.0_f32, f32::max);
         let menu_width = content_width + 36.0;

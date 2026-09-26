@@ -1,6 +1,6 @@
 use crate::utils::settings_ui::hover_test;
 use crate::utils::settings_ui::items::SIDEBAR_PAD;
-use skia_safe::Contains;
+use winisland_render::{Point, Rect};
 use winit::keyboard::{Key, NamedKey};
 
 use super::pages::PageInput;
@@ -17,7 +17,7 @@ impl SettingsApp {
         }
         let (x, y) = self.logical_mouse_pos;
         super::pages::music::music_notice_button_rect(self.content_width(), SETTINGS_HEADER_H)
-            .contains(skia_safe::Point::new(x - SIDEBAR_W, y + self.scroll_y))
+            .contains(Point::new(x - SIDEBAR_W, y + self.scroll_y))
     }
 
     pub(super) fn handle_click(&mut self) {
@@ -114,9 +114,7 @@ impl SettingsApp {
         let (mouse_x, mouse_y) = self.logical_mouse_pos;
         if self.resource_editor_open {
             if let Some(popup) = &self.popup
-                && popup
-                    .menu_rect()
-                    .contains(skia_safe::Point::new(mouse_x, mouse_y))
+                && popup.menu_rect().contains(Point::new(mouse_x, mouse_y))
             {
                 return true;
             }
@@ -252,7 +250,7 @@ impl SettingsApp {
 
     pub(crate) fn begin_number_input(
         &mut self,
-        rect: skia_safe::Rect,
+        rect: Rect,
         value: String,
         on_commit: NumberInputHandler,
     ) {

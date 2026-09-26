@@ -1,6 +1,6 @@
 use std::cell::LazyCell;
 
-use skia_safe::{Canvas, Color, Paint, Path, Point};
+use winisland_render::{Painter, Path, Point, Rgba, Vec2};
 
 const MUTED_PATH: &str = "M9.571,0.000 L9.893,0.036 L10.232,0.196 L10.500,0.500 L10.643,1.018 L10.643,10.196 L4.643,4.214 L8.696,0.393 L9.196,0.071 Z M-1.161,0.232 L-0.857,0.268 L-0.661,0.375 L14.714,15.732 L14.839,15.929 L14.893,16.250 L14.839,16.482 L14.661,16.732 L14.321,16.893 L14.018,16.875 L13.768,16.750 L-1.643,1.357 L-1.786,0.964 L-1.732,0.643 L-1.482,0.339 Z M0.393,4.875 L10.589,15.036 L10.518,15.268 L10.321,15.518 L9.964,15.714 L9.429,15.750 L9.107,15.661 L8.786,15.482 L4.554,11.518 L1.571,11.500 L0.893,11.321 L0.411,10.946 L0.107,10.375 L0.000,9.696 L0.018,5.857 L0.179,5.214 Z";
 const LOW_PATH: &str = "M9.411,0.018 L9.804,0.018 L10.196,0.179 L10.482,0.482 L10.625,0.875 L10.625,14.946 L10.554,15.196 L10.375,15.464 L10.143,15.643 L9.821,15.750 L9.250,15.714 L8.661,15.393 L4.536,11.518 L1.554,11.500 L1.107,11.411 L0.696,11.214 L0.375,10.911 L0.161,10.536 L0.000,9.768 L0.000,6.018 L0.161,5.250 L0.393,4.857 L0.821,4.500 L1.429,4.304 L4.411,4.286 L4.607,4.232 L8.607,0.464 L9.036,0.143 Z M14.143,3.946 L14.464,4.000 L14.768,4.250 L15.286,5.107 L15.696,6.286 L15.875,7.571 L15.804,8.911 L15.482,10.179 L15.161,10.893 L14.768,11.500 L14.589,11.679 L14.196,11.804 L13.804,11.679 L13.589,11.446 L13.518,11.250 L13.571,10.786 L13.946,10.196 L14.286,9.357 L14.482,8.286 L14.482,7.464 L14.321,6.500 L14.000,5.643 L13.625,5.071 L13.500,4.714 L13.554,4.375 L13.696,4.161 L13.929,4.000 Z";
@@ -15,12 +15,12 @@ thread_local! {
 }
 
 pub fn draw_volume_icon(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     center: Point,
     size: f32,
     alpha: u8,
     level: f32,
-    color: Color,
+    color: Rgba,
 ) {
     let index = if level <= 0.0 {
         0
@@ -31,15 +31,12 @@ pub fn draw_volume_icon(
     } else {
         3
     };
-    let mut fill = Paint::default();
-    fill.set_anti_alias(true);
-    fill.set_color(Color::from_argb(alpha, color.r(), color.g(), color.b()));
 
-    canvas.save();
-    canvas.translate((center.x, center.y));
+    painter.save();
+    painter.translate(Vec2::new(center.x, center.y));
     let scale = size / 25.75;
-    canvas.scale((scale, scale));
-    canvas.translate((-11.089286, -7.883929));
-    VOLUME_PATHS.with(|paths| canvas.draw_path(&paths[index], &fill));
-    canvas.restore();
+    painter.scale(Vec2::new(scale, scale));
+    painter.translate(Vec2::new(-11.089286, -7.883929));
+    VOLUME_PATHS.with(|paths| painter.fill_path(&paths[index], color.with_alpha(alpha)));
+    painter.restore();
 }

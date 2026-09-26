@@ -1,13 +1,12 @@
-use skia_safe::{Canvas, Color, ImageFilter, Paint};
-
 use crate::core::smtc::MediaInfo;
 use crate::ui::expanded::music_view::{DrawMusicPageParams, draw_music_page};
 use crate::ui::expanded::widget_view::draw_widget_page;
 use winisland_core::config::{PluginWidgetSlot, WidgetSlot};
+use winisland_render::{BlurSpec, LayerSpec, Painter, Rgba, Vec2};
 
 pub(super) struct ExpandedContentParams<'a> {
-    pub(super) canvas: &'a Canvas,
-    pub(super) blur_filter: Option<ImageFilter>,
+    pub(super) painter: Painter<'a>,
+    pub(super) blur_filter: Option<BlurSpec>,
     pub(super) expanded_alpha: f32,
     pub(super) view_offset: f32,
     pub(super) current_w: f32,
@@ -23,9 +22,9 @@ pub(super) struct ExpandedContentParams<'a> {
     pub(super) use_blur: bool,
     pub(super) font_size: f32,
     pub(super) dt: f32,
-    pub(super) text_color: Color,
-    pub(super) text_color_sec: Color,
-    pub(super) palette: &'a [Color],
+    pub(super) text_color: Rgba,
+    pub(super) text_color_sec: Rgba,
+    pub(super) palette: &'a [Rgba],
     pub(super) widget_layout: &'a [WidgetSlot],
     pub(super) plugin_widget_layout: &'a [PluginWidgetSlot],
     pub(super) plugin_widgets: &'a winisland_core::widgets::WidgetManager,
@@ -33,7 +32,7 @@ pub(super) struct ExpandedContentParams<'a> {
 
 pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
     let ExpandedContentParams {
-        canvas,
+        painter,
         blur_filter,
         expanded_alpha: expanded_alpha_f,
         view_offset,
@@ -61,11 +60,9 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
     if expanded_alpha_f > 0.01 {
         let music_page_available = music_active;
         let alpha = (expanded_alpha_f * 255.0) as u8;
-        canvas.save();
-        if let Some(ref filter) = blur_filter {
-            let mut layer_paint = Paint::default();
-            layer_paint.set_image_filter(filter.clone());
-            canvas.save_layer(&skia_safe::canvas::SaveLayerRec::default().paint(&layer_paint));
+        painter.save();
+        if let Some(filter) = blur_filter {
+            painter.begin_layer(LayerSpec::Blur(filter));
         }
 
         let visible_view_offset = if music_page_available {
@@ -76,10 +73,10 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
         let page_shift = visible_view_offset * current_w;
 
         if music_page_available && visible_view_offset < 1.0 {
-            canvas.save();
-            canvas.translate((-page_shift, 0.0));
+            painter.save();
+            painter.translate(Vec2::new(-page_shift, 0.0));
             draw_music_page(DrawMusicPageParams {
-                canvas,
+                painter,
                 ox: offset_x,
                 oy: offset_y,
                 w: current_w,
@@ -99,14 +96,14 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
                 text_color_sec,
                 palette,
             });
-            canvas.restore();
+            painter.restore();
         }
 
         if visible_view_offset > 0.0 {
-            canvas.save();
-            canvas.translate((current_w - page_shift, 0.0));
+            painter.save();
+            painter.translate(Vec2::new(current_w - page_shift, 0.0));
             let widget_anim = draw_widget_page(
-                canvas,
+                painter,
                 offset_x,
                 offset_y,
                 current_w,
@@ -119,15 +116,15 @@ pub(super) fn draw_expanded_content(params: ExpandedContentParams<'_>) -> bool {
                 text_color,
                 music_page_available,
             );
-            canvas.restore();
+            painter.restore();
 
             widget_animating = widget_anim;
         }
 
         if blur_filter.is_some() {
-            canvas.restore();
+            painter.restore();
         }
-        canvas.restore();
+        painter.restore();
     }
     widget_animating
 }

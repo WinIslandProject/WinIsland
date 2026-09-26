@@ -1,8 +1,14 @@
-use skia_safe::{Canvas, Font, FontMgr, FontStyle, Paint, Path, Typeface};
+//! Cached font measurement and drawing for the rendering layer.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
+
+use skia_safe::{Font, FontMgr, FontStyle as SkFontStyle, Paint, Path, Typeface, image_filters};
+
+use crate::painter::Painter;
+use crate::types::{BlurSpec, FontStyle, Rgba, Slant};
 
 static GLOBAL_FONT_MANAGER: OnceLock<FontManager> = OnceLock::new();
 
@@ -13,25 +19,44 @@ type TextCacheMap = HashMap<u64, TextCacheValue>;
 type TextPathCacheMap = HashMap<u64, Vec<Path>>;
 type TextPrefixCacheMap = HashMap<u64, Vec<(usize, f32)>>;
 
+fn text_paint(color: Rgba, blur: Option<BlurSpec>) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(crate::convert::to_skia_color(color));
+    if let Some(BlurSpec { sigma, tile }) = blur
+        && let Some(filter) = image_filters::blur(
+            sigma,
+            tile.map(crate::convert::to_skia_tile_mode),
+            None,
+            None,
+        )
+    {
+        paint.set_image_filter(filter);
+    }
+    paint
+}
+
 pub struct DrawTextInRectParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub text: &'a str,
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub size: f32,
     pub bold: bool,
-    pub paint: &'a Paint,
+    pub color: Rgba,
+    pub blur: Option<BlurSpec>,
 }
 
 pub struct DrawTextCachedParams<'a> {
-    pub canvas: &'a Canvas,
+    pub painter: Painter<'a>,
     pub text: &'a str,
     pub x: f32,
     pub y: f32,
     pub size: f32,
     pub bold: bool,
-    pub paint: &'a Paint,
+    pub color: Rgba,
+    pub blur: Option<BlurSpec>,
 }
 
 pub struct FontManager;
@@ -61,6 +86,19 @@ const TEXT_PATH_CACHE_LIMIT: usize = 100;
 const TEXT_PREFIX_CACHE_LIMIT: usize = 100;
 const TEXT_PREFIX_WIDTH_LIMIT: usize = 256;
 
+fn to_skia_font_style(style: FontStyle) -> SkFontStyle {
+    let slant = match style.slant() {
+        Slant::Upright => skia_safe::font_style::Slant::Upright,
+        Slant::Italic => skia_safe::font_style::Slant::Italic,
+        Slant::Oblique => skia_safe::font_style::Slant::Oblique,
+    };
+    SkFontStyle::new(
+        i32::from(style.weight().value()).into(),
+        i32::from(style.width().value()).into(),
+        slant,
+    )
+}
+
 fn evict_one_if_full<K, V>(cache: &mut HashMap<K, V>, limit: usize)
 where
     K: Clone + std::cmp::Eq + std::hash::Hash,
@@ -75,20 +113,13 @@ where
 fn hash_cache_key(text: &str, style: FontStyle, size: f32) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
-    style_to_key(style).hash(&mut hasher);
+    style.cache_key().hash(&mut hasher);
     ((size * 100.0).round() as i32).hash(&mut hasher);
     hasher.finish()
 }
 
-fn style_to_key(style: FontStyle) -> u32 {
-    let weight = *style.weight() as u32;
-    let width = *style.width() as u32;
-    let slant = style.slant() as u32;
-    (weight << 16) | (width << 8) | slant
-}
-
 fn needs_synthetic_bold(tf: &Typeface, style: FontStyle) -> bool {
-    *style.weight() >= 600 && *tf.font_style().weight() < 600
+    style.weight().value() >= 600 && *tf.font_style().weight() < 600
 }
 
 fn make_font(tf: Typeface, size: f32, style: FontStyle) -> Font {
@@ -132,7 +163,8 @@ fn typeface_supports_char(typeface: &Typeface, character: char) -> bool {
 }
 
 fn get_typeface_for_char(c: char, style: FontStyle) -> (Typeface, bool) {
-    let s_key = style_to_key(style);
+    let sk_style = to_skia_font_style(style);
+    let s_key = style.cache_key();
     FALLBACK_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(tf) = cache.get(&(c, s_key)) {
@@ -152,7 +184,7 @@ fn get_typeface_for_char(c: char, style: FontStyle) -> (Typeface, bool) {
         }
 
         let tf = FONT_MGR.with(|mgr| {
-            mgr.match_family_style_character("", style, &["zh-CN", "ja-JP", "en-US"], c as i32)
+            mgr.match_family_style_character("", sk_style, &["zh-CN", "ja-JP", "en-US"], c as i32)
                 .filter(|tf| typeface_supports_char(tf, c))
                 .or_else(|| {
                     [
@@ -163,11 +195,11 @@ fn get_typeface_for_char(c: char, style: FontStyle) -> (Typeface, bool) {
                     ]
                     .into_iter()
                     .find_map(|family| {
-                        mgr.match_family_style(family, style)
+                        mgr.match_family_style(family, sk_style)
                             .filter(|tf| typeface_supports_char(tf, c))
                     })
                 })
-                .unwrap_or_else(|| mgr.legacy_make_typeface(None, style).unwrap())
+                .unwrap_or_else(|| mgr.legacy_make_typeface(None, sk_style).unwrap())
         });
         let embolden = needs_synthetic_bold(&tf, style);
         cache.insert((c, s_key), tf.clone());
@@ -188,15 +220,16 @@ fn is_ascii_text(text: &str) -> bool {
 /// Compute text groups and total width.
 /// Falls back to a single typeface for ASCII-only text to skip per-char lookups.
 fn compute_text_groups(text: &str, size: f32, style: FontStyle) -> (f32, TextGroups) {
+    let sk_style = to_skia_font_style(style);
     let mut current_w = 0.0;
     let mut groups: TextGroups = Vec::new();
 
     if is_ascii_text(text) {
         let tf = get_custom_typeface().unwrap_or_else(|| {
             FONT_MGR.with(|mgr| {
-                mgr.match_family_style("Microsoft YaHei", style)
-                    .or_else(|| mgr.match_family_style("Segoe UI", style))
-                    .unwrap_or_else(|| mgr.legacy_make_typeface(None, style).unwrap())
+                mgr.match_family_style("Microsoft YaHei", sk_style)
+                    .or_else(|| mgr.match_family_style("Segoe UI", sk_style))
+                    .unwrap_or_else(|| mgr.legacy_make_typeface(None, sk_style).unwrap())
             })
         });
         let embolden = needs_synthetic_bold(&tf, style);
@@ -285,7 +318,7 @@ impl FontManager {
         TEXT_PREFIX_CACHE.with(|cache| cache.borrow_mut().clear());
     }
 
-    pub fn get_font(&self, size: f32, bold: bool) -> Font {
+    fn get_font(&self, size: f32, bold: bool) -> Font {
         let style = if bold {
             FontStyle::bold()
         } else {
@@ -294,23 +327,64 @@ impl FontManager {
         if let Some(tf) = get_custom_typeface() {
             return make_font(tf, size, style);
         }
+        let sk_style = to_skia_font_style(style);
         let typeface = FONT_MGR.with(|mgr| {
-            mgr.match_family_style("Microsoft YaHei", style)
-                .or_else(|| mgr.match_family_style("Segoe UI", style))
-                .unwrap_or_else(|| mgr.legacy_make_typeface(None, style).unwrap())
+            mgr.match_family_style("Microsoft YaHei", sk_style)
+                .or_else(|| mgr.match_family_style("Segoe UI", sk_style))
+                .unwrap_or_else(|| mgr.legacy_make_typeface(None, sk_style).unwrap())
         });
         make_font(typeface, size, style)
     }
 
+    pub fn measure_str(&self, text: &str, size: f32, bold: bool) -> crate::types::Rect {
+        let font = self.get_font(size, bold);
+        let (_, bounds) = font.measure_str(text, None);
+        crate::types::Rect::from_ltrb(bounds.left, bounds.top, bounds.right, bounds.bottom)
+    }
+
+    pub fn ascent(&self, size: f32, bold: bool) -> f32 {
+        let font = self.get_font(size, bold);
+        let (_, metrics) = font.metrics();
+        metrics.ascent
+    }
+
+    pub fn draw_str(
+        &self,
+        painter: Painter<'_>,
+        text: &str,
+        at: crate::types::Point,
+        size: f32,
+        bold: bool,
+        color: Rgba,
+    ) {
+        let font = self.get_font(size, bold);
+        let paint = text_paint(color, None);
+        painter.canvas().draw_str(text, (at.x, at.y), &font, &paint);
+    }
+
+    pub fn draw_plugin_str_v1(
+        &self,
+        canvas: &skia_safe::Canvas,
+        text: &str,
+        at: crate::types::Point,
+        size: f32,
+        bold: bool,
+        color: Rgba,
+    ) {
+        self.draw_str(Painter { canvas }, text, at, size, bold, color);
+    }
+
     pub fn draw_text_in_rect(&self, params: DrawTextInRectParams<'_>) {
         let font = self.get_font(params.size, params.bold);
+        let paint = text_paint(params.color, params.blur);
+        let canvas = params.painter.canvas();
         let (_, rect) = font.measure_str(params.text, None);
         if rect.width() <= params.w {
-            params.canvas.draw_str(
+            canvas.draw_str(
                 params.text,
                 (params.x + (params.w - rect.width()) / 2.0, params.y),
                 &font,
-                params.paint,
+                &paint,
             );
         } else {
             let mut truncated = String::new();
@@ -326,9 +400,7 @@ impl FontManager {
                 truncated.push(c);
             }
             truncated.push_str("...");
-            params
-                .canvas
-                .draw_str(&truncated, (params.x, params.y), &font, params.paint);
+            canvas.draw_str(&truncated, (params.x, params.y), &font, &paint);
         }
     }
 
@@ -387,6 +459,7 @@ impl FontManager {
             FontStyle::normal()
         };
         let cache_key = hash_cache_key(params.text, style, params.size);
+        let paint = text_paint(params.color, params.blur);
         TEXT_CACHE.with(|cache| {
             let mut cache_mut = cache.borrow_mut();
             if !cache_mut.contains_key(&cache_key) {
@@ -396,6 +469,7 @@ impl FontManager {
                 .entry(cache_key)
                 .or_insert_with(|| compute_text_groups(params.text, params.size, style));
             let (_, groups) = entry;
+            let canvas = params.painter.canvas();
             let mut x = params.x;
             let y = params.y;
             for (s, tf, embolden, width) in groups {
@@ -404,7 +478,7 @@ impl FontManager {
                 if *embolden {
                     font.set_embolden(true);
                 }
-                params.canvas.draw_str(&**s, (x, y), &font, params.paint);
+                canvas.draw_str(&**s, (x, y), &font, &paint);
                 x += *width;
             }
         });
@@ -417,6 +491,7 @@ impl FontManager {
             FontStyle::normal()
         };
         let cache_key = hash_cache_key(params.text, style, params.size);
+        let paint = text_paint(params.color, params.blur);
         TEXT_PATH_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
             if !cache.contains_key(&cache_key) {
@@ -425,12 +500,13 @@ impl FontManager {
             let paths = cache
                 .entry(cache_key)
                 .or_insert_with(|| compute_text_paths(params.text, params.size, style));
-            params.canvas.save();
-            params.canvas.translate((params.x, params.y));
+            let canvas = params.painter.canvas();
+            canvas.save();
+            canvas.translate((params.x, params.y));
             for path in paths {
-                params.canvas.draw_path(path, params.paint);
+                canvas.draw_path(path, &paint);
             }
-            params.canvas.restore();
+            canvas.restore();
         });
     }
 }

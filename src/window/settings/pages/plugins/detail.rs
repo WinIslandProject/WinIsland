@@ -1,14 +1,15 @@
-use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::PCWSTR;
+use winisland_render::{Painter, Point, Radius, Rect, Rgba, Vec2};
 
 use crate::plugin::manager::InstalledPlugin;
 use crate::plugin::marketplace::MarketplacePlugin;
 use crate::utils::color::SettingsTheme;
-use crate::utils::font::FontManager;
-use crate::utils::settings_ui::{SettingsPainter, ellipsize_text, settings_paint};
+use crate::utils::color::settings_color;
+use crate::utils::settings_ui::{SettingsPainter, ellipsize_text};
 use winisland_core::i18n::tr;
+use winisland_render::text::FontManager;
 
 use super::super::super::{
     PLUGIN_DETAIL_KEY, PluginPageTab, PluginSettingsRequest, SETTINGS_HEADER_H, SIDEBAR_W,
@@ -236,8 +237,8 @@ impl SettingsApp {
 
     pub(super) fn draw_plugin_detail(
         &mut self,
-        drawing_context: &mut crate::window::renderer::DrawingContext<'_>,
-        canvas: &Canvas,
+        drawing_context: &mut winisland_render::DrawingContext<'_>,
+        painter: Painter<'_>,
         theme: &SettingsTheme,
         win_w: f32,
         win_h: f32,
@@ -247,52 +248,39 @@ impl SettingsApp {
             return;
         };
         let panel_x = win_w - DETAIL_W * progress;
-        draw_panel_background(canvas, theme, panel_x, win_h, progress);
-        draw_panel_header(canvas, theme, panel_x);
+        draw_panel_background(painter, theme, panel_x, win_h, progress);
+        draw_panel_header(painter, theme, panel_x);
 
-        canvas.save();
-        canvas.clip_rect(
-            Rect::from_xywh(
-                panel_x,
-                SETTINGS_HEADER_H,
-                DETAIL_W,
-                win_h - SETTINGS_HEADER_H,
-            ),
-            skia_safe::ClipOp::Intersect,
-            true,
-        );
-        canvas.translate((0.0, -self.plugin_detail_scroll));
+        painter.save();
+        painter.clip_rect(Rect::from_xywh(
+            panel_x,
+            SETTINGS_HEADER_H,
+            DETAIL_W,
+            win_h - SETTINGS_HEADER_H,
+        ));
+        painter.translate(Vec2::new(0.0, -self.plugin_detail_scroll));
 
         let fm = FontManager::global();
-        let mut paint = Paint::default();
-        paint.set_anti_alias(true);
         let y = DETAIL_HEADER_Y;
+        let icon_rect = Rect::from_xywh(
+            panel_x + DETAIL_PADDING,
+            y,
+            DETAIL_ICON_SIZE,
+            DETAIL_ICON_SIZE,
+        );
         match &plugin {
-            DetailPlugin::Installed(installed) => draw_plugin_icon(
-                drawing_context,
-                canvas,
-                installed,
-                Rect::from_xywh(
-                    panel_x + DETAIL_PADDING,
-                    y,
-                    DETAIL_ICON_SIZE,
-                    DETAIL_ICON_SIZE,
-                ),
-            ),
+            DetailPlugin::Installed(installed) => {
+                draw_plugin_icon(drawing_context, painter, installed, icon_rect)
+            }
             DetailPlugin::Marketplace(marketplace) => draw_plugin_icon_data(
                 drawing_context,
-                canvas,
+                painter,
                 &marketplace.id,
                 &marketplace.name,
                 marketplace.icon.as_deref(),
-                Rect::from_xywh(
-                    panel_x + DETAIL_PADDING,
-                    y,
-                    DETAIL_ICON_SIZE,
-                    DETAIL_ICON_SIZE,
-                ),
+                icon_rect,
             ),
-        }
+        };
         let info_x = panel_x + DETAIL_PADDING + DETAIL_ICON_SIZE + 14.0;
         let name_width = match plugin {
             DetailPlugin::Installed(_) => panel_x + DETAIL_W - DETAIL_PADDING - 46.0 - info_x,
@@ -302,18 +290,18 @@ impl SettingsApp {
             fm,
             plugin.name(),
             17.0,
-            skia_safe::FontStyle::bold(),
+            winisland_render::FontStyle::bold(),
             name_width.max(30.0),
         );
-        SettingsPainter::new(canvas).text(&name, (info_x, y + 22.0), 17.0, true, theme.text_pri);
+        SettingsPainter::new(painter).text(&name, (info_x, y + 22.0), 17.0, true, theme.text_pri);
         let subtitle = ellipsize_text(
             fm,
             &format!("{} · v{}", plugin.author(), plugin.version()),
             11.5,
-            skia_safe::FontStyle::normal(),
+            winisland_render::FontStyle::normal(),
             DETAIL_W - (info_x - panel_x) - DETAIL_PADDING,
         );
-        SettingsPainter::new(canvas).text(
+        SettingsPainter::new(painter).text(
             &subtitle,
             (info_x, y + 43.0),
             11.5,
@@ -324,14 +312,14 @@ impl SettingsApp {
         match &plugin {
             DetailPlugin::Installed(installed) => {
                 draw_toggle(
-                    canvas,
+                    painter,
                     theme,
                     installed.enabled,
                     panel_x + DETAIL_W - DETAIL_PADDING - 36.0,
                     y + 2.0,
                 );
                 draw_uninstall_button(
-                    canvas,
+                    painter,
                     panel_x,
                     safe_github_url(&installed.github_link),
                     self.pending_plugin_uninstall_id
@@ -341,21 +329,23 @@ impl SettingsApp {
             }
             DetailPlugin::Marketplace(marketplace) => {
                 let action = self.marketplace_action(marketplace);
-                draw_detail_action(canvas, theme, panel_x, action);
+                draw_detail_action(painter, theme, panel_x, action);
             }
         }
 
         if safe_github_url(plugin.repository()) {
             let button = github_rect(panel_x);
-            paint.set_color(theme.control_bg);
-            canvas.draw_round_rect(button, BUTTON_H / 2.0, BUTTON_H / 2.0, &paint);
-            paint.set_color(theme.accent);
-            SettingsPainter::new(canvas).centered_text(
+            painter.fill_round_rect(
+                button,
+                Radius::uniform(BUTTON_H / 2.0),
+                settings_color(theme.control_bg),
+            );
+            SettingsPainter::new(painter).centered_text(
                 &tr("plugin_open_github"),
                 (button.center_x(), button.top + 18.0),
                 11.0,
                 true,
-                paint.color(),
+                settings_color(theme.accent),
             );
         }
 
@@ -363,32 +353,35 @@ impl SettingsApp {
         if let DetailPlugin::Marketplace(marketplace) = &plugin
             && let Some(reason) = &marketplace.revoked_reason
         {
-            paint.set_color(Color::from_argb(28, 255, 69, 58));
             let warning = Rect::from_xywh(
                 panel_x + DETAIL_PADDING,
                 content_y,
                 DETAIL_W - DETAIL_PADDING * 2.0,
                 42.0,
             );
-            canvas.draw_round_rect(warning, 10.0, 10.0, &paint);
+            painter.fill_round_rect(
+                warning,
+                Radius::uniform(10.0),
+                Rgba::from_argb(28, 255, 69, 58),
+            );
             let reason = ellipsize_text(
                 fm,
                 reason,
                 11.0,
-                skia_safe::FontStyle::normal(),
+                winisland_render::FontStyle::normal(),
                 warning.width() - 20.0,
             );
-            SettingsPainter::new(canvas).text(
+            SettingsPainter::new(painter).text(
                 &reason,
                 (warning.left + 10.0, warning.top + 25.0),
                 11.0,
                 false,
-                Color::from_rgb(255, 69, 58),
+                Rgba::from_rgb(255, 69, 58),
             );
             content_y += 54.0;
         }
         let description = markdown::render(markdown::MarkdownRenderParams {
-            canvas,
+            painter,
             markdown: plugin.description(),
             origin: (panel_x + DETAIL_PADDING, content_y),
             width: DETAIL_W - DETAIL_PADDING * 2.0,
@@ -406,7 +399,7 @@ impl SettingsApp {
             plugin.readme()
         };
         let readme = markdown::render(markdown::MarkdownRenderParams {
-            canvas,
+            painter,
             markdown: readme_text,
             origin: (panel_x + DETAIL_PADDING, content_y),
             width: DETAIL_W - DETAIL_PADDING * 2.0,
@@ -417,7 +410,7 @@ impl SettingsApp {
             colors: markdown_colors(theme),
         });
         content_y += readme.height + 28.0;
-        canvas.restore();
+        painter.restore();
 
         self.plugin_detail_max_scroll = (content_y - win_h).max(0.0);
         self.plugin_detail_scroll = self
@@ -427,43 +420,38 @@ impl SettingsApp {
 }
 
 fn draw_detail_action(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     theme: &SettingsTheme,
     panel_x: f32,
     action: MarketplaceAction,
 ) {
     let label = action.label();
     let rect = detail_action_rect(panel_x, &label);
-    let paint = settings_paint(if action.is_available() {
-        Color::from_argb(32, theme.accent.r(), theme.accent.g(), theme.accent.b())
+    let color = if action.is_available() {
+        settings_color(theme.accent).with_alpha(32)
     } else {
-        theme.control_bg
-    });
-    canvas.draw_round_rect(rect, BUTTON_H / 2.0, BUTTON_H / 2.0, &paint);
+        settings_color(theme.control_bg)
+    };
+    painter.fill_round_rect(rect, Radius::uniform(BUTTON_H / 2.0), color);
     let text_color = if action.is_available() {
         theme.accent
     } else {
         theme.text_sec
     };
-    SettingsPainter::new(canvas).centered_text(
+    SettingsPainter::new(painter).centered_text(
         &label,
         (rect.center_x(), rect.top + 18.0),
         11.0,
         true,
-        text_color,
+        settings_color(text_color),
     );
 }
 
-fn draw_uninstall_button(canvas: &Canvas, panel_x: f32, has_github: bool, confirming: bool) {
+fn draw_uninstall_button(painter: Painter<'_>, panel_x: f32, has_github: bool, confirming: bool) {
     let rect = uninstall_rect(panel_x, has_github);
-    let paint = settings_paint(Color::from_argb(
-        if confirming { 50 } else { 28 },
-        255,
-        69,
-        58,
-    ));
-    canvas.draw_round_rect(rect, BUTTON_H / 2.0, BUTTON_H / 2.0, &paint);
-    SettingsPainter::new(canvas).centered_text(
+    let color = Rgba::from_argb(if confirming { 50 } else { 28 }, 255, 69, 58);
+    painter.fill_round_rect(rect, Radius::uniform(BUTTON_H / 2.0), color);
+    SettingsPainter::new(painter).centered_text(
         &tr(if confirming {
             "plugin_uninstall_confirm"
         } else {
@@ -472,35 +460,38 @@ fn draw_uninstall_button(canvas: &Canvas, panel_x: f32, has_github: bool, confir
         (rect.center_x(), rect.top + 18.0),
         11.0,
         true,
-        Color::from_rgb(255, 69, 58),
+        Rgba::from_rgb(255, 69, 58),
     );
 }
 
 fn draw_panel_background(
-    canvas: &Canvas,
+    painter: Painter<'_>,
     theme: &SettingsTheme,
     panel_x: f32,
     win_h: f32,
     progress: f32,
 ) {
-    let mut paint = settings_paint(Color::from_argb((72.0 * progress) as u8, 0, 0, 0));
-    canvas.draw_rect(
+    painter.fill_rect(
         Rect::from_xywh(SIDEBAR_W, 0.0, panel_x - SIDEBAR_W, win_h),
-        &paint,
+        Rgba::from_argb((72.0 * progress) as u8, 0, 0, 0),
     );
-    paint.set_color(theme.win_bg);
-    canvas.draw_rect(Rect::from_xywh(panel_x, 0.0, DETAIL_W, win_h), &paint);
-    paint.set_color(theme.separator);
-    canvas.draw_rect(Rect::from_xywh(panel_x, 0.0, 0.5, win_h), &paint);
+    painter.fill_rect(
+        Rect::from_xywh(panel_x, 0.0, DETAIL_W, win_h),
+        settings_color(theme.win_bg),
+    );
+    painter.fill_rect(
+        Rect::from_xywh(panel_x, 0.0, 0.5, win_h),
+        settings_color(theme.separator),
+    );
 }
 
-fn draw_panel_header(canvas: &Canvas, theme: &SettingsTheme, panel_x: f32) {
-    SettingsPainter::new(canvas).text(
+fn draw_panel_header(painter: Painter<'_>, theme: &SettingsTheme, panel_x: f32) {
+    SettingsPainter::new(painter).text(
         &tr("plugin_details"),
         (panel_x + DETAIL_PADDING, 37.0),
         15.0,
         true,
-        theme.text_pri,
+        settings_color(theme.text_pri),
     );
 }
 
@@ -514,10 +505,12 @@ fn toggle_rect(panel_x: f32) -> Rect {
 }
 
 fn detail_action_rect(panel_x: f32, label: &str) -> Rect {
-    let width =
-        (FontManager::global().measure_text_cached(label, 11.0, skia_safe::FontStyle::bold())
-            + 24.0)
-            .clamp(64.0, 112.0);
+    let width = (FontManager::global().measure_text_cached(
+        label,
+        11.0,
+        winisland_render::FontStyle::bold(),
+    ) + 24.0)
+        .clamp(64.0, 112.0);
     Rect::from_xywh(
         panel_x + DETAIL_PADDING + 116.0 + ACTION_GAP,
         DETAIL_ACTION_Y,
@@ -555,12 +548,12 @@ fn safe_github_url(url: &str) -> bool {
 
 fn markdown_colors(theme: &SettingsTheme) -> markdown::MarkdownColors {
     markdown::MarkdownColors {
-        text: theme.text_pri,
-        secondary: theme.text_sec,
-        accent: theme.accent,
-        code_background: theme.control_bg,
-        quote_background: theme.group_bg,
-        separator: theme.separator,
+        text: crate::utils::color::settings_color(theme.text_pri),
+        secondary: crate::utils::color::settings_color(theme.text_sec),
+        accent: crate::utils::color::settings_color(theme.accent),
+        code_background: crate::utils::color::settings_color(theme.control_bg),
+        quote_background: crate::utils::color::settings_color(theme.group_bg),
+        separator: crate::utils::color::settings_color(theme.separator),
     }
 }
 
