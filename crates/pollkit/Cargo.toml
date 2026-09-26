@@ -8,3 +8,4 @@ license = "MIT"
 
 [dependencies]
 log = "0.4"
+parking_lot = "0.12"

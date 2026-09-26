@@ -3088,6 +3088,7 @@ name = "pollkit"
 version = "0.1.0"
 dependencies = [
  "log",
+ "parking_lot",
 ]
 
 [[package]]
@@ -5292,6 +5293,7 @@ dependencies = [
  "fuzzengine",
  "log",
  "lrc",
+ "parking_lot",
  "quick-xml",
  "reqwest",
  "serde",

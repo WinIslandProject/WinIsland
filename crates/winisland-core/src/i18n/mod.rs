@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::{Arc, LazyLock, OnceLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock};
+
+use parking_lot::RwLock;
 
 #[derive(Clone, Debug)]
 pub struct Language {
@@ -222,28 +224,28 @@ pub fn init_i18n(config_lang: &str) {
     } else {
         config_lang.to_string()
     };
-    I18N.write().unwrap().load(&target_lang);
+    I18N.write().load(&target_lang);
 }
 
 pub fn set_lang(lang: &str) {
-    I18N.write().unwrap().load(lang);
+    I18N.write().load(lang);
 }
 
 pub fn current_lang() -> String {
-    I18N.read().unwrap().current_lang.clone()
+    I18N.read().current_lang.clone()
 }
 
 pub fn tr(key: &str) -> String {
-    I18N.read().unwrap().get(key)
+    I18N.read().get(key)
 }
 
 pub fn tr_args(key: &str, args: &[&str]) -> String {
-    let template = I18N.read().unwrap().get(key);
+    let template = I18N.read().get(key);
     format_args(&template, args)
 }
 
 pub fn available_langs() -> Vec<Language> {
-    I18N.read().unwrap().available_languages.clone()
+    I18N.read().available_languages.clone()
 }
 
 pub fn register_plugin_translation_bundle(
@@ -251,14 +253,13 @@ pub fn register_plugin_translation_bundle(
     language: String,
     pairs: Vec<(String, String)>,
 ) -> Result<(), &'static str> {
-    let mut i18n = I18N.write().map_err(|_| "i18n lock is poisoned")?;
-    i18n.register_plugin_translation_bundle(id, language, pairs);
+    I18N.write()
+        .register_plugin_translation_bundle(id, language, pairs);
     Ok(())
 }
 
 pub fn release_plugin_translation_bundle(id: u64) -> Result<(), &'static str> {
-    let mut i18n = I18N.write().map_err(|_| "i18n lock is poisoned")?;
-    i18n.release_plugin_translation_bundle(id);
+    I18N.write().release_plugin_translation_bundle(id);
     Ok(())
 }
 

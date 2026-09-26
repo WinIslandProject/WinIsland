@@ -4,8 +4,10 @@
 
 use std::fmt;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
 
 static WAKE_HOOK: OnceLock<fn()> = OnceLock::new();
 
@@ -26,11 +28,11 @@ struct CancelSlot(Mutex<Option<Box<dyn FnOnce() + Send>>>);
 
 impl CancelSlot {
     fn set(&self, action: impl FnOnce() + Send + 'static) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(action));
+        *self.0.lock() = Some(Box::new(action));
     }
 
     fn fire(&self) {
-        let action = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let action = self.0.lock().take();
         if let Some(action) = action {
             action();
         }

@@ -10,6 +10,7 @@ encoding_rs = "0.8"
 fuzzengine = "0.2.1"
 log = { version = "0.4", features = ["std"] }
 lrc = "0.2.0"
+parking_lot = "0.12"
 quick-xml = "0.41.0"
 reqwest = { version = "0.13.4", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
