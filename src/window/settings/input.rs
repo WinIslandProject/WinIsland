@@ -53,15 +53,8 @@ impl SettingsApp {
         }
 
         if mouse_x < SIDEBAR_W {
-            for page in 0..self.sidebar_page_count() {
-                let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
-                if mouse_y >= row_y
-                    && mouse_y <= row_y + SIDEBAR_ROW_H
-                    && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mouse_x)
-                {
-                    self.visit_page(page);
-                    return;
-                }
+            if let Some(page) = self.sidebar_page_at(mouse_x, mouse_y) {
+                self.visit_page(page);
             }
             return;
         }
@@ -152,16 +145,7 @@ impl SettingsApp {
         }
 
         if mouse_x < SIDEBAR_W {
-            for page in 0..self.sidebar_page_count() {
-                let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
-                if mouse_y >= row_y
-                    && mouse_y <= row_y + SIDEBAR_ROW_H
-                    && (SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&mouse_x)
-                {
-                    return true;
-                }
-            }
-            return false;
+            return self.sidebar_page_at(mouse_x, mouse_y).is_some();
         }
 
         let content_width = self.content_width();
@@ -186,6 +170,16 @@ impl SettingsApp {
             SETTINGS_HEADER_H,
             content_width,
         )
+    }
+
+    fn sidebar_page_at(&self, x: f32, y: f32) -> Option<usize> {
+        if !(SIDEBAR_PAD..=SIDEBAR_W - SIDEBAR_PAD).contains(&x) {
+            return None;
+        }
+        (0..self.sidebar_page_count()).find(|&page| {
+            let row_y = SIDEBAR_START_Y + page as f32 * (SIDEBAR_ROW_H + SIDEBAR_ROW_GAP);
+            (row_y..=row_y + SIDEBAR_ROW_H).contains(&y)
+        })
     }
 
     pub(super) fn page_navigation_at(mouse_x: f32, mouse_y: f32) -> Option<PageNavigation> {
