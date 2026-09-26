@@ -13,7 +13,7 @@ use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTAT
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetSystemTimes, SetProcessWorkingSetSize,
 };
-use windows::core::{Interface, PCWSTR};
+use windows::core::{HSTRING, Interface};
 use winisland_platform::{MetricSelection, PlatformError, SystemMetrics, SystemSample};
 
 const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
@@ -123,13 +123,12 @@ fn network() -> Option<(u64, u64)> {
 
 fn disk() -> Option<(u64, u64)> {
     let root = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string()) + "\\";
-    let wide: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
     let mut total = 0u64;
     let mut free = 0u64;
     // SAFETY: The root is NUL-terminated and total and free are writable outputs.
     unsafe {
         GetDiskFreeSpaceExW(
-            PCWSTR(wide.as_ptr()),
+            &HSTRING::from(root),
             None,
             Some(&mut total),
             Some(&mut free),

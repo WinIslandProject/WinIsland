@@ -1,18 +1,17 @@
 use wasapi::{
     AudioCaptureClient, AudioClient, Direction, Handle, SampleType, StreamMode, WaveFormat,
 };
-use windows::Win32::Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, S_OK};
+use windows::Win32::Foundation::S_OK;
 use windows::Win32::Media::Audio::{
     Endpoints::IAudioMeterInformation, IAudioSessionControl2, IAudioSessionManager2,
     IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender,
 };
-use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-use windows::core::{Interface, PWSTR};
+use windows::core::Interface;
 use winisland_platform::{AudioMeter, PlatformError, ProcessCapture};
 
 use crate::com::ComGuard;
+use crate::process;
 
 const LOOPBACK_SAMPLE_RATE: usize = 48_000;
 const LOOPBACK_CHANNELS: usize = 2;
@@ -74,7 +73,8 @@ impl AudioMeter for WindowsAudioMeter {
                     continue;
                 };
                 if process_id != 0
-                    && process_app_user_model_id(process_id)
+                    && process::open(process_id)
+                        .and_then(|process| process::app_user_model_id(*process))
                         .is_some_and(|id| id.eq_ignore_ascii_case(app_id))
                 {
                     return Some(process_id);
@@ -114,37 +114,6 @@ impl AudioMeter for WindowsAudioMeter {
         }
         peak
     }
-}
-
-fn process_app_user_model_id(process_id: u32) -> Option<String> {
-    // SAFETY: The PID comes from an audio session and the requested access only reads identity.
-    let process =
-        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
-    let mut length = 0;
-    // SAFETY: A null output buffer requests the required UTF-16 length for this valid handle.
-    let first = unsafe { GetApplicationUserModelId(process, &mut length, None) };
-    if first != ERROR_INSUFFICIENT_BUFFER || length == 0 {
-        // SAFETY: This branch owns the process handle and closes it exactly once.
-        unsafe {
-            let _ = CloseHandle(process);
-        }
-        return None;
-    }
-    let mut app_id = vec![0u16; length as usize];
-    // SAFETY: The buffer has the length returned by Windows and stays allocated for this call.
-    let result = unsafe {
-        GetApplicationUserModelId(process, &mut length, Some(PWSTR(app_id.as_mut_ptr())))
-    };
-    // SAFETY: The process handle is no longer used after this point.
-    unsafe {
-        let _ = CloseHandle(process);
-    }
-    if result.0 != 0 {
-        return None;
-    }
-    String::from_utf16(&app_id)
-        .ok()
-        .map(|id| id.trim_end_matches('\0').to_string())
 }
 
 pub(super) struct WindowsProcessCapture {

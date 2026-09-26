@@ -14,7 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, SW_RESTORE,
     SetForegroundWindow, ShowWindow,
 };
-use windows::core::{BOOL, PCWSTR};
+use windows::core::{BOOL, HSTRING};
 use winisland_platform::{
     DisplayProvider, GpuProfile, MonitorId, MonitorInfo, PlatformError, Point, Rect,
 };
@@ -184,10 +184,9 @@ fn foreground_fullscreen(target: Rect) -> bool {
 }
 
 fn find_window(title: &str) -> Option<HWND> {
-    let wide: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     // SAFETY: The title is NUL-terminated and remains live for the call.
     unsafe {
-        FindWindowW(None, PCWSTR(wide.as_ptr()))
+        FindWindowW(None, &HSTRING::from(title))
             .ok()
             .filter(|hwnd| !hwnd.is_invalid())
     }

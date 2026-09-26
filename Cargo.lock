@@ -5230,6 +5230,7 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+ "windows-registry",
  "winisland-platform",
  "winit",
 ]

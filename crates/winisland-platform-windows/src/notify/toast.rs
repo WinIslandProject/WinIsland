@@ -1,19 +1,15 @@
 use windows::ApplicationModel::Package;
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager, ToastTemplateType};
 use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::{HSTRING, h, w};
 
 pub(super) fn set_app_identity() {
     if Package::Current().is_ok() {
         return;
     }
-    let wide: Vec<u16> = "WinIsland.PluginManager"
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
-    // SAFETY: The UTF-16 buffer is NUL-terminated and remains live for this synchronous call.
+    // SAFETY: The app ID is a static NUL-terminated literal.
     unsafe {
-        let _ = SetCurrentProcessExplicitAppUserModelID(PCWSTR::from_raw(wide.as_ptr()));
+        let _ = SetCurrentProcessExplicitAppUserModelID(w!("WinIsland.PluginManager"));
     }
 }
 
@@ -26,7 +22,7 @@ pub(super) fn show(title: &str, message: &str) {
             return;
         }
     };
-    if let Ok(nodes) = tmpl.SelectNodes(&HSTRING::from("//text")) {
+    if let Ok(nodes) = tmpl.SelectNodes(h!("//text")) {
         if let Ok(node) = nodes.Item(0) {
             let _ = node.SetInnerText(&HSTRING::from(title));
         }
@@ -44,9 +40,7 @@ pub(super) fn show(title: &str, message: &str) {
     let notifier_result = if Package::Current().is_ok() {
         ToastNotificationManager::CreateToastNotifier()
     } else {
-        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
-            "WinIsland.PluginManager",
-        ))
+        ToastNotificationManager::CreateToastNotifierWithId(h!("WinIsland.PluginManager"))
     };
     let notifier = match notifier_result {
         Ok(notifier) => notifier,

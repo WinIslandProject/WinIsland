@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IDOK, IDYES, MB_ICONERROR, MB_ICONINFORMATION, MB_OKCANCEL, MB_SETFOREGROUND, MB_TOPMOST,
     MESSAGEBOX_STYLE, MessageBoxW,
 };
-use windows::core::PCWSTR;
+use windows::core::HSTRING;
 use winisland_platform::{
     InstanceLock, LocalDateTime, PlatformError, ShellIntegration, TrayAction, TrayLabels, TrayTheme,
 };
@@ -118,8 +118,6 @@ fn show_dialog(
     body: &str,
     style: MESSAGEBOX_STYLE,
 ) -> windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_RESULT {
-    let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
-    let body: Vec<u16> = body.encode_utf16().chain(Some(0)).collect();
     // SAFETY: Both strings remain live and NUL-terminated for the synchronous call.
-    unsafe { MessageBoxW(None, PCWSTR(body.as_ptr()), PCWSTR(title.as_ptr()), style) }
+    unsafe { MessageBoxW(None, &HSTRING::from(body), &HSTRING::from(title), style) }
 }
