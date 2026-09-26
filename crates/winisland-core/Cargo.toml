@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 base64 = "0.23.1"
+educe = { version = "0.7", default-features = false, features = ["Default"] }
 encoding_rs = "0.8"
 fuzzengine = "0.2.1"
 log = { version = "0.4", features = ["std"] }
