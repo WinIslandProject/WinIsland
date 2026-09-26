@@ -2,6 +2,7 @@ export type Locale = 'en' | 'zh'
 export type DemoMode = 'media' | 'notification' | 'widgets'
 export type DocKey =
   | 'guide'
+  | 'faq'
   | 'getting-started'
   | 'download'
   | 'plugin-dev'
@@ -14,6 +15,7 @@ export type DocKey =
 
 export const DOC_KEYS: DocKey[] = [
   'guide',
+  'faq',
   'getting-started',
   'download',
   'plugin-dev',
@@ -119,6 +121,7 @@ export const copy = {
       onThisPage: 'Documentation',
       pages: {
         guide: 'What is WinIsland?',
+        faq: 'Thoughts & FAQ (中文)',
         'getting-started': 'Getting started',
         download: 'Download',
         'plugin-dev': 'Plugin development',
@@ -223,6 +226,7 @@ export const copy = {
       onThisPage: '文档目录',
       pages: {
         guide: '什么是 WinIsland？',
+        faq: '想法与常见问题',
         'getting-started': '快速开始',
         download: '下载',
         'plugin-dev': '插件开发',
