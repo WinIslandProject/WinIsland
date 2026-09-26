@@ -346,7 +346,7 @@ impl SettingsApp {
                 lyric_transition_labels(),
                 LyricTransitionMode::ALL
                     .into_iter()
-                    .map(|mode| mode.as_str().to_string())
+                    .map(|mode| mode.to_string())
                     .collect(),
                 LyricTransitionMode::ALL
                     .iter()
