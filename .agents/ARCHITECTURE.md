@@ -4,7 +4,7 @@
 
 WinIsland is a Windows desktop application that creates a Dynamic Island overlay — a translucent, always-on-top island that displays media playback info, lyrics, and audio visualization. Built entirely in Rust with Skia rendering.
 
-- **Window system**: winit + DirectComposition, with a companion Windows Composition backdrop window
+- **Window system**: `WindowSystem` and `PlatformEvent` isolate the application's window and event-loop code from winit; the Windows implementation uses winit + DirectComposition with a companion Windows Composition backdrop window
 - **Rendering**: Skia Ganesh on D3D12, with premultiplied-alpha DXGI composition swap chains
 - **Media integration**: Windows SMTC (System Media Transport Controls) via COM
 - **Audio visualization**: cpal (loopback capture) + realfft (6-band spectrum)
@@ -28,8 +28,8 @@ crates/
 │   └── widgets.rs     Plugin widget model (PluginWidget, WidgetManager)
 ├── winisland-plugin-api/  Plugin C ABI types + optional packager
 ├── winisland-render/      Rendering values, Painter, images, text, D3D12 targets, and frame lifecycle
-├── winisland-platform/    OS-neutral capability traits and value types; no dependencies or unsafe
-└── winisland-platform-windows/  Windows shell, metrics, display, audio, media, notification, and input implementations
+├── winisland-platform/    OS-neutral capability traits, window/event contracts, and value types; no dependencies or unsafe
+└── winisland-platform-windows/  Windows window/event loop, backdrop, shell, metrics, display, audio, media, notification, and input implementations
 
 src/                 Application crate "WinIsland"; it depends on winisland-core, never the reverse
 ├── core/              Application-side scheduling and state
@@ -56,11 +56,10 @@ src/                 Application crate "WinIsland"; it depends on winisland-core
 │   ├── mouse.rs       Geometry helpers using DisplayProvider
 │   ├── scroll.rs      Scroll container helpers
 │   ├── settings_ui/   Settings UI components drawn through Painter
-│   ├── updater.rs     Nightly release check + download
-│   └── win32.rs       Raw Win32 API wrappers (topmost, window styles, etc.)
+│   └── updater.rs     Nightly release check + download
 └── window/
-    ├── app.rs         Main App struct — event loop, state, input, orchestration
-    ├── backdrop.rs    Shared Windows Composition host-backdrop window
+    ├── app.rs         Main App state, input, frame scheduling, and orchestration
+    ├── app/events.rs  AppHandler implementation consuming PlatformEvent
     ├── app/system.rs  Tray polling and shell notifications through platform traits
     └── settings/      Separate settings window
 ```
@@ -72,14 +71,15 @@ src/                 Application crate "WinIsland"; it depends on winisland-core
 
 ## Rendering pipeline
 
-The application uses winit's `ApplicationHandler` and `WaitUntil` scheduling in [app.rs](src/window/app.rs):
+`src/main.rs` calls `platform::window().run(&mut app)`. The Windows platform owns the winit event loop, its proxy and message hook, and both application windows. Its adapter converts winit callbacks into `PlatformEvent` values for the application's `AppHandler` in [events.rs](src/window/app/events.rs):
 
 ```
-resumed() → create foreground and backdrop windows (transparent, topmost, skip-taskbar)
+Resumed → WindowSystem::create_overlay creates backdrop before the owned foreground window
+           (transparent, topmost, skip-taskbar)
            → create a hardware D3D12 device and shared Skia DirectContext
            → create independent composition swap chains for the island and settings windows
 
-about_to_wait() [display refresh rate while active, throttled while idle]:
+on_about_to_wait() [display refresh rate while active, throttled while idle]:
   1. Enforce topmost position
   2. Handle tray events
   3. Check config changes on a timed interval
@@ -88,7 +88,7 @@ about_to_wait() [display refresh rate while active, throttled while idle]:
   6. Update seeking, borders, lyrics transitions
   7. Compute spring targets, update all springs
   8. Request redraw if animating
-  9. Schedule the next deadline from animation, playback, interaction, or idle state
+  9. Return the earliest app/settings deadline; the platform applies winit WaitUntil or Wait
 
 RedrawRequested → winisland_render::Renderer::frame() → ui::island::draw_island():
   1. Compute dt, motion blur sigmas
@@ -102,6 +102,8 @@ RedrawRequested → winisland_render::Renderer::frame() → ui::island::draw_isl
   9. Draw mini controls (play/pause/prev/next)
   10. Flush with Present access, submit on the shared D3D12 queue, and present through DXGI
 ```
+
+The platform normalizes input, resize, DPI, theme, file drop, redraw, and lifecycle callbacks. The settings window handles DPI size requests during the same scale-change callback through `WindowSystem::request_inner_size`. The event-loop proxy coalesces repeated wake requests; the platform message hook reports DWM composition changes as `PlatformEvent::CompositionChanged`. Window operations use `WindowId` and platform-owned value types. `native_surface()` supplies the renderer with an HWND and an opaque keepalive for the window. On exit, the app releases the host backdrop before the renderer and then destroys the overlay window; `main.rs` flushes the logger after `run()` returns.
 
 Each style draws its background differently:
 - **glass**: Companion Windows Composition window with a clipped host-backdrop brush
@@ -151,7 +153,7 @@ PluginCreateInfoV1:
 Host services issue ResourceId values. Context, Media, translation, and Widget
 resources are owned by PluginToken, validated on every operation, and revoked
 after a successful shutdown. Plugins may call host services from worker threads;
-resource changes wake the winit event loop. shutdown must stop and join all plugin
+resource changes wake the platform event loop. shutdown must stop and join all plugin
 threads before the DLL can be destroyed and unloaded.
 
 LyricsTransform resources register bounded UTF-8 line callbacks. The host runs
@@ -181,10 +183,10 @@ bounded staging extraction and backup/rollback directory activation.
 | WNF, Event Log, WinRT toast listener | `crates/winisland-platform-windows/src/notify/` |
 | Registry, locale, app activation, tray, process lock | `crates/winisland-platform-windows/src/shell/` |
 | System metrics, WMI brightness, monitor and cursor queries, input hooks | `crates/winisland-platform-windows/src/{metrics,display,input}.rs` |
-| Window ownership, styles, backdrop and event loop | `src/utils/win32.rs`, `src/window/backdrop.rs`, `src/window/app/` until Phase 4 |
+| Window ownership, styles, backdrop, input adaptation and event loop | `crates/winisland-platform-windows/src/{window/,backdrop.rs}` |
 | D3D12, DXGI presentation and Skia | `crates/winisland-render/` |
 
-`winisland-platform` carries only traits and value types. The application adapter in `src/platform.rs` selects the Windows implementation. COM and WinRT initialization are owned by platform resources, which release their handles on drop. Every unsafe block needs a `// SAFETY:` explanation.
+`winisland-platform` carries only traits and value types, including `WindowSystem`, `AppHandler`, and `PlatformEvent`. The application adapter in `src/platform.rs` selects the Windows implementation. `winit` is confined to `winisland-platform-windows`; application code calls the platform contract. COM and WinRT initialization are owned by platform resources, which release their handles on drop. Every unsafe block needs a `// SAFETY:` explanation.
 
 ---
 
