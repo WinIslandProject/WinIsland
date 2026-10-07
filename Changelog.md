@@ -1,5 +1,19 @@
 # Changelog
 
+### v1.4.1
+- Added a timer with compact countdown, pause/resume controls, and completion alerts
+- Added a prompt to open copied web links
+- Added optional camera and microphone usage indicators beside the island
+- Added a first-launch guide, also available from Settings
+- Added settings to reorder and show or hide expanded pages
+- Made the built-in calendar available as a plugin that can be enabled or disabled
+- Added music title and artist position and spacing adjustments
+- Improved song duration detection and lyric matching
+- Improved auto-hide behavior and touch input, including remote touch input
+- Reduced idle CPU wakeups and improved multitasking animations
+- Expanded plugin support for interactive pages, media controls, and live activities
+- Improved installation and update reliability
+
 ### v1.4.0
 - Refactored the underlying architecture, rendering, and window systems
 - Reworked the plugin system; older plugins require updates
