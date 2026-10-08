@@ -44,5 +44,8 @@ And You should see [Contributing](CONTRIBUTING.md)
 > [!IMPORTANT]
 > Any PRs not following the [Contributing Guidelines](CONTRIBUTING.md) will be closed.
 
+## Privacy
+WinIsland collects no telemetry. See the [Privacy Policy](PRIVACY.md) for what it processes and which features use the network.
+
 ## LICENCE
 This project is subject to the [GNU General Public License v3.0](LICENSE).
