@@ -44,5 +44,8 @@ cargo build --release
 > [!IMPORTANT]
 > 所有未遵守[贡献指南](CONTRIBUTING-zh.md)的PR将会被close
 
+## 隐私
+WinIsland 不收集任何遥测数据。它处理哪些信息、哪些功能会联网，请参阅[隐私政策](PRIVACY-zh.md)。
+
 ## 许可证
 本项目遵循 [GNU General Public License v3.0.](LICENSE)
