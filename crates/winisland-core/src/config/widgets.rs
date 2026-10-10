@@ -38,9 +38,15 @@ pub fn normalize_expanded_pages(
         }
     }
     for page in hidden.iter() {
-        if *page != ExpandedPageKind::Widgets && !normalized_hidden.contains(page) {
+        if !normalized_hidden.contains(page) {
             normalized_hidden.push(*page);
         }
+    }
+    if normalized_order
+        .iter()
+        .all(|page| normalized_hidden.contains(page))
+    {
+        normalized_hidden.retain(|page| *page != ExpandedPageKind::Widgets);
     }
     let changed = normalized_order != *order || normalized_hidden != *hidden;
     *order = normalized_order;
@@ -141,6 +147,8 @@ pub fn resource_widget_span() -> (usize, usize) {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ResourceMetricConfig {
     pub kind: ResourceMetricKind,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub gpu: u8,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
@@ -152,17 +160,30 @@ fn default_true() -> bool {
     true
 }
 
+fn is_zero(value: &u8) -> bool {
+    *value == 0
+}
+
+const GPU_COLORS: [u32; 4] = [0x30d158, 0x64d2ff, 0xbf5af2, 0xffd60a];
+
+impl ResourceMetricConfig {
+    pub fn is_same_metric(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.gpu == other.gpu
+    }
+}
+
 pub fn default_resource_metrics() -> Vec<ResourceMetricConfig> {
     [
         (ResourceMetricKind::Cpu, 0x32bef6, true),
         (ResourceMetricKind::Ram, 0xaf52de, true),
-        (ResourceMetricKind::Gpu, 0x30d158, false),
+        (ResourceMetricKind::Gpu, GPU_COLORS[0], false),
         (ResourceMetricKind::Network, 0x0a84ff, false),
         (ResourceMetricKind::Disk, 0xff9f0a, false),
     ]
     .into_iter()
     .map(|(kind, color, enabled)| ResourceMetricConfig {
         kind,
+        gpu: 0,
         enabled,
         style: ResourceMetricStyle::Bar,
         color,
@@ -175,23 +196,70 @@ pub fn normalize_resource_metrics(metrics: &mut Vec<ResourceMetricConfig>) -> bo
     let defaults = default_resource_metrics();
     let mut normalized = Vec::with_capacity(ResourceMetricKind::ALL.len());
     for metric in metrics.drain(..) {
+        let metric = ResourceMetricConfig {
+            gpu: if metric.kind == ResourceMetricKind::Gpu {
+                metric.gpu
+            } else {
+                0
+            },
+            color: metric.color & 0x00ff_ffff,
+            ..metric
+        };
         if !normalized
             .iter()
-            .any(|entry: &ResourceMetricConfig| entry.kind == metric.kind)
+            .any(|entry: &ResourceMetricConfig| entry.is_same_metric(&metric))
         {
-            normalized.push(ResourceMetricConfig {
-                color: metric.color & 0x00ff_ffff,
-                ..metric
-            });
+            normalized.push(metric);
         }
     }
     for default in defaults {
-        if !normalized.iter().any(|entry| entry.kind == default.kind) {
+        if !normalized
+            .iter()
+            .any(|entry| entry.is_same_metric(&default))
+        {
             normalized.push(default);
         }
     }
     *metrics = normalized;
     *metrics != original
+}
+
+pub fn add_detected_gpu_metrics(metrics: &mut Vec<ResourceMetricConfig>, gpu_count: usize) -> bool {
+    let mut changed = false;
+    for gpu in 1..gpu_count.min(usize::from(u8::MAX) + 1) {
+        let gpu = gpu as u8;
+        if metrics
+            .iter()
+            .any(|metric| metric.kind == ResourceMetricKind::Gpu && metric.gpu == gpu)
+        {
+            continue;
+        }
+        let primary = metrics
+            .iter()
+            .find(|metric| metric.kind == ResourceMetricKind::Gpu);
+        let style = primary.map_or(ResourceMetricStyle::Bar, |metric| metric.style);
+        let position = metrics
+            .iter()
+            .rposition(|metric| metric.kind == ResourceMetricKind::Gpu)
+            .map_or(metrics.len(), |index| index + 1);
+        let color = GPU_COLORS
+            .iter()
+            .copied()
+            .find(|color| !metrics.iter().any(|metric| metric.color == *color))
+            .unwrap_or(GPU_COLORS[usize::from(gpu) % GPU_COLORS.len()]);
+        metrics.insert(
+            position,
+            ResourceMetricConfig {
+                kind: ResourceMetricKind::Gpu,
+                gpu,
+                enabled: false,
+                style,
+                color,
+            },
+        );
+        changed = true;
+    }
+    changed
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]

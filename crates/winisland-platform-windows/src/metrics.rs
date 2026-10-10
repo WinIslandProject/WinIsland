@@ -1,11 +1,6 @@
-use std::cell::RefCell;
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::FILETIME;
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
-    IDXGIAdapter3, IDXGIFactory1,
-};
 use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
 use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
 use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
@@ -13,14 +8,14 @@ use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTAT
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetSystemTimes, SetProcessWorkingSetSize,
 };
-use windows::core::{HSTRING, Interface};
+use windows::core::HSTRING;
 use winisland_platform::{MetricSelection, PlatformError, SystemMetrics, SystemSample};
 
-const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
+mod gpu;
 
-thread_local! {
-    static GPU_ADAPTERS: RefCell<Option<Vec<IDXGIAdapter3>>> = const { RefCell::new(None) };
-}
+const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
+const HARDWARE_INTERFACE_FLAG: u8 = 0b01;
+const FILTER_INTERFACE_FLAG: u8 = 0b10;
 
 pub struct WindowsMetrics;
 
@@ -41,10 +36,10 @@ impl SystemMetrics for WindowsMetrics {
             sample.memory_load_percent = Some(load);
         }
         if selection.network
-            && let Some((bytes, link)) = network()
+            && let Some((received, sent)) = network()
         {
-            sample.network_bytes = Some(bytes);
-            sample.network_link_bits_per_second = Some(link);
+            sample.network_received_bytes = Some(received);
+            sample.network_sent_bytes = Some(sent);
         }
         if selection.disk
             && let Some((free, total)) = disk()
@@ -52,13 +47,17 @@ impl SystemMetrics for WindowsMetrics {
             sample.disk_free_bytes = Some(free);
             sample.disk_total_bytes = Some(total);
         }
-        if selection.gpu
-            && let Some((used, budget)) = GPU_ADAPTERS.with(|cell| gpu(&mut cell.borrow_mut()))
-        {
-            sample.gpu_memory_used_bytes = Some(used);
-            sample.gpu_memory_budget_bytes = Some(budget);
+        if selection.gpu {
+            sample.gpu_usage = gpu::usage(&gpu::adapters());
         }
         Ok(sample)
+    }
+
+    fn gpu_adapters(&self) -> Vec<String> {
+        gpu::adapters()
+            .iter()
+            .map(|adapter| adapter.name.clone())
+            .collect()
     }
 
     fn trim_working_set(&self) -> Result<(), PlatformError> {
@@ -108,17 +107,31 @@ fn network() -> Option<(u64, u64)> {
     let rows = unsafe {
         std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize)
     };
-    let mut bytes = 0u64;
-    let mut link = 0u64;
+    let mut all = (0u64, 0u64);
+    let mut hardware = None::<(u64, u64)>;
     for row in rows {
-        if row.OperStatus == IfOperStatusUp && row.Type != IF_TYPE_SOFTWARE_LOOPBACK {
-            bytes = bytes.saturating_add(row.InOctets.saturating_add(row.OutOctets));
-            link = link.saturating_add(row.ReceiveLinkSpeed.saturating_add(row.TransmitLinkSpeed));
+        let flags = row.InterfaceAndOperStatusFlags._bitfield;
+        if row.OperStatus != IfOperStatusUp
+            || row.Type == IF_TYPE_SOFTWARE_LOOPBACK
+            || flags & FILTER_INTERFACE_FLAG != 0
+        {
+            continue;
+        }
+        all = (
+            all.0.saturating_add(row.InOctets),
+            all.1.saturating_add(row.OutOctets),
+        );
+        if flags & HARDWARE_INTERFACE_FLAG != 0 {
+            let (received, sent) = hardware.unwrap_or_default();
+            hardware = Some((
+                received.saturating_add(row.InOctets),
+                sent.saturating_add(row.OutOctets),
+            ));
         }
     }
     // SAFETY: table is the allocation returned by GetIfTable2 and is released once.
     unsafe { FreeMibTable(table.cast::<c_void>()) };
-    Some((bytes, link))
+    Some(hardware.unwrap_or(all))
 }
 
 fn disk() -> Option<(u64, u64)> {
@@ -136,36 +149,4 @@ fn disk() -> Option<(u64, u64)> {
     }
     .ok()?;
     (total > 0).then_some((free, total))
-}
-
-fn gpu(adapters: &mut Option<Vec<IDXGIAdapter3>>) -> Option<(u64, u64)> {
-    if adapters.is_none() {
-        // SAFETY: Factory creation and adapter enumeration retain no caller-owned pointers.
-        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.ok()?;
-        let mut available = Vec::new();
-        for index in 0..16 {
-            // SAFETY: The factory owns the adapter and returns an owned interface.
-            let Ok(adapter) = (unsafe { factory.EnumAdapters1(index) }) else {
-                break;
-            };
-            if let Ok(adapter) = adapter.cast::<IDXGIAdapter3>() {
-                available.push(adapter);
-            }
-        }
-        *adapters = Some(available);
-    }
-    let mut used = 0u64;
-    let mut budget = 0u64;
-    for adapter in adapters.as_ref()? {
-        let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-        // SAFETY: info is writable and adapter is retained by this thread-local cache.
-        if unsafe { adapter.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info) }
-            .is_ok()
-            && info.Budget > 0
-        {
-            used = used.saturating_add(info.CurrentUsage);
-            budget = budget.saturating_add(info.Budget);
-        }
-    }
-    (budget > 0).then_some((used, budget))
 }

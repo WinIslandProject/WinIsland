@@ -1,17 +1,21 @@
-use std::cell::RefCell;
+use std::borrow::Cow;
+use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use winisland_platform::{MetricSelection, SystemSample};
 
 use winisland_core::config::{
-    ResourceMetricConfig, ResourceMetricKind, ResourceMetricStyle, default_resource_metrics,
-    normalize_resource_metrics,
+    ResourceMetricConfig, ResourceMetricKind, ResourceMetricStyle, add_detected_gpu_metrics,
+    default_resource_metrics, normalize_resource_metrics,
 };
 use winisland_render::Rgba;
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const TRANSITION_DURATION: Duration = Duration::from_millis(400);
-const METRIC_COUNT: usize = ResourceMetricKind::ALL.len();
+const GPU_LABELS: [&str; 8] = [
+    "GPU 0", "GPU 1", "GPU 2", "GPU 3", "GPU 4", "GPU 5", "GPU 6", "GPU 7",
+];
+const EMPTY_TEXT: &str = "—";
 
 #[derive(Default)]
 struct AnimatedUsage {
@@ -52,38 +56,87 @@ impl AnimatedUsage {
     }
 }
 
+#[derive(Default)]
+struct PercentMetric {
+    value: Option<f32>,
+    animated: AnimatedUsage,
+    text: String,
+}
+
+impl PercentMetric {
+    fn set(&mut self, value: Option<f32>, now: Instant) {
+        self.value = value;
+        if let Some(value) = value {
+            self.text = format!("{:.0}%", value * 100.0);
+        } else if self.text.is_empty() {
+            self.text.push_str(EMPTY_TEXT);
+        }
+        self.animated.set_target(value, now);
+    }
+
+    fn usage(&self, now: Instant) -> MetricUsage<'_> {
+        MetricUsage::Percent {
+            value: self.animated.value(now),
+            text: if self.text.is_empty() {
+                EMPTY_TEXT
+            } else {
+                &self.text
+            },
+        }
+    }
+}
+
+struct RateText {
+    value: String,
+    unit: &'static str,
+}
+
+impl Default for RateText {
+    fn default() -> Self {
+        Self {
+            value: EMPTY_TEXT.to_string(),
+            unit: "",
+        }
+    }
+}
+
+impl RateText {
+    fn set(&mut self, bytes_per_second: f64) {
+        let (value, unit) = format_rate(bytes_per_second);
+        self.value = value;
+        self.unit = unit;
+    }
+
+    fn usage(&self) -> RateUsage<'_> {
+        RateUsage {
+            value: &self.value,
+            unit: self.unit,
+        }
+    }
+}
+
+#[derive(Default)]
+struct NetworkMetric {
+    previous: Option<(u64, u64)>,
+    upload: RateText,
+    download: RateText,
+}
+
 #[derive(Clone, Copy, Default)]
 struct CpuTimes {
     idle: u64,
     total: u64,
 }
 
-#[derive(Clone, Copy)]
-struct NetworkSample {
-    bytes: u64,
-    link_bits_per_second: u64,
-}
-
+#[derive(Default)]
 struct ResourceUsageCache {
     sampled_at: Option<Instant>,
     previous_cpu: Option<CpuTimes>,
-    previous_network: Option<NetworkSample>,
-    values: [Option<f32>; METRIC_COUNT],
-    animated: [AnimatedUsage; METRIC_COUNT],
-    texts: [String; METRIC_COUNT],
-}
-
-impl Default for ResourceUsageCache {
-    fn default() -> Self {
-        Self {
-            sampled_at: None,
-            previous_cpu: None,
-            previous_network: None,
-            values: [None; METRIC_COUNT],
-            animated: std::array::from_fn(|_| AnimatedUsage::default()),
-            texts: std::array::from_fn(|_| String::new()),
-        }
-    }
+    cpu: PercentMetric,
+    ram: PercentMetric,
+    disk: PercentMetric,
+    gpus: Vec<PercentMetric>,
+    network: NetworkMetric,
 }
 
 impl ResourceUsageCache {
@@ -97,14 +150,15 @@ impl ResourceUsageCache {
         let now = Instant::now();
         let elapsed = self
             .sampled_at
-            .map(|sampled_at| now.saturating_duration_since(sampled_at).as_secs_f32())
+            .map(|sampled_at| now.saturating_duration_since(sampled_at).as_secs_f64())
             .unwrap_or_default();
         self.sampled_at = Some(now);
 
+        let gpu_count = gpu_count();
         let enabled = |kind: ResourceMetricKind| {
-            metrics
-                .iter()
-                .any(|metric| metric.enabled && metric.kind == kind)
+            metrics.iter().any(|metric| {
+                metric.enabled && metric.kind == kind && metric_visible(metric, gpu_count)
+            })
         };
         let selection = MetricSelection {
             cpu: enabled(ResourceMetricKind::Cpu),
@@ -120,73 +174,72 @@ impl ResourceUsageCache {
                 SystemSample::default()
             }
         };
-        if enabled(ResourceMetricKind::Cpu)
-            && let (Some(idle), Some(total)) = (sample.cpu_idle_ticks, sample.cpu_total_ticks)
-        {
-            let current = CpuTimes { idle, total };
-            if let Some(previous) = self.previous_cpu {
-                let total = current.total.saturating_sub(previous.total);
-                let idle = current.idle.saturating_sub(previous.idle);
-                if total > 0 {
-                    self.values[ResourceMetricKind::Cpu.index()] =
-                        Some((1.0 - idle as f32 / total as f32).clamp(0.0, 1.0));
+        if selection.cpu {
+            let mut value = self.cpu.value;
+            if let (Some(idle), Some(total)) = (sample.cpu_idle_ticks, sample.cpu_total_ticks) {
+                let current = CpuTimes { idle, total };
+                if let Some(previous) = self.previous_cpu {
+                    let total = current.total.saturating_sub(previous.total);
+                    let idle = current.idle.saturating_sub(previous.idle);
+                    if total > 0 {
+                        value = Some((1.0 - idle as f32 / total as f32).clamp(0.0, 1.0));
+                    }
                 }
+                self.previous_cpu = Some(current);
             }
-            self.previous_cpu = Some(current);
+            self.cpu.set(value, now);
         }
-        if enabled(ResourceMetricKind::Ram) {
-            self.values[ResourceMetricKind::Ram.index()] = sample
-                .memory_load_percent
-                .map(|load| (load as f32 / 100.0).clamp(0.0, 1.0));
+        if selection.memory {
+            self.ram.set(
+                sample
+                    .memory_load_percent
+                    .map(|load| (load as f32 / 100.0).clamp(0.0, 1.0)),
+                now,
+            );
         }
-        if enabled(ResourceMetricKind::Gpu) {
-            self.values[ResourceMetricKind::Gpu.index()] = sample
-                .gpu_memory_used_bytes
-                .zip(sample.gpu_memory_budget_bytes)
-                .filter(|(_, budget)| *budget > 0)
-                .map(|(used, budget)| (used as f32 / budget as f32).clamp(0.0, 1.0));
+        if selection.disk {
+            self.disk.set(
+                sample
+                    .disk_free_bytes
+                    .zip(sample.disk_total_bytes)
+                    .filter(|(_, total)| *total > 0)
+                    .map(|(free, total)| (1.0 - free as f32 / total as f32).clamp(0.0, 1.0)),
+                now,
+            );
         }
-        if enabled(ResourceMetricKind::Disk) {
-            self.values[ResourceMetricKind::Disk.index()] = sample
-                .disk_free_bytes
-                .zip(sample.disk_total_bytes)
-                .filter(|(_, total)| *total > 0)
-                .map(|(free, total)| (1.0 - free as f32 / total as f32).clamp(0.0, 1.0));
+        if selection.gpu {
+            set_gpu_count(sample.gpu_usage.len());
+            self.gpus
+                .resize_with(sample.gpu_usage.len(), PercentMetric::default);
+            for (metric, usage) in self.gpus.iter_mut().zip(&sample.gpu_usage) {
+                metric.set(*usage, now);
+            }
         }
-
-        if enabled(ResourceMetricKind::Network)
-            && let (Some(bytes), Some(link_bits_per_second)) =
-                (sample.network_bytes, sample.network_link_bits_per_second)
+        if selection.network
+            && let (Some(received), Some(sent)) =
+                (sample.network_received_bytes, sample.network_sent_bytes)
         {
-            let current = NetworkSample {
-                bytes,
-                link_bits_per_second,
-            };
-            if let Some(previous) = self.previous_network
+            if let Some((previous_received, previous_sent)) = self.network.previous
                 && elapsed > 0.0
             {
-                let bytes_per_second =
-                    current.bytes.saturating_sub(previous.bytes) as f32 / elapsed;
-                let link_bytes_per_second = current.link_bits_per_second as f32 / 8.0;
-                self.values[ResourceMetricKind::Network.index()] = (link_bytes_per_second > 0.0)
-                    .then_some((bytes_per_second / link_bytes_per_second).clamp(0.0, 1.0));
-                self.texts[ResourceMetricKind::Network.index()] =
-                    format_network_rate(bytes_per_second);
+                self.network
+                    .download
+                    .set(received.saturating_sub(previous_received) as f64 / elapsed);
+                self.network
+                    .upload
+                    .set(sent.saturating_sub(previous_sent) as f64 / elapsed);
             }
-            self.previous_network = Some(current);
+            self.network.previous = Some((received, sent));
         }
+    }
 
-        for kind in ResourceMetricKind::ALL {
-            if !enabled(kind) {
-                continue;
-            }
-            let index = kind.index();
-            if kind != ResourceMetricKind::Network {
-                update_percent_text(&mut self.texts[index], self.values[index]);
-            } else if self.texts[index].is_empty() {
-                self.texts[index].push('—');
-            }
-            self.animated[index].set_target(self.values[index], now);
+    fn percent(&self, metric: &ResourceMetricConfig) -> Option<&PercentMetric> {
+        match metric.kind {
+            ResourceMetricKind::Cpu => Some(&self.cpu),
+            ResourceMetricKind::Ram => Some(&self.ram),
+            ResourceMetricKind::Disk => Some(&self.disk),
+            ResourceMetricKind::Gpu => self.gpus.get(usize::from(metric.gpu)),
+            ResourceMetricKind::Network => None,
         }
     }
 
@@ -197,23 +250,44 @@ impl ResourceUsageCache {
     }
 }
 
-pub(crate) struct MetricUsage<'a> {
-    pub(crate) value: Option<f32>,
-    pub(crate) text: &'a str,
+#[derive(Clone, Copy)]
+pub(crate) struct RateUsage<'a> {
+    pub(crate) value: &'a str,
+    pub(crate) unit: &'a str,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum MetricUsage<'a> {
+    Percent {
+        value: Option<f32>,
+        text: &'a str,
+    },
+    Rates {
+        upload: RateUsage<'a>,
+        download: RateUsage<'a>,
+    },
 }
 
 pub(crate) struct ResourceUsage<'a> {
-    values: [Option<f32>; METRIC_COUNT],
-    texts: &'a [String; METRIC_COUNT],
+    cache: &'a ResourceUsageCache,
+    now: Instant,
 }
 
 impl<'a> ResourceUsage<'a> {
-    pub(crate) fn metric(&self, kind: ResourceMetricKind) -> MetricUsage<'a> {
-        let index = kind.index();
-        MetricUsage {
-            value: self.values[index],
-            text: &self.texts[index],
+    pub(crate) fn metric(&self, metric: &ResourceMetricConfig) -> MetricUsage<'a> {
+        if metric.kind == ResourceMetricKind::Network {
+            return MetricUsage::Rates {
+                upload: self.cache.network.upload.usage(),
+                download: self.cache.network.download.usage(),
+            };
         }
+        self.cache.percent(metric).map_or(
+            MetricUsage::Percent {
+                value: None,
+                text: EMPTY_TEXT,
+            },
+            |percent| percent.usage(self.now),
+        )
     }
 }
 
@@ -221,11 +295,52 @@ thread_local! {
     static RESOURCE_USAGE: RefCell<ResourceUsageCache> = RefCell::new(ResourceUsageCache::default());
     static EXPANDED_RESOURCE_CONFIG: RefCell<Vec<ResourceMetricConfig>> = RefCell::new(default_resource_metrics());
     static COMPACT_RESOURCE_CONFIG: RefCell<Vec<ResourceMetricConfig>> = RefCell::new(default_resource_metrics());
+    static GPU_COUNT: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+pub(crate) fn gpu_names() -> Vec<String> {
+    let names = crate::platform::metrics().gpu_adapters();
+    set_gpu_count(names.len());
+    names
+}
+
+pub(crate) fn gpu_count() -> usize {
+    GPU_COUNT
+        .with(Cell::get)
+        .unwrap_or_else(|| gpu_names().len())
+}
+
+fn set_gpu_count(count: usize) {
+    GPU_COUNT.with(|cell| cell.set(Some(count)));
+}
+
+pub(crate) fn metric_visible(metric: &ResourceMetricConfig, gpu_count: usize) -> bool {
+    metric.kind != ResourceMetricKind::Gpu || usize::from(metric.gpu) < gpu_count.max(1)
+}
+
+pub(crate) fn metric_label(metric: &ResourceMetricConfig, gpu_count: usize) -> Cow<'static, str> {
+    if metric.kind != ResourceMetricKind::Gpu || gpu_count < 2 {
+        return Cow::Borrowed(metric.kind.label());
+    }
+    GPU_LABELS.get(usize::from(metric.gpu)).map_or_else(
+        || Cow::Owned(format!("GPU {}", metric.gpu)),
+        |label| Cow::Borrowed(*label),
+    )
+}
+
+pub(crate) fn visible_metrics(
+    metrics: &[ResourceMetricConfig],
+) -> impl Iterator<Item = &ResourceMetricConfig> {
+    let gpu_count = gpu_count();
+    metrics
+        .iter()
+        .filter(move |metric| metric.enabled && metric_visible(metric, gpu_count))
 }
 
 fn replace_config(cell: &RefCell<Vec<ResourceMetricConfig>>, metrics: &[ResourceMetricConfig]) {
     let mut normalized = metrics.to_vec();
     normalize_resource_metrics(&mut normalized);
+    add_detected_gpu_metrics(&mut normalized, gpu_count());
     *cell.borrow_mut() = normalized;
 }
 
@@ -243,24 +358,32 @@ pub(crate) fn with_compact_config<R>(read: impl FnOnce(&[ResourceMetricConfig]) 
 }
 
 pub(crate) const COMPACT_METRIC_GAP: f32 = 4.0;
+const COMPACT_NETWORK_WIDTH: f32 = 50.0;
+const COMPACT_GPU_INDEX_WIDTH: f32 = 7.0;
 
-pub(crate) fn compact_metric_width(style: ResourceMetricStyle) -> f32 {
-    match style {
+pub(crate) fn compact_metric_width(metric: &ResourceMetricConfig, gpu_count: usize) -> f32 {
+    if metric.kind == ResourceMetricKind::Network {
+        return COMPACT_NETWORK_WIDTH;
+    }
+    let base = match metric.style {
         ResourceMetricStyle::Bar => 44.0,
         ResourceMetricStyle::Ring => 38.0,
+    };
+    if metric.kind == ResourceMetricKind::Gpu && gpu_count > 1 {
+        base + COMPACT_GPU_INDEX_WIDTH
+    } else {
+        base
     }
 }
 
 pub(crate) fn compact_width() -> f32 {
     with_compact_config(|config| {
-        let (count, width) = config
-            .iter()
-            .filter(|metric| metric.enabled)
-            .fold((0, 0.0), |(count, width), metric| {
-                (count + 1, width + compact_metric_width(metric.style))
-            });
+        let gpu_count = gpu_count();
+        let (count, width) = visible_metrics(config).fold((0, 0.0), |(count, width), metric| {
+            (count + 1, width + compact_metric_width(metric, gpu_count))
+        });
         if count == 0 {
-            compact_metric_width(ResourceMetricStyle::Bar)
+            44.0
         } else {
             width + COMPACT_METRIC_GAP * (count - 1) as f32
         }
@@ -272,13 +395,11 @@ pub(crate) fn with_resource_usage<R>(
     draw: impl FnOnce(ResourceUsage<'_>) -> R,
 ) -> R {
     RESOURCE_USAGE.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        cache.refresh_if_due(metrics);
-        let now = Instant::now();
-        let values = std::array::from_fn(|index| cache.animated[index].value(now));
+        cell.borrow_mut().refresh_if_due(metrics);
+        let cache = cell.borrow();
         draw(ResourceUsage {
-            values,
-            texts: &cache.texts,
+            cache: &cache,
+            now: Instant::now(),
         })
     })
 }
@@ -291,9 +412,11 @@ pub(crate) fn is_animating(metrics: &[ResourceMetricConfig]) -> bool {
     RESOURCE_USAGE.with(|cell| {
         let cache = cell.borrow();
         let now = Instant::now();
-        metrics
-            .iter()
-            .any(|metric| metric.enabled && cache.animated[metric.kind.index()].is_animating(now))
+        visible_metrics(metrics).any(|metric| {
+            cache
+                .percent(metric)
+                .is_some_and(|percent| percent.animated.is_animating(now))
+        })
     })
 }
 
@@ -330,20 +453,72 @@ fn blend_color(from: Rgba, to: Rgba, amount: f32) -> Rgba {
     )
 }
 
-fn update_percent_text(text: &mut String, value: Option<f32>) {
-    if let Some(value) = value {
-        *text = format!("{:.0}%", value * 100.0);
-    } else if text.is_empty() {
-        text.push('—');
+fn format_rate(bytes_per_second: f64) -> (String, &'static str) {
+    const UNITS: [&str; 4] = ["B/s", "KB/s", "MB/s", "GB/s"];
+    let mut value = bytes_per_second.max(0.0);
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    let text = if unit > 0 && value < 10.0 {
+        format!("{value:.1}")
+    } else {
+        format!("{value:.0}")
+    };
+    (text, UNITS[unit])
+}
+
+pub(crate) fn draw_rate_arrow(
+    painter: winisland_render::Painter<'_>,
+    center: winisland_render::Point,
+    size: f32,
+    upward: bool,
+    color: Rgba,
+) {
+    use winisland_render::{Point, StrokeCap};
+    let direction = if upward { -1.0 } else { 1.0 };
+    let tip = Point::new(center.x, center.y + direction * size / 2.0);
+    let tail = Point::new(center.x, center.y - direction * size / 2.0);
+    let width = (size * 0.19).max(1.0);
+    painter.stroke_line(tail, tip, width, color, StrokeCap::Round);
+    for side in [-1.0, 1.0] {
+        painter.stroke_line(
+            tip,
+            Point::new(
+                center.x + side * size * 0.36,
+                tip.y - direction * size * 0.36,
+            ),
+            width,
+            color,
+            StrokeCap::Round,
+        );
     }
 }
 
-fn format_network_rate(bytes_per_second: f32) -> String {
-    if bytes_per_second >= 1024.0 * 1024.0 {
-        format!("{:.1}M/s", bytes_per_second / (1024.0 * 1024.0))
-    } else if bytes_per_second >= 1024.0 {
-        format!("{:.0}K/s", bytes_per_second / 1024.0)
-    } else {
-        format!("{:.0}B/s", bytes_per_second)
+pub(crate) fn preview_usage(metric: &ResourceMetricConfig) -> MetricUsage<'static> {
+    const GPU_PREVIEW: [(f32, &str); 4] =
+        [(0.48, "48%"), (0.23, "23%"), (0.12, "12%"), (0.07, "7%")];
+    let (value, text) = match metric.kind {
+        ResourceMetricKind::Cpu => (0.37, "37%"),
+        ResourceMetricKind::Ram => (0.62, "62%"),
+        ResourceMetricKind::Disk => (0.71, "71%"),
+        ResourceMetricKind::Gpu => GPU_PREVIEW[usize::from(metric.gpu) % GPU_PREVIEW.len()],
+        ResourceMetricKind::Network => {
+            return MetricUsage::Rates {
+                upload: RateUsage {
+                    value: "1.2",
+                    unit: "MB/s",
+                },
+                download: RateUsage {
+                    value: "18",
+                    unit: "MB/s",
+                },
+            };
+        }
+    };
+    MetricUsage::Percent {
+        value: Some(value),
+        text,
     }
 }

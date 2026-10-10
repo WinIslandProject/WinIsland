@@ -5,6 +5,8 @@ use crate::{MetricSelection, PlatformError, SystemSample};
 pub trait SystemMetrics {
     /// Samples selected counters; an error means the OS did not provide them.
     fn sample(&self, selection: MetricSelection) -> Result<SystemSample, PlatformError>;
+    /// Names of the hardware GPUs, indexed like `SystemSample::gpu_usage`.
+    fn gpu_adapters(&self) -> Vec<String>;
     /// Trims this process's working set, or returns an OS error.
     fn trim_working_set(&self) -> Result<(), PlatformError>;
 }

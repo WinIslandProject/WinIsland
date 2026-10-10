@@ -68,8 +68,6 @@ impl SettingsApp {
         page.push(SettingsItem::Custom {
             height: self.page_order_display_height(),
         });
-        page.spacer(10.0);
-        page.row_label(tr("page_order_hint"));
         page
     }
 
@@ -511,10 +509,9 @@ impl SettingsApp {
             widget_edit_button_hit(context.pointer, (x, y, width, height), geometry.cap_scale)
         });
         if resource_edit {
-            self.resource_editor_open = true;
+            self.open_resource_editor();
             self.set_widget_hover_target(None);
             self.set_active_widget_preview_hover_slot(None);
-            self.request_redraw();
             return true;
         }
 
@@ -574,10 +571,9 @@ impl SettingsApp {
             widget_edit_button_hit(context.pointer, (x, y, width, height), geometry.cap_scale)
         });
         if resource_edit {
-            self.resource_editor_open = true;
+            self.open_resource_editor();
             self.set_widget_hover_target(None);
             self.set_active_widget_preview_hover_slot(None);
-            self.request_redraw();
             return true;
         }
         let position = self.config.compact_widget_layout.iter().find_map(|entry| {
