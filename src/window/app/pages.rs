@@ -42,6 +42,9 @@ impl App {
                     .map(|(id, _)| ExpandedPage::Plugin(id)),
             );
         }
+        if pages.is_empty() {
+            pages.push(ExpandedPage::Widgets);
+        }
         pages
     }
 

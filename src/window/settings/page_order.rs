@@ -19,6 +19,9 @@ const ARROW_BUTTON: f32 = 28.0;
 const ARROW_GAP: f32 = 6.0;
 const CHECK_SIZE: f32 = 20.0;
 const PRESS_SECS: f32 = 0.25;
+const HINT_GAP: f32 = 10.0;
+const HINT_SIZE: f32 = 12.0;
+const HINT_LINE_HEIGHT: f32 = 17.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ArrowDirection {
@@ -87,11 +90,7 @@ fn mix(from: Rgba, to: Rgba, amount: f32) -> Rgba {
     )
 }
 
-fn page_can_hide(kind: ExpandedPageKind) -> bool {
-    kind != ExpandedPageKind::Widgets
-}
-
-fn draw_checkbox(
+pub(crate) fn draw_checkbox(
     painter: Painter<'_>,
     rect: Rect,
     checked: f32,
@@ -151,6 +150,17 @@ fn draw_checkbox(
 impl SettingsApp {
     pub(crate) fn page_order_display_height(&self) -> f32 {
         page_order_list_height(self.config.expanded_page_order.len())
+            + HINT_GAP
+            + self.page_order_hint_lines().len() as f32 * HINT_LINE_HEIGHT
+    }
+
+    fn page_order_hint_lines(&self) -> Vec<String> {
+        FontManager::global().wrap_text(
+            &tr("page_order_hint"),
+            HINT_SIZE,
+            winisland_render::FontStyle::normal(),
+            self.content_width() - CONTENT_PADDING * 2.0 - GROUP_INNER_PAD * 2.0,
+        )
     }
 
     fn page_order_active(&self) -> bool {
@@ -165,12 +175,12 @@ impl SettingsApp {
         }
         let mut y = SETTINGS_HEADER_H;
         for item in &self.cached_items {
-            if let SettingsItem::Custom { height } = item {
+            if let SettingsItem::Custom { .. } = item {
                 return Some(Rect::from_xywh(
                     SIDEBAR_W + CONTENT_PADDING,
                     y - self.scroll_y,
                     self.content_width() - CONTENT_PADDING * 2.0,
-                    *height,
+                    page_order_list_height(self.config.expanded_page_order.len()),
                 ));
             }
             y += item.height();
@@ -251,8 +261,17 @@ impl SettingsApp {
         order.insert(to, kind);
     }
 
+    fn page_toggle_locked(&self, kind: ExpandedPageKind) -> bool {
+        !self.page_hidden(kind)
+            && self
+                .config
+                .expanded_page_order
+                .iter()
+                .all(|page| *page == kind || self.page_hidden(*page))
+    }
+
     fn toggle_page_visibility(&mut self, kind: ExpandedPageKind) {
-        if !page_can_hide(kind) {
+        if self.page_toggle_locked(kind) {
             return;
         }
         let hidden = &mut self.config.hidden_expanded_pages;
@@ -527,7 +546,13 @@ impl SettingsApp {
                 f32::from(!self.page_hidden(kind))
             };
             let check = Self::page_order_check_rect(list, top);
-            draw_checkbox(painter, check, checked, !page_can_hide(kind), theme);
+            draw_checkbox(
+                painter,
+                check,
+                checked,
+                self.page_toggle_locked(kind),
+                theme,
+            );
 
             let fonts = FontManager::global();
             let name = tr(page_name_key(kind));
@@ -606,6 +631,20 @@ impl SettingsApp {
                     );
                 }
             }
+        }
+        let fonts = FontManager::global();
+        for (index, line) in self.page_order_hint_lines().iter().enumerate() {
+            fonts.draw_str(
+                painter,
+                line,
+                Point::new(
+                    list.left + GROUP_INNER_PAD,
+                    list.bottom + HINT_GAP + HINT_SIZE + index as f32 * HINT_LINE_HEIGHT,
+                ),
+                HINT_SIZE,
+                false,
+                settings_color(theme.text_sec),
+            );
         }
         painter.restore_to(save_count);
     }

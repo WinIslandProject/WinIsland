@@ -197,19 +197,18 @@ pub enum GpuProfile {
     Integrated,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SystemSample {
     pub cpu_idle_ticks: Option<u64>,
     pub cpu_total_ticks: Option<u64>,
     pub memory_used_bytes: Option<u64>,
     pub memory_total_bytes: Option<u64>,
     pub memory_load_percent: Option<u32>,
-    pub network_bytes: Option<u64>,
-    pub network_link_bits_per_second: Option<u64>,
+    pub network_received_bytes: Option<u64>,
+    pub network_sent_bytes: Option<u64>,
     pub disk_free_bytes: Option<u64>,
     pub disk_total_bytes: Option<u64>,
-    pub gpu_memory_used_bytes: Option<u64>,
-    pub gpu_memory_budget_bytes: Option<u64>,
+    pub gpu_usage: Vec<Option<f32>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

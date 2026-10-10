@@ -238,6 +238,7 @@ pub struct SettingsApp {
     pub(crate) widget_drop_animation: Option<WidgetDropAnimation>,
     pub(crate) page_order: page_order::PageOrderState,
     pub(crate) resource_editor_open: bool,
+    pub(crate) resource_editor: resource_editor::ResourceEditorState,
     pub(crate) plugin_widgets: Vec<PluginWidget>,
     pub(crate) plugin_host: Option<Rc<PluginHost>>,
     pub(crate) plugins: Vec<InstalledPlugin>,
@@ -372,6 +373,7 @@ impl SettingsApp {
             widget_drop_animation: None,
             page_order: page_order::PageOrderState::default(),
             resource_editor_open: false,
+            resource_editor: resource_editor::ResourceEditorState::default(),
             plugin_widgets,
             plugin_host: None,
             plugins,
@@ -773,10 +775,10 @@ impl SettingsApp {
             if matches!(key, Key::Escape) {
                 if self.popup.take().is_some() {
                     self.anim.set_with_speed(POPUP_OPACITY_KEY, 0.0, 0.3);
+                    self.request_redraw();
                 } else {
-                    self.resource_editor_open = false;
+                    self.handle_resource_editor_escape();
                 }
-                self.request_redraw();
             }
             return;
         }
@@ -815,6 +817,7 @@ impl SettingsApp {
         }
         redraw |= self.update_widget_hover();
         redraw |= self.update_page_order_drag();
+        redraw |= self.update_resource_editor_drag();
         redraw |= self.update_popup_hover();
         if mouse_moved {
             self.last_hover_mouse_pos = new_position;
@@ -1114,7 +1117,10 @@ impl SettingsApp {
             return;
         }
         let scroll_released = std::mem::take(&mut self.scroll_dragging);
-        if scroll_released || self.handle_widget_drag_release() || self.handle_page_order_release()
+        if scroll_released
+            || self.handle_widget_drag_release()
+            || self.handle_page_order_release()
+            || self.handle_resource_editor_release()
         {
             self.request_redraw();
         }

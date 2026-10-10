@@ -76,6 +76,7 @@ thread_local! {
     static TEXT_CACHE: RefCell<TextCacheMap> = RefCell::new(HashMap::new());
     static TEXT_PATH_CACHE: RefCell<TextPathCacheMap> = RefCell::new(HashMap::new());
     static TEXT_PREFIX_CACHE: RefCell<TextPrefixCacheMap> = RefCell::new(HashMap::new());
+    static TEXT_WRAP_CACHE: RefCell<HashMap<u64, Vec<String>>> = RefCell::new(HashMap::new());
     static CUSTOM_TYPEFACE: RefCell<CustomTypefaceState> = const { RefCell::new(CustomTypefaceState {
         path: None,
         typeface: None,
@@ -87,6 +88,8 @@ const FALLBACK_CACHE_LIMIT: usize = 2000;
 const TEXT_CACHE_LIMIT: usize = 500;
 const TEXT_PATH_CACHE_LIMIT: usize = 100;
 const TEXT_PREFIX_CACHE_LIMIT: usize = 100;
+const TEXT_WRAP_CACHE_LIMIT: usize = 32;
+const NO_LINE_START: &str = ",.;:!?)%，。、；：！？）」』》";
 const TEXT_PREFIX_WIDTH_LIMIT: usize = 256;
 
 fn to_skia_font_style(style: FontStyle) -> SkFontStyle {
@@ -111,6 +114,35 @@ where
     {
         cache.remove(&key);
     }
+}
+
+fn breaks_anywhere(character: char) -> bool {
+    matches!(
+        character,
+        '\u{2E80}'..='\u{9FFF}'
+            | '\u{AC00}'..='\u{D7AF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FF00}'..='\u{FFEF}'
+    )
+}
+
+fn break_tokens(text: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    for character in text.chars() {
+        let previous = tokens.last().and_then(|token| token.chars().last());
+        let attaches = previous.is_some_and(|previous| {
+            !previous.is_whitespace()
+                && (NO_LINE_START.contains(character)
+                    || (!character.is_whitespace()
+                        && !breaks_anywhere(character)
+                        && !breaks_anywhere(previous)))
+        });
+        match tokens.last_mut() {
+            Some(token) if attaches => token.push(character),
+            _ => tokens.push(character.to_string()),
+        }
+    }
+    tokens
 }
 
 fn hash_cache_key(text: &str, style: FontStyle, size: f32) -> u64 {
@@ -393,6 +425,44 @@ impl FontManager {
             truncated.push_str("...");
             canvas.draw_str(&truncated, (params.x, params.y), &font, &paint);
         }
+    }
+
+    pub fn wrap_text(
+        &self,
+        text: &str,
+        size: f32,
+        style: FontStyle,
+        max_width: f32,
+    ) -> Vec<String> {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        hash_cache_key(text, style, size).hash(&mut hasher);
+        max_width.to_bits().hash(&mut hasher);
+        let cache_key = hasher.finish();
+        if let Some(lines) = TEXT_WRAP_CACHE.with(|cache| cache.borrow().get(&cache_key).cloned()) {
+            return lines;
+        }
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        for token in break_tokens(text) {
+            let candidate = format!("{line}{token}");
+            if !line.trim().is_empty()
+                && self.measure_text_cached(&candidate, size, style) > max_width
+            {
+                lines.push(line.trim_end().to_string());
+                line = token.trim_start().to_string();
+            } else {
+                line = candidate;
+            }
+        }
+        if !line.trim().is_empty() {
+            lines.push(line.trim_end().to_string());
+        }
+        TEXT_WRAP_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            evict_one_if_full(&mut cache, TEXT_WRAP_CACHE_LIMIT);
+            cache.insert(cache_key, lines.clone());
+        });
+        lines
     }
 
     pub fn measure_text_cached(&self, text: &str, size: f32, style: FontStyle) -> f32 {

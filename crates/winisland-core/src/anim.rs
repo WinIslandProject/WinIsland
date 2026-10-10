@@ -171,6 +171,21 @@ impl AnimPool {
         }
     }
 
+    pub fn snap(&mut self, key: u64, value: f32) {
+        let speed = self.default_speed;
+        let entry = self.values.entry(key).or_insert(AnimValue {
+            value,
+            target: value,
+            speed,
+        });
+        entry.value = value;
+        entry.target = value;
+    }
+
+    pub fn try_get(&self, key: u64) -> Option<f32> {
+        self.values.get(&key).map(|v| v.value)
+    }
+
     pub fn get(&self, key: u64) -> f32 {
         self.values.get(&key).map(|v| v.value).unwrap_or(0.0)
     }

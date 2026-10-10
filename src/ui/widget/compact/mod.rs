@@ -1,4 +1,4 @@
-mod resource_usage;
+pub(crate) mod resource_usage;
 mod time;
 
 use winisland_core::config::{CompactWidgetAlignment, CompactWidgetKind, CompactWidgetSlot};
