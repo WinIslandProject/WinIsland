@@ -227,4 +227,37 @@ Build requirements: Windows SDK, LLVM/clang (via Visual Studio or `choco install
 
 ### Version
 
-`[workspace.package] version` in the root `Cargo.toml` is the single source of truth (currently 1.3.9); both `WinIsland` and `winisland-core` inherit it through `version.workspace = true`, so `core::config::APP_VERSION` still reports the application version. The `release.yml` workflow takes its version as a manual input, so that input has to be bumped together with the manifest.
+`[workspace.package] version` in the root `Cargo.toml` is the single source of truth; both `WinIsland` and `winisland-core` inherit it through `version.workspace = true`, so `core::config::APP_VERSION` still reports the application version. The `release.yml` workflow takes its version as a manual input, so that input has to be bumped together with the manifest. Read the current value from `Cargo.toml`; do not rely on a number written here.
+
+---
+
+## Where `unsafe` is allowed
+
+`unsafe` exists only where the code owns a platform handle, crosses the C ABI, or drives the GPU. Everywhere else it is a defect, not a style choice.
+
+| Crate | Allowed locations | Why |
+|---|---|---|
+| `winisland-platform-windows` | entire crate | Owns Win32, COM, WinRT, and winit handles |
+| `winisland-render` | `src/backend/**` only | Owns the D3D12 device, swap chains, and Skia GPU contexts |
+| `winisland-plugin-host` | `src/{abi,loader,services}/**`, `src/lifecycle*` | Implements the C ABI tables and the plugin loader |
+| `winisland-plugin-api` | `src/{abi,sdk}/**` | Declares the ABI types and wraps them for plugin authors |
+| `winisland-plugin-calendar` | `src/lib.rs` plugin entry only | Built-in plugin; its `extern "C"` entry points are the only FFI surface |
+| `winisland-core` | none | Domain layer; must compile without any platform dependency |
+| `winisland-platform` | none | Contracts and value types only; must stay free of `unsafe` |
+| `src/**` (application) | none | Application code calls the platform contract instead |
+
+Rules that apply everywhere:
+
+1. Every `unsafe` block has a `// SAFETY:` comment on the line above it. The comment names the invariant and who upholds it. "This is safe" is not a comment.
+2. Every `unsafe extern "C"` entry point validates its pointer arguments before dereferencing them and returns a `PluginStatus` instead of panicking.
+3. New `unsafe` outside the table above requires an architecture decision, not a code review comment.
+
+Two known violations are recorded rather than fixed: `src/window/settings/mod.rs` calls `EnumDisplayDevicesW` directly instead of going through `winisland-platform-windows`, and `winisland-plugin-calendar` keeps its `extern "C"` entry points in the crate root. Do not add more.
+
+### Documentation rules
+
+Documentation in this directory is read by agents as ground truth, so it must not contain facts that expire.
+
+- Do not write version numbers, line counts, file counts, or line references. Point at the file instead: "see `Cargo.toml`", not "currently 1.3.9".
+- Directory listings describe intent, not an exhaustive inventory. Treat the tree as authoritative when they disagree, and correct the listing in the same change that moves a file.
+- When a rule names a file path, that path must exist. A rule that points at a deleted file is worse than no rule.

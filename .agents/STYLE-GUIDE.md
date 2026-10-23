@@ -73,7 +73,7 @@ Group imports in this order, separated by blank lines:
 ## Rendering conventions
 
 - Use `winisland_render` value types and `Painter` in application UI code
-- Keep Skia calls inside `crates/winisland-render/`, except the plugin ABI v1 bridge in `src/plugin/manager.rs`
+- Keep Skia calls inside `crates/winisland-render/`. Application code, plugins, and the plugin host reach rendering only through `Painter` and the validated ABI v2 draw lists
 - Preserve sampling, alpha, anti-aliasing, clip, and blur settings when migrating drawing calls
 - Keep expensive image, path, and text caches scoped to their rendering module
 
