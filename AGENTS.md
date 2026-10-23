@@ -34,3 +34,38 @@ cargo build --release   # Production build
 10. **Do not modify changelog files** (`Changelog.md`, `Changelog-zh.md`) — only project maintainers can modify them, unless explicitly requested by the user.
 11. **Do not add tests** — this project does not accept unit, integration, snapshot, or UI tests.
 12. **Pull requests must follow the PR format** — see [`.github/pull_request_template.md`](.github/pull_request_template.md) for the required template and guidelines.
+
+## Change discipline
+
+These rules exist because over-broad, unreviewed agent changes are the main source of structural debt in this repository. They apply to every task unless the user explicitly overrides a specific rule.
+
+### Scope budget
+
+- State the files and crates you intend to touch before editing. If the change spans more than one crate, wait for confirmation first.
+- Keep one task within 5 files and 2 crates. If a change must cross more boundaries, stop and report why each boundary is required. Do not expand scope on your own.
+- Do not perform opportunistic refactors, reformatting, import reordering, or rename passes. Change only what the task requires.
+
+### No net addition without removal
+
+- When replacing an implementation, delete the code it replaces. Do not keep the old path "just in case", as a fallback branch, or as a compatibility layer.
+- Do not add functions, types, modules, config keys, or feature flags that have no call site.
+- Before reporting completion, state what the change removed. If the answer is "nothing", re-examine the change.
+
+### Suppressions require justification
+
+- Do not add `#[allow(...)]` to silence a clippy warning. A warning is a signal to restructure, not to suppress. If suppression is genuinely required, put the reason on the same line and call it out separately in your reply.
+- Do not add `unsafe`. If it is genuinely required: keep it inside a crate allowed by [.agents/ARCHITECTURE.md](.agents/ARCHITECTURE.md), place a `// SAFETY:` comment immediately above explaining which invariant is upheld and by whom, and list it separately in your reply.
+- Do not add `unwrap()`, `expect()`, or `panic!()` outside `main` startup paths.
+
+### Never relax your own constraints
+
+- Do not modify `AGENTS.md`, `.agents/**`, `.github/workflows/**`, or `CODEOWNERS` unless the task is explicitly about those files.
+- Do not make checks pass by editing CI configuration, path filters, skip markers, or test selection. Fix the code instead.
+- Do not add `[ci-skip]`, `[docs]`, or any equivalent marker to a PR title or commit message.
+
+### Dependency changes are architectural decisions
+
+- Do not add, remove, upgrade, or enable features on any dependency in `Cargo.toml` unless the user explicitly asks.
+- If a dependency change is required, state the alternative considered, the binary size impact, and whether it reaches `winisland-plugin-api` (plugin authors compile against that crate).
+- Do not edit `Cargo.lock` by hand; let cargo regenerate it.
+
