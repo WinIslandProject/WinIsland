@@ -1,85 +1,96 @@
 ---
 name: commit-push
-description: Generate a Conventional Commit message from the current git diff and commit. Use when the user says 'commit', '/commit', 'commit changes', or asks to create a git commit.
+description: Write a Conventional Commit message from the staged diff and commit it. Use when the user says commit, /commit, commit changes, or asks to create a git commit.
 license: GPL-3.0
 metadata:
   project: WinIsland
 ---
 
-Analyze the staged and unstaged changes, then generate a commit message following the project's existing style. The project uses **Conventional Commits** with optional scopes matching module names.
+## Before writing anything
 
-## Commit message format
-
-```
-<type>(<scope>): <short description>
-
-<body (optional)>
+```bash
+git status --short
+git diff --cached --stat
 ```
 
-### Types
+If nothing is staged, stage related files together first. Do not `git add -A` when the working tree spans unrelated changes; split them.
 
-| Type | When to use |
-|------|------------|
+Never commit unless the user explicitly asked in this turn.
+
+## Format
+
+```
+<type>(<scope>): <description>
+
+<body, optional>
+```
+
+### Type
+
+| Type | Use for |
+|---|---|
 | `feat` | A new feature |
 | `fix` | A bug fix |
-| `refactor` | Code restructuring without feature/bug changes |
-| `perf` | Performance improvement |
-| `style` | Formatting, whitespace, etc. (no logic change) |
-| `docs` | Documentation changes |
-| `chore` | Maintenance, config, dependencies |
+| `refactor` | Neither fixes a bug nor adds a feature |
+| `perf` | A performance improvement |
+| `style` | Formatting with no behaviour change |
+| `docs` | Documentation only |
+| `chore` | Build, tooling, dependencies, releases |
+| `ci` | CI configuration |
+| `revert` | Reverting a previous commit |
+| `security` | A security fix |
 
-### Scopes
+### Scope
 
-Match the scope to the module or subsystem affected:
+Use the module or crate the change actually touches. Prefer the crate name when the change lives in one crate, and omit the scope when it spans several.
 
-| Scope | Module |
-|-------|--------|
-| `lyrics` | `src/core/lyrics.rs` or lyrics-related changes |
-| `smtc` | `src/core/smtc.rs` — SMTC/media integration |
-| `render` | `src/core/render.rs` — rendering |
-| `glass` | `src/utils/glass.rs` — glass effect |
-| `plugin` | `src/plugin/` or `crates/winisland-plugin-api/` |
-| `settings` | `src/window/settings/` or settings UI |
-| `packager` | `crates/winisland-plugin-api/src/packager/` |
-| `window` | `src/window/` — window management |
-| (none) | Use no scope for cross-cutting changes |
+| Scope | Area |
+|---|---|
+| `core` | `crates/winisland-core/` |
+| `platform` | `crates/winisland-platform/` or `winisland-platform-windows/` |
+| `render` | `crates/winisland-render/` |
+| `plugin` | `crates/winisland-plugin-*/` or `src/plugin/` |
+| `settings` | `src/window/settings/` |
+| `window` | `src/window/` |
+| `ui` | `src/ui/` |
+| `lyrics` | Lyrics model, providers, or matching |
+| `smtc` | Media session integration |
+| `audio` | Capture, spectrum, output devices |
+| `ci` | `.github/workflows/` |
+| `agents` | `AGENTS.md`, `.agents/` |
 
-### Examples from the project
+### Description
+
+- Imperative mood: `add`, not `added` or `adds`.
+- Lowercase, no trailing period.
+- 72 characters or fewer.
+- Describe the change, not the process.
+
+### Body
+
+Only when the subject cannot carry the reason. Explain why the change is needed and what it replaces. Wrap at 72 columns. Do not restate the diff, do not list files, and do not narrate the steps you took.
+
+## What a message must not contain
+
+- Workflow position or planning state: no `phase 1`, `P0`, `P1`, `step 3`, `stage 2`, `batch 4`, `part 2`.
+- A number standing in for a plan. If a change needs several commits, name each by its content.
+- Emoji, unless the user asked for them.
+
+## Examples
 
 ```
-feat(lyrics): prevent unrelated lyrics for browser video sessions and add local lyrics
-fix: filter empty path in RowFolderPicker clear_label and current_path
-refactor: restructure rendering pipeline, optimize code quality, fix plugin security issues
-perf(glass): capture background once, cache by position, reduce blur CPU usage
-style: fix fmt formatting in packager mod.rs
+feat(lyrics): shape Bangla lines before measuring text
+fix(render): keep the rounded corner inside the island bounds
+refactor(plugin): move the built-in calendar into a workspace crate
+ci: gate PR checks so required contexts always report
+docs(agents): document where unsafe is allowed
 ```
 
-## Procedure
+## After committing
 
-1. **Stage files logically**: Group related changes together. Do NOT stage everything at once if changes span unrelated areas.
+```bash
+git log --oneline -1
+git status --short
+```
 
-   ```bash
-   # Stage only the files relevant to this commit
-   git add <file1> <file2>
-   ```
-
-2. **Generate the message**: Based on the staged diff, write a commit message following the format above.
-
-3. **Commit**:
-
-   ```bash
-   git commit -m "<type>(<scope>): <description>"
-   ```
-
-4. **If the user has a fork + PR setup**: Ask whether to push. If yes, push to the fork's branch:
-
-   ```bash
-   git push
-   ```
-
-## Rules
-
-- Short description: imperative mood, lowercase, no period at end, max ~72 chars
-- Body (if needed): wrap at 72 chars, explain *why* not *what*
-- If the change fixes an issue, reference it in the body: `Fixes #123`
-- Never commit unless the user explicitly asks
+Confirm the tree is clean and report the hash. Push only if the user asked.

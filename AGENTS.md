@@ -5,35 +5,51 @@ WinIsland is a **Dynamic Island for Windows**, written in Rust. It replicates th
 ## Quick start
 
 ```bash
-cargo check          # Fast type-check
-cargo clippy --workspace -- -D warnings   # Lint (warnings as errors)
-cargo fmt --all      # Format all files
-cargo build --release   # Production build
+cargo fmt --all                          # Format
+cargo clippy --workspace -- -D warnings  # Lint and type-check; replaces cargo check
+cargo build --release                    # Production build, only when asked
 ```
 
-## Key files to read
+Clippy type-checks the workspace, so running `cargo check` as well only pays the compile cost twice. `cargo test` is not useful here: the project accepts no tests.
 
-| File | What it contains |
-|------|-----------------|
-| [.agents/ARCHITECTURE.md](.agents/ARCHITECTURE.md) | Project structure, module responsibilities, rendering pipeline, plugin system, Windows API usage |
-| [.agents/STYLE-GUIDE.md](.agents/STYLE-GUIDE.md) | Coding conventions, naming, unsafe safety comments, Skia patterns |
-| [.agents/skills/pr-check/SKILL.md](.agents/skills/pr-check/SKILL.md) | Build and lint automation for AI agents |
-| [.agents/skills/commit-push/SKILL.md](.agents/skills/commit-push/SKILL.md) | Commit message generation for AI agents |
+## Where to look
 
-## Agent behavior rules
+Read in this order. Stop when you have what you need; do not read all of it for a small change.
 
-1. **Never commit changes** unless the user explicitly asks you to.
-2. **Never create README or documentation files** unless the user asks.
-3. **Do not use emoji** unless the user explicitly requests it.
-4. **Always look at existing code conventions** before writing new code — mimic imports, patterns, and styles from neighboring files.
-5. **Check dependencies exist** before using a library — look at Cargo.toml or neighboring imports first.
-6. **Follow security best practices** — never log or commit secrets/keys.
-7. **No unnecessary comments** — do NOT add comments in code unless asked.
-8. Prefer editing existing files over creating new ones.
-9. **WDA_EXCLUDEFROMCAPTURE is intentionally NOT set** — see glass.rs doc comments for rationale.
-10. **Do not modify changelog files** (`Changelog.md`, `Changelog-zh.md`) — only project maintainers can modify them, unless explicitly requested by the user.
-11. **Do not add tests** — this project does not accept unit, integration, snapshot, or UI tests.
-12. **Pull requests must follow the PR format** — see [`.github/pull_request_template.md`](.github/pull_request_template.md) for the required template and guidelines.
+| File | Read it when |
+|------|--------------|
+| [.agents/ARCHITECTURE.md](.agents/ARCHITECTURE.md) | You need to know which crate owns a concern, or where `unsafe` is allowed |
+| [.agents/STYLE-GUIDE.md](.agents/STYLE-GUIDE.md) | You are writing Rust and need naming, import, error, or rendering conventions |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | You are preparing a pull request |
+| [.agents/skills/pr-check/SKILL.md](.agents/skills/pr-check/SKILL.md) | You changed code and need to verify it |
+| [.agents/skills/commit-push/SKILL.md](.agents/skills/commit-push/SKILL.md) | The user asked you to commit |
+| [.agents/skills/pr-write/SKILL.md](.agents/skills/pr-write/SKILL.md) | You are writing a PR description |
+
+## Hard rules
+
+These are absolute. Nothing else in this file overrides them.
+
+1. **Never commit** unless the user explicitly asks in this turn.
+2. **Never modify changelog files** (`Changelog.md`, `Changelog-zh.md`). Only maintainers update them.
+3. **Never add tests** — no unit, integration, snapshot, UI, or `#[cfg(test)]` tests. The project rejects them.
+4. **Never create README or documentation files** unless the user asks.
+5. **Never add `unsafe`** outside the crates listed in [.agents/ARCHITECTURE.md](.agents/ARCHITECTURE.md). If it is genuinely required there, put a `// SAFETY:` comment immediately above naming the invariant and who upholds it, and list it separately in your reply.
+6. **Never add `#[allow(...)]` to silence a warning.** A warning is a signal to restructure. If suppression is genuinely required, explain it in the PR.
+7. **Never add `unwrap()`, `expect()`, or `panic!()`** outside `main` startup paths.
+8. **Never commit secrets.** Do not log keys, tokens, or credentials.
+9. **Do not change capture exclusion casually.** `crates/winisland-platform-windows/src/capture.rs` sets `WDA_EXCLUDEFROMCAPTURE` so the island does not appear in its own backdrop; the magnifier fallback and the liquid glass style depend on that ordering. Read the module before touching it.
+10. **Pull requests follow the template** in [`.github/pull_request_template.md`](.github/pull_request_template.md). An unfilled template gets the PR closed.
+
+## Conventions
+
+Match the code around you before writing new code. If the neighboring files disagree with any document here, the code wins and the document is stale.
+
+- **Naming, imports, errors, rendering**: [.agents/STYLE-GUIDE.md](.agents/STYLE-GUIDE.md).
+- **Which crate owns a concern**: [.agents/ARCHITECTURE.md](.agents/ARCHITECTURE.md).
+- **Comments**: explain why, not what. No comment that restates the code.
+- **Dependencies**: check `Cargo.toml` and neighboring imports before adding a crate. Adding one is an architecture decision; see Dependency changes below.
+- **Files**: prefer editing an existing file over creating a new one.
+- **Emoji**: none, unless the user asks.
 
 ## Change discipline
 
@@ -50,12 +66,6 @@ These rules exist because over-broad, unreviewed agent changes are the main sour
 - When replacing an implementation, delete the code it replaces. Do not keep the old path "just in case", as a fallback branch, or as a compatibility layer.
 - Do not add functions, types, modules, config keys, or feature flags that have no call site.
 - Before reporting completion, state what the change removed. If the answer is "nothing", re-examine the change.
-
-### Suppressions require justification
-
-- Do not add `#[allow(...)]` to silence a clippy warning. A warning is a signal to restructure, not to suppress. If suppression is genuinely required, put the reason on the same line and call it out separately in your reply.
-- Do not add `unsafe`. If it is genuinely required: keep it inside a crate allowed by [.agents/ARCHITECTURE.md](.agents/ARCHITECTURE.md), place a `// SAFETY:` comment immediately above explaining which invariant is upheld and by whom, and list it separately in your reply.
-- Do not add `unwrap()`, `expect()`, or `panic!()` outside `main` startup paths.
 
 ### Never relax your own constraints
 
@@ -78,18 +88,16 @@ These rules exist because over-broad, unreviewed agent changes are the main sour
 
 ### No throwaway scaffolding
 
-- Do not create temporary test directories, comparison harnesses, verification crates, or `#[cfg(test)]` modules. Rule 11 already forbids tests; this also forbids the temporary equivalents.
+- Do not create temporary test directories, comparison harnesses, verification crates, or `#[cfg(test)]` modules. Hard rule 3 forbids tests; this also forbids the temporary equivalents.
 - Do not leave `examples/`, debug binaries, or scratch files behind. If a file exists only to prove your change works, delete it before reporting.
 
 ### Commit messages
 
-- A commit message describes what the commit changes and why. Nothing else.
-- Do not encode workflow position, planning state, or task tracking in a commit message. No `phase 1`, `phase-2`, `P0`, `P1`, `step 3`, `stage 2`, `batch 4`, `part 2`, or any localized equivalent, in the subject or the body.
-- Do not number a series of commits as a plan. If a change needs multiple commits, name each by its content.
-- Follow the Conventional Commits format from [`.agents/skills/commit-push/SKILL.md`](.agents/skills/commit-push/SKILL.md): `<type>(<scope>): <description>`.
-- Subject: imperative, lowercase, no trailing period, 72 characters or fewer.
-- Body: explain why the change is needed and what it replaces. Do not restate the diff, do not list files, do not narrate the process.
-- Do not commit unless the user explicitly asks.
+A commit message describes what the commit changes and why. Nothing else.
+
+- No workflow position or task tracking: no `phase 1`, `P0`, `step 3`, `stage 2`, `batch 4`, `part 2`, or any localized equivalent.
+- Do not number a series of commits as a plan. If a change needs several commits, name each by its content.
+- The format, types, scopes, and body rules live in [.agents/skills/commit-push/SKILL.md](.agents/skills/commit-push/SKILL.md). Load that skill rather than reconstructing the format from memory.
 
 ### Reporting
 
