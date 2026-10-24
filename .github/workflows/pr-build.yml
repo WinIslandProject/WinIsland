@@ -3,24 +3,46 @@ name: PR Build & Test
 on:
   pull_request:
     branches: [ "master", "main" ]
-    paths-ignore:
-      - 'Docs/**/*.md'
-      - '*.md'
-      - '.github/**'
-      - '.ai/**'
-      - '.agents/**'
-      - 'AGENTS.md'
-      - 'crates/**/*.md'
 
 permissions:
   contents: read
 
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  build-and-test:
-    if: ${{ !contains(github.event.pull_request.title, '[ci-skip]') && !contains(github.event.pull_request.title, '[docs]') }}
+  # Always runs, so the required contexts below always report. A job skipped by
+  # a path filter never reports, which leaves the PR permanently unmergeable.
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Rust changes
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA...HEAD")
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^resources/'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: classify
+    if: needs.classify.outputs.rust == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +53,26 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
 
-      - name: Install dependencies
-        run: choco install ninja
-
       - name: Build (release)
-        run: cargo build --release --verbose
+        run: cargo build --release --locked --verbose
 
-      - name: Run tests
-        run: cargo test --verbose
+  # Name kept because branch protection requires this exact context. The project
+  # accepts no tests, so `cargo test` compiled the whole workspace a second time
+  # in the test profile and then ran nothing.
+  build-and-test:
+    if: always()
+    needs: [classify, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify outcomes
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          fail=0
+          [ "$CLASSIFY" = "success" ] || { echo "classify: $CLASSIFY"; fail=1; }
+          case "$BUILD" in
+            success|skipped) echo "build: $BUILD";;
+            *) echo "build: $BUILD"; fail=1;;
+          esac
+          exit $fail

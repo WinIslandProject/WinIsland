@@ -3,24 +3,60 @@ name: PR Check
 on:
   pull_request:
     branches: [ "master", "main" ]
-    paths-ignore:
-      - 'Docs/**/*.md'
-      - '*.md'
-      - '.github/**'
-      - '.ai/**'
-      - '.agents/**'
-      - 'AGENTS.md'
-      - 'crates/**/*.md'
 
 permissions:
   contents: read
 
+# A new push to the same PR cancels the previous run. Without this, a branch
+# amended five times pays for five full runs.
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  # Incremental artifacts are never reused between CI runs and only cost disk.
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  check:
-    if: ${{ !contains(github.event.pull_request.title, '[ci-skip]') && !contains(github.event.pull_request.title, '[docs]') }}
+  # Always runs, so the required contexts below always report. A job skipped by
+  # a path filter never reports, which leaves the PR permanently unmergeable.
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Rust changes
+        id: diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA...HEAD")
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$|^resources/'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  fmt:
+    needs: classify
+    if: needs.classify.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    needs: classify
+    if: needs.classify.outputs.rust == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,16 +64,35 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
 
-      - name: Install build dependencies (for Clippy)
-        run: choco install ninja
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
       - name: Run Clippy (warnings as errors)
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --locked -- -D warnings
+
+  # Required context. Passes when the real jobs ran and passed, and when they
+  # were correctly skipped because the PR contains no Rust.
+  check:
+    if: always()
+    needs: [classify, fmt, clippy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify outcomes
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          FMT: ${{ needs.fmt.result }}
+          CLIPPY: ${{ needs.clippy.result }}
+        run: |
+          fail=0
+          [ "$CLASSIFY" = "success" ] || { echo "classify: $CLASSIFY"; fail=1; }
+          for pair in "fmt:$FMT" "clippy:$CLIPPY"; do
+            name=${pair%%:*}
+            result=${pair#*:}
+            case "$result" in
+              success|skipped) echo "$name: $result";;
+              *) echo "$name: $result"; fail=1;;
+            esac
+          done
+          exit $fail
